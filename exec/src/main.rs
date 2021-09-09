@@ -120,6 +120,12 @@ impl Tracee {
         Ok(())
     }
 
+    fn restart(&mut self) -> io::Result<()> {
+        self.continu()?;
+        self.wait()?;
+        Ok(())
+    }
+
     fn continu(&mut self) -> io::Result<()> {
         unsafe {
             check!(libc::ptrace(
@@ -129,7 +135,6 @@ impl Tracee {
                 0usize
             ))?;
         }
-        self.wait()?;
         Ok(())
     }
 }
@@ -195,7 +200,7 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     new_regs.rdi = mmap_addr as _;
     new_regs.rsi = libc::RTLD_NOW as _;
     tracee.set_registers(&new_regs).context("set regs1")?;
-    tracee.continu()?;
+    tracee.restart()?;
 
     new_regs = tracee.registers().context("regs3")?;
     let handle = new_regs.rax;
@@ -207,7 +212,7 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     new_regs.rdi = handle;
     new_regs.rsi = mmap_addr as u64 + LIB_PATH.len() as u64;
     tracee.set_registers(&new_regs).context("set regs2")?;
-    tracee.continu().context("continue 1")?;
+    tracee.restart().context("continue 1")?;
 
     new_regs = tracee.registers().context("regs4")?;
     let payload = new_regs.rax;
@@ -217,14 +222,14 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     new_regs.rip = (rip as u64) + 2;
     new_regs.rax = payload;
     tracee.set_registers(&new_regs).context("set regs3")?;
-    tracee.continu().context("continue 2")?;
+    tracee.restart().context("continue 2")?;
 
     new_regs = tracee.registers()?;
     ensure!(new_regs.rax == 0, "payload failed");
 
     tracee.poke_data(rip, &old_instrs)?;
     tracee.set_registers(&old_regs)?;
-    tracee.detach().context("detach")?;
+    tracee.continu()?;
     Ok(())
 }
 
