@@ -8,4 +8,4 @@ edition = "2018"
 [dependencies]
 libc = "0.2.94"
 anyhow = "1.0"
-passfd = "0.1.4"
+bytemuck = { version = "1.7", features = ["derive"]}

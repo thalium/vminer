@@ -10,4 +10,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 libc = "0.2"
-passfd = "0.1.4"
+bytemuck = { version = "1.7", features = ["derive"]}

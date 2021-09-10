@@ -3,13 +3,11 @@
 use anyhow::{bail, ensure, Context};
 use std::{
     fs,
-    io::{self, BufRead},
+    io::{self, BufRead, Read},
     mem,
     os::unix::{net::UnixListener, prelude::*},
     ptr,
 };
-
-use passfd::FdPassingExt;
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
@@ -276,19 +274,21 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     tracee.restart().context("continue 2")?;
 
     new_regs = tracee.registers()?;
+
+    tracee.poke_data(rip, &old_instrs)?;
+    tracee.set_registers(&old_regs)?;
+    tracee.continu()?;
+
     if new_regs.rax != 0 {
         let err = io::Error::from_raw_os_error(new_regs.rax as _);
         bail!("Payload failed: {}", err);
     }
 
-    tracee.poke_data(rip, &old_instrs)?;
-    tracee.set_registers(&old_regs)?;
-    tracee.continu()?;
     Ok(())
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct kvm_regs {
     rax: u64,
     rbx: u64,
@@ -321,33 +321,17 @@ fn main() {
     let listener = UnixListener::bind(socket_path).context("bind").unwrap();
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777)).unwrap();
 
-    let handle = std::thread::spawn(move || -> anyhow::Result<_> {
-        let (socket, _) = listener.accept().context("accept")?;
-        let mut fds = [0; 3];
+    let handle = std::thread::spawn(move || -> anyhow::Result<kvm_regs> {
+        let (mut socket, _) = listener.accept().context("accept")?;
+        let mut buf = [0; mem::size_of::<kvm_regs>()];
 
-        for fd in &mut fds {
-            *fd = socket.recv_fd()?;
-        }
-
-        Ok(fds)
+        socket.read_exact(&mut buf)?;
+        let regs = *bytemuck::from_bytes(&buf);
+        Ok(regs)
     });
 
     attach(pid, &[]).unwrap();
 
-    let fds = handle.join().unwrap().unwrap();
-
-    for fd in fds {
-        let f = mem::ManuallyDrop::new(unsafe { fs::File::from_raw_fd(fd) });
-        dbg!(f);
-    }
-    let [vm, vcpu1, vcpu2] = fds;
-
-    loop {
-        unsafe {
-            let mut regs = mem::zeroed::<kvm_regs>();
-            let res = libc::ioctl(vcpu1, KVM_GET_REGS, &mut regs as *mut _ as u64);
-            let _ = dbg!(check!(&res));
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
-    }
+    let regs = handle.join().unwrap().unwrap();
+    dbg!(regs);
 }
