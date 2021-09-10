@@ -3,4 +3,5 @@ members = [
     "exec",
     "looper",
     "patch",
+    "phys_addr",
 ]

@@ -1,9 +1,9 @@
-#![allow(clippy::fn_to_numeric_cast, clippy::unnecessary_cast)]
+#![allow(clippy::fn_to_numeric_cast, clippy::unnecessary_cast, dead_code)]
 
 use anyhow::{bail, ensure, Context};
 use std::{
     fs,
-    io::{self, BufRead, Read},
+    io::{self, BufRead},
     mem,
     os::unix::{net::UnixListener, prelude::*},
     ptr,
@@ -310,12 +310,91 @@ struct kvm_regs {
     rflags: u64,
 }
 
-const KVM_GET_REGS: u64 = 2156965505;
+#[derive(Clone, Copy, Debug)]
+struct GuestPhysAddr(u64);
+
+struct Vm {
+    mem: fs::File,
+    mem_offset: u64,
+    mem_size: u64,
+}
+
+impl Vm {
+    fn connect(pid: libc::pid_t, mem_size: u64) -> anyhow::Result<Vm> {
+        // Parse /proc/pid/maps file to find the adress of the VM memory
+        let mem_offset = {
+            let mut maps = io::BufReader::new(fs::File::open(format!("/proc/{}/maps", pid))?);
+            let mut line = String::with_capacity(200);
+
+            let start_addr = loop {
+                if maps.read_line(&mut line)? == 0 {
+                    break None;
+                }
+
+                let guess_addr = (|| {
+                    let i = line.find('-')?;
+                    let (start_addr, line) = line.split_at(i);
+                    let start_addr = u64::from_str_radix(start_addr, 16).ok()?;
+
+                    let i = line.find(' ')?;
+                    let (end_addr, line) = line.split_at(i);
+                    let end_addr = u64::from_str_radix(&end_addr[1..], 16).ok()?;
+
+                    //Avoid loaded libs
+                    if line.contains("/usr/") {
+                        return None;
+                    }
+
+                    (end_addr - start_addr == mem_size).then(|| start_addr)
+                })();
+
+                if let Some(addr) = guess_addr {
+                    break Some(addr);
+                }
+
+                line.clear();
+            };
+
+            start_addr.context("Could not find VM memory")?
+        };
+
+        // Map VM memory in our address space
+        let mem = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(format!("/proc/{}/mem", pid))?;
+
+        Ok(Vm {
+            mem,
+            mem_offset,
+            mem_size,
+        })
+    }
+
+    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> io::Result<()> {
+        self.mem.read_exact_at(buf, self.mem_offset + addr.0)
+    }
+
+    fn write_memory(&self, addr: GuestPhysAddr, buf: &[u8]) -> io::Result<()> {
+        self.mem.write_all_at(buf, self.mem_offset + addr.0)
+    }
+}
 
 fn main() {
-    let pid = std::env::args().nth(1).expect("missing pid");
+    let mut args = std::env::args();
+    let pid = args.nth(1).expect("missing pid");
     let pid = pid.parse().unwrap();
+    let len = args.next().expect("missing len");
+    let len = len.parse().unwrap();
+    let addr = args.next().expect("missing phys_addr");
+    let addr = if addr.starts_with("0x") {
+        &addr[2..]
+    } else {
+        &addr
+    };
+    let addr = u64::from_str_radix(addr, 16).unwrap();
 
+    /*
     let socket_path = "/tmp/get_fds";
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path).context("bind").unwrap();
@@ -334,4 +413,16 @@ fn main() {
 
     let regs = handle.join().unwrap().unwrap();
     dbg!(regs);
+    */
+
+    let vm = Vm::connect(pid, 2 << 30).unwrap();
+    let mut buf = vec![0; len];
+    let addr = GuestPhysAddr(addr);
+
+    vm.read_memory(addr, &mut buf).unwrap();
+    println!(
+        "Read {} bytes of memory: {:?}",
+        buf.len(),
+        String::from_utf8_lossy(&buf)
+    );
 }
