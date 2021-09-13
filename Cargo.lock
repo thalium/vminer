@@ -4,9 +4,18 @@ version = 3
 
 [[package]]
 name = "anyhow"
-version = "1.0.43"
+version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28ae2b3dec75a406790005a200b1bd89785afc02517a00ca99ecfe093ee9e6cf"
+checksum = "61604a8f862e1d5c3229fdd78f8b02c68dcf73a4c4b05fd636d12240aaa242c1"
+
+[[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bytemuck"
@@ -33,8 +42,20 @@ name = "exec"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
+ "bytemuck",
+ "kvm-common",
+ "libc",
+ "serde",
+]
+
+[[package]]
+name = "kvm-common"
+version = "0.1.0"
+dependencies = [
  "bytemuck",
  "libc",
+ "serde",
 ]
 
 [[package]]
@@ -52,6 +73,7 @@ name = "patch"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "kvm-common",
  "libc",
 ]
 
@@ -75,6 +97,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d0b9745dc2debf507c8422de05d7226cc1f0644216dfdfead988f9b1ab32a7"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "serde"
+version = "1.0.130"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f12d06de37cf59146fbdecab66aa99f9fe4f78722e3607577a5375d66bd0c913"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.130"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7bc1a1ab1961464eae040d96713baa5a724a8152c1222492465b54322ec508b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

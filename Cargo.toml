@@ -1,7 +1,11 @@
 [workspace]
 members = [
     "exec",
+    "kvm-common",
     "looper",
     "patch",
     "phys_addr",
 ]
+
+[profile.dev]
+opt-level = 1

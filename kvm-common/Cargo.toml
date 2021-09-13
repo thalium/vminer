@@ -1,14 +1,11 @@
 [package]
-name = "patch"
+name = "kvm-common"
 version = "0.1.0"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
+bytemuck = {version = "1.7", features = ["derive"]}
 libc = "0.2"
-bytemuck = { version = "1.7", features = ["derive"]}
-kvm-common = {path = "../kvm-common"}
+serde = {version = "1.0", features = ["derive"], optional = true}
