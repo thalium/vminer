@@ -3,6 +3,9 @@
 mod addr;
 use addr::{GuestPhysAddr, GuestVirtAddr, MmPte};
 
+mod os;
+use os::Os;
+
 mod kvm;
 use bytemuck::Zeroable;
 pub use kvm::Vm;
@@ -24,7 +27,7 @@ pub fn dump_vm(vm: &Vm) -> io::Result<DumbDump> {
     Ok(dump)
 }
 
-trait Backend {
+pub trait Backend {
     fn get_regs(&self) -> &kvm_common::kvm_regs;
     fn get_sregs(&self) -> &kvm_common::kvm_sregs;
 
@@ -69,6 +72,7 @@ where
 
     let pte_addr = mmu_entry.page_frame() + 8 * addr.pte();
     backend.read_memory(pte_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
+    ensure!(mmu_entry.is_valid(), "invalid PTE: 0x{:016x}", mmu_entry);
     ensure!(!mmu_entry.is_large(), "large PTE");
 
     let phys_addr = mmu_entry.page_frame() + addr.page_offset();
@@ -92,9 +96,10 @@ fn main() {
     */
 
     let vm = Vm::connect(pid, 2 << 30).unwrap();
-    //let vm = DumbDump::read("dump").unwrap();
-    //dump.write("dump").unwrap();
+    //let vm = DumbDump::read("linux.dump").unwrap();
+    //dump_vm(&vm).unwrap().write("grub.dump").unwrap();
 
-    let addr = virtual_to_physical(&vm, GuestVirtAddr(vm.get_regs().rip)).unwrap();
-    println!("0x{:x}", addr);
+    //let addr = virtual_to_physical(&vm, GuestVirtAddr(vm.get_regs().rip)).unwrap();
+    let _ = dbg!(os::Linux::quick_check(&vm));
+    //println!("0x{:x}", addr);
 }
