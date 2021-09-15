@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "serde")]
-use serde::{Serialize, Deserialize};
-use std::io;
+use serde::{Deserialize, Serialize};
+use std::{fmt, io};
 
 macro_rules! check {
     ($e:expr) => {
@@ -14,6 +14,7 @@ macro_rules! check {
 
 pub const KVM_GET_REGS: u64 = 2156965505;
 pub const KVM_GET_SREGS: u64 = 2167975555;
+pub const KVM_TRANSLATE: u64 = 3222843013;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -57,7 +58,6 @@ pub struct kvm_segment {
     pub unusable: u8,
     pub padding: u8,
 }
-
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -104,4 +104,43 @@ pub unsafe fn get_sregs(vcpu_fd: i32) -> io::Result<kvm_sregs> {
     let mut sregs = kvm_sregs::zeroed();
     check!(libc::ioctl(vcpu_fd, KVM_GET_SREGS, &mut sregs))?;
     Ok(sregs)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct kvm_translation {
+    pub linear_address: u64,
+    pub physical_address: u64,
+    pub valid: u8,
+    pub writeable: u8,
+    pub usermode: u8,
+    pub pad: [u8; 5],
+}
+
+impl fmt::Debug for kvm_translation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        struct Hex(u64);
+        impl fmt::Debug for Hex {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_fmt(format_args!("0x{:016x}", self.0))
+            }
+        }
+
+        f.debug_struct("kvm_translation")
+            .field("linear_address", &Hex(self.linear_address))
+            .field("physical_address", &Hex(self.physical_address))
+            .field("valid", &self.valid)
+            .field("writeable", &self.writeable)
+            .field("usermode", &self.usermode)
+            .finish()
+    }
+}
+
+#[inline]
+pub unsafe fn translate_virtual_address(vcpu_fd: i32, address: u64) -> io::Result<kvm_translation> {
+    let mut translation = kvm_translation::zeroed();
+    translation.linear_address = address;
+    check!(libc::ioctl(vcpu_fd, KVM_TRANSLATE, &mut translation))?;
+    Ok(translation)
 }

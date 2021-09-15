@@ -313,7 +313,6 @@ pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm_common::kvm_regs, kvm_c
     Ok(regs)
 }
 
-
 pub struct Vm {
     mem: fs::File,
     mem_offset: u64,
