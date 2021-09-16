@@ -9,7 +9,7 @@ impl Linux {
 }
 
 impl Os for Linux {
-    fn quick_check<B: Backend>(backend: &B) -> ibc::backend::MemoryAccessResult<bool> {
+    fn quick_check<B: Backend>(backend: &B) -> ibc::MemoryAccessResult<bool> {
         const OFFSET: usize = 0x1000;
         const TARGET: &[u8] = b"Linux version";
 

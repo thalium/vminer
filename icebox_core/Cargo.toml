@@ -7,6 +7,6 @@ edition = "2018"
 std = []
 
 [dependencies]
-kvm-common = {path = "../kvm-common", features = ["serde"]}
+kvm-common = {path = "../kvm-common"}
 
 bytemuck = {version = "1.7", features = ["derive"]}

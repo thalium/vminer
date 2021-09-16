@@ -4,16 +4,15 @@ version = "0.1.0"
 edition = "2018"
 
 [features]
-default = ["std"]
+default = ["icebox_os_linux", "icebox_backend_kvm", "icebox_backend_dumb_dump"]
 std = []
 
 [dependencies]
 ibc = {path = "../icebox_core", package = "icebox_core"}
 
-icebox_backend_dumb_dump = {path = "../icebox_backend_dumb_dump"}
-icebox_backend_kvm = {path = "../icebox_backend_kvm"}
-icebox_os_linux = {path = "../icebox_os_linux"}
+icebox_backend_dumb_dump = {path = "../icebox_backend_dumb_dump", optional = true}
+icebox_backend_kvm = {path = "../icebox_backend_kvm", optional = true}
+icebox_os_linux = {path = "../icebox_os_linux", optional = true}
 
 anyhow = "1.0"
-kvm-common = {path = "../kvm-common", features = ["serde"]}
-serde = {version = "1.0", features = ["derive"]}
+kvm-common = {path = "../kvm-common"}

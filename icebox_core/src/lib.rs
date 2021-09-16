@@ -3,8 +3,11 @@
 mod addr;
 pub use addr::{GuestPhysAddr, GuestVirtAddr, MmPte};
 
-pub mod backend;
+mod backend;
 pub use backend::Backend;
+
+mod error;
+pub use error::{Error, MemoryAccessError, MemoryAccessResult};
 
 mod os;
 pub use os::Os;

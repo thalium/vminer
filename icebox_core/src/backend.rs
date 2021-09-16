@@ -1,27 +1,4 @@
-use core::fmt;
-
-use crate::{mask, GuestPhysAddr, GuestVirtAddr, MmPte};
-
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum MemoryAccessError {
-    OutOfBounds,
-    Other(&'static str),
-}
-
-impl fmt::Display for MemoryAccessError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::OutOfBounds => f.write_str("out of bounds memory access"),
-            Self::Other(s) => f.write_str(s),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for MemoryAccessError {}
-
-pub type MemoryAccessResult<T> = Result<T, MemoryAccessError>;
+use crate::{mask, GuestPhysAddr, GuestVirtAddr, MemoryAccessResult, MmPte};
 
 pub trait Backend {
     fn get_regs(&self) -> &kvm_common::kvm_regs;
@@ -76,17 +53,3 @@ pub trait Backend {
         Ok(Some(phys_addr))
     }
 }
-
-/*
-pub fn dump_kvm(vm: &Kvm) -> io::Result<DumbDump> {
-    let mut mem = vec![0; 2 << 30];
-    vm.read_memory(GuestPhysAddr(0), &mut mem).unwrap();
-
-    let dump = dumb_dump::DumbDump {
-        regs: *vm.get_regs(),
-        sregs: *vm.get_sregs(),
-        mem: dumb_dump::Mem::Bytes(mem),
-    };
-    Ok(dump)
-}
-*/

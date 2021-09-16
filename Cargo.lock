@@ -38,7 +38,6 @@ dependencies = [
  "icebox_core",
  "icebox_os_linux",
  "kvm-common",
- "serde",
 ]
 
 [[package]]

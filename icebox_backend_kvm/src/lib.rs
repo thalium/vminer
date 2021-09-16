@@ -7,10 +7,7 @@ use std::{
     ptr,
 };
 
-use ibc::{
-    backend::{MemoryAccessError, MemoryAccessResult},
-    Backend, GuestPhysAddr,
-};
+use ibc::{Backend, GuestPhysAddr};
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
@@ -180,6 +177,7 @@ fn get_dlerror(
     Ok(String::from_utf8_lossy(&error).into_owned())
 }
 
+#[allow(clippy::fn_to_numeric_cast, clippy::unnecessary_cast)]
 fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     let our_libdl = find_lib(std::process::id() as _, "libdl-2").context("our libdl")?;
     let their_libdl = find_lib(pid, "libdl-2").context("their libdl")?;
@@ -391,21 +389,21 @@ impl Backend for Kvm {
         &self.sregs
     }
 
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> ibc::MemoryAccessResult<()> {
         if addr.0 + buf.len() as u64 > self.mem_size {
-            return Err(MemoryAccessError::OutOfBounds);
+            return Err(ibc::MemoryAccessError::OutOfBounds);
         }
         self.mem
             .read_exact_at(buf, self.mem_offset + addr.0)
-            .map_err(|_| MemoryAccessError::Other("read kvm"))
+            .map_err(|e| ibc::MemoryAccessError::Io(e.into()))
     }
 
-    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> MemoryAccessResult<()> {
+    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> ibc::MemoryAccessResult<()> {
         if addr.0 + buf.len() as u64 > self.mem_size {
-            return Err(MemoryAccessError::OutOfBounds);
+            return Err(ibc::MemoryAccessError::OutOfBounds);
         }
         self.mem
             .write_all_at(buf, self.mem_offset + addr.0)
-            .map_err(|_| MemoryAccessError::Other("write kvm"))
+            .map_err(|e| ibc::MemoryAccessError::Io(e.into()))
     }
 }

@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use ibc::{backend::MemoryAccessError, Backend, GuestPhysAddr};
+use ibc::{Backend, GuestPhysAddr};
 
 pub enum Mem {
     Bytes(Vec<u8>),
@@ -79,11 +79,7 @@ impl Backend for DumbDump {
         &self.sregs
     }
 
-    fn read_memory(
-        &self,
-        addr: GuestPhysAddr,
-        buf: &mut [u8],
-    ) -> ibc::backend::MemoryAccessResult<()> {
+    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> ibc::MemoryAccessResult<()> {
         match &self.mem {
             Mem::Bytes(mem) => {
                 let start = addr.0 as usize;
@@ -92,20 +88,16 @@ impl Backend for DumbDump {
                         buf.copy_from_slice(mem);
                         Ok(())
                     }
-                    None => Err(MemoryAccessError::OutOfBounds),
+                    None => Err(ibc::MemoryAccessError::OutOfBounds),
                 }
             }
             Mem::File(f) => f
                 .read_exact_at(buf, addr.0 + MEM_OFFSET)
-                .map_err(|_| MemoryAccessError::Other("read")),
+                .map_err(|e| ibc::MemoryAccessError::Io(e.into())),
         }
     }
 
-    fn write_memory(
-        &mut self,
-        addr: GuestPhysAddr,
-        buf: &[u8],
-    ) -> ibc::backend::MemoryAccessResult<()> {
+    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> ibc::MemoryAccessResult<()> {
         match &mut self.mem {
             Mem::Bytes(mem) => {
                 let start = addr.0 as usize;
@@ -114,12 +106,12 @@ impl Backend for DumbDump {
                         mem.copy_from_slice(buf);
                         Ok(())
                     }
-                    None => Err(MemoryAccessError::OutOfBounds),
+                    None => Err(ibc::MemoryAccessError::OutOfBounds),
                 }
             }
             Mem::File(f) => f
                 .write_all_at(buf, addr.0 + MEM_OFFSET)
-                .map_err(|_| MemoryAccessError::Other("write")),
+                .map_err(|e| ibc::MemoryAccessError::Io(e.into())),
         }
     }
 }
