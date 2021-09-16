@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use crate::{Backend, GuestPhysAddr};
+use ibc::{backend::MemoryAccessError, Backend, GuestPhysAddr};
 
 pub enum Mem {
     Bytes(Vec<u8>),
@@ -23,7 +23,7 @@ const MEM_OFFSET: u64 =
     (mem::size_of::<kvm_common::kvm_regs>() + mem::size_of::<kvm_common::kvm_sregs>()) as _;
 
 impl DumbDump {
-    pub fn read<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+    pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut f = fs::File::open(path)?;
 
         let mut buf = [0; mem::size_of::<kvm_common::kvm_regs>()];
@@ -38,7 +38,7 @@ impl DumbDump {
         Ok(DumbDump { regs, sregs, mem })
     }
 
-    pub fn write<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+    pub fn write<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let mut out = fs::File::create(path)?;
 
         match &self.mem {
@@ -56,6 +56,18 @@ impl DumbDump {
 
         Ok(())
     }
+
+    pub fn dump_vm<B: Backend>(backend: &B) -> io::Result<DumbDump> {
+        let mut mem = vec![0; 2 << 30];
+        backend.read_memory(GuestPhysAddr(0), &mut mem).unwrap();
+
+        let dump = DumbDump {
+            regs: *backend.get_regs(),
+            sregs: *backend.get_sregs(),
+            mem: Mem::Bytes(mem),
+        };
+        Ok(dump)
+    }
 }
 
 impl Backend for DumbDump {
@@ -67,25 +79,47 @@ impl Backend for DumbDump {
         &self.sregs
     }
 
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> io::Result<()> {
+    fn read_memory(
+        &self,
+        addr: GuestPhysAddr,
+        buf: &mut [u8],
+    ) -> ibc::backend::MemoryAccessResult<()> {
         match &self.mem {
             Mem::Bytes(mem) => {
                 let start = addr.0 as usize;
-                buf.copy_from_slice(&mem[start..start + buf.len()]);
-                Ok(())
+                match mem.get(start..start + buf.len()) {
+                    Some(mem) => {
+                        buf.copy_from_slice(mem);
+                        Ok(())
+                    }
+                    None => Err(MemoryAccessError::OutOfBounds),
+                }
             }
-            Mem::File(f) => f.read_exact_at(buf, addr.0 + MEM_OFFSET),
+            Mem::File(f) => f
+                .read_exact_at(buf, addr.0 + MEM_OFFSET)
+                .map_err(|_| MemoryAccessError::Other("read")),
         }
     }
 
-    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> io::Result<()> {
+    fn write_memory(
+        &mut self,
+        addr: GuestPhysAddr,
+        buf: &[u8],
+    ) -> ibc::backend::MemoryAccessResult<()> {
         match &mut self.mem {
             Mem::Bytes(mem) => {
                 let start = addr.0 as usize;
-                mem[start..start + buf.len()].copy_from_slice(buf);
-                Ok(())
+                match mem.get_mut(start..start + buf.len()) {
+                    Some(mem) => {
+                        mem.copy_from_slice(buf);
+                        Ok(())
+                    }
+                    None => Err(MemoryAccessError::OutOfBounds),
+                }
             }
-            Mem::File(f) => f.write_all_at(buf, addr.0 + MEM_OFFSET),
+            Mem::File(f) => f
+                .write_all_at(buf, addr.0 + MEM_OFFSET)
+                .map_err(|_| MemoryAccessError::Other("write")),
         }
     }
 }

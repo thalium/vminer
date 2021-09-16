@@ -1,0 +1,12 @@
+[package]
+name = "icebox_backend_kvm"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+ibc = {path = "../icebox_core", package = "icebox_core", features = ["std"]}
+kvm-common = {path = "../kvm-common"}
+
+libc = "0.2.94"
+anyhow = "1.0"
+bytemuck = { version = "1.7", features = ["derive"]}

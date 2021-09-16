@@ -7,7 +7,10 @@ use std::{
     ptr,
 };
 
-use crate::{Backend, GuestPhysAddr};
+use ibc::{
+    backend::{MemoryAccessError, MemoryAccessResult},
+    Backend, GuestPhysAddr,
+};
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
@@ -43,7 +46,7 @@ macro_rules! check {
     };
 }
 
-struct Tracee {
+pub struct Tracee {
     pid: libc::pid_t,
     mem: fs::File,
 }
@@ -70,7 +73,7 @@ impl Tracee {
         check!(libc::ptrace(libc::PTRACE_DETACH, self.pid))
     }
 
-    fn detach(self) -> io::Result<()> {
+    pub fn detach(self) -> io::Result<()> {
         let mut this = mem::ManuallyDrop::new(self);
         unsafe { this.raw_detach() }
     }
@@ -156,7 +159,7 @@ fn get_dlerror(
     // char *error = dlerror();
     regs.rip = rip;
     regs.rax = dlerror;
-    tracee.set_registers(&regs).context("p")?;
+    tracee.set_registers(regs).context("p")?;
     tracee.restart().context("qsd")?;
     let res = tracee.registers().context("er")?;
 
@@ -313,7 +316,7 @@ pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm_common::kvm_regs, kvm_c
     Ok(regs)
 }
 
-pub struct Vm {
+pub struct Kvm {
     mem: fs::File,
     mem_offset: u64,
     mem_size: u64,
@@ -321,8 +324,8 @@ pub struct Vm {
     sregs: kvm_common::kvm_sregs,
 }
 
-impl Vm {
-    pub fn connect(pid: libc::pid_t, mem_size: u64) -> anyhow::Result<Vm> {
+impl Kvm {
+    pub fn connect(pid: libc::pid_t, mem_size: u64) -> anyhow::Result<Kvm> {
         // Parse /proc/pid/maps file to find the adress of the VM memory
         let mem_offset = {
             let mut maps = io::BufReader::new(fs::File::open(format!("/proc/{}/maps", pid))?);
@@ -368,7 +371,7 @@ impl Vm {
 
         let (regs, sregs) = get_regs(pid)?;
 
-        Ok(Vm {
+        Ok(Kvm {
             mem,
             mem_offset,
             mem_size,
@@ -379,7 +382,7 @@ impl Vm {
     }
 }
 
-impl Backend for Vm {
+impl Backend for Kvm {
     fn get_regs(&self) -> &kvm_common::kvm_regs {
         &self.regs
     }
@@ -388,11 +391,21 @@ impl Backend for Vm {
         &self.sregs
     }
 
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> io::Result<()> {
-        self.mem.read_exact_at(buf, self.mem_offset + addr.0)
+    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        if addr.0 + buf.len() as u64 > self.mem_size {
+            return Err(MemoryAccessError::OutOfBounds);
+        }
+        self.mem
+            .read_exact_at(buf, self.mem_offset + addr.0)
+            .map_err(|_| MemoryAccessError::Other("read kvm"))
     }
 
-    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> io::Result<()> {
-        self.mem.write_all_at(buf, self.mem_offset + addr.0)
+    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> MemoryAccessResult<()> {
+        if addr.0 + buf.len() as u64 > self.mem_size {
+            return Err(MemoryAccessError::OutOfBounds);
+        }
+        self.mem
+            .write_all_at(buf, self.mem_offset + addr.0)
+            .map_err(|_| MemoryAccessError::Other("write kvm"))
     }
 }

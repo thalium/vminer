@@ -1,5 +1,5 @@
 use super::mask;
-use std::{fmt, ops::Add};
+use core::{fmt, ops::Add};
 
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
@@ -91,7 +91,7 @@ impl fmt::UpperHex for GuestVirtAddr {
 
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
-pub struct MmPte(u64);
+pub struct MmPte(pub u64);
 
 impl MmPte {
     /// Normal pages (4Ko)
