@@ -1,5 +1,5 @@
 use ibc::{Backend, GuestVirtAddr, Os};
-
+use std::io;
 pub struct Linux;
 
 impl Linux {
@@ -32,6 +32,46 @@ impl Os for Linux {
 
         Ok(false)
     }
+}
+
+pub struct Sym {
+    addr: u64,
+    name: String,
+}
+
+pub fn parse_kallsyms<R: io::BufRead>(r: &mut R) -> io::Result<Vec<Sym>> {
+    let mut line = String::with_capacity(200);
+    let mut total_len = 0;
+
+    loop {
+        if r.read_line(&mut line)? == 0 {
+            break;
+        }
+
+        let sym = (|| {
+            let addr = u64::from_str_radix(&line[0..16], 16).ok()?;
+            let rest = &line[19..];
+            let name = match rest.find(' ') {
+                Some(i) => &rest[..i],
+                None => rest,
+            }
+            .to_owned();
+
+            Some(Sym { addr, name })
+        })();
+
+        if let Some(sym) = sym {
+            total_len += sym.name.len();
+        } else {
+            dbg!(&line);
+        }
+
+        line.clear();
+    }
+
+    dbg!(total_len);
+
+    Ok(Vec::new())
 }
 
 #[cfg(test)]

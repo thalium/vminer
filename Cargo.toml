@@ -8,6 +8,7 @@ members = [
     "kvm-common",
     "patch",
     "phys_addr",
+    "read_dwarf",
 ]
 
 [profile.dev]

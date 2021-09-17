@@ -293,8 +293,8 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
 pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm_common::kvm_regs, kvm_common::kvm_sregs)> {
     let socket_path = "/tmp/get_fds";
     let _ = fs::remove_file(socket_path);
-    let listener = UnixListener::bind(socket_path).context("bind").unwrap();
-    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777)).unwrap();
+    let listener = UnixListener::bind(socket_path).context("bind")?;
+    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
 
     let handle = std::thread::spawn(move || -> anyhow::Result<_> {
         let (mut socket, _) = listener.accept().context("accept")?;
@@ -307,7 +307,7 @@ pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm_common::kvm_regs, kvm_c
         Ok((regs, sregs))
     });
 
-    attach(pid, &[]).unwrap();
+    attach(pid, &[])?;
     println!("Payload succeded");
 
     let regs = handle.join().unwrap()?;

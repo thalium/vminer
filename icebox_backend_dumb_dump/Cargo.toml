@@ -10,5 +10,4 @@ std = ["ibc/std"]
 ibc = {path = "../icebox_core", package = "icebox_core"}
 kvm-common = {path = "../kvm-common"}
 
-
 bytemuck = {version = "1.7", features = ["derive"]}
