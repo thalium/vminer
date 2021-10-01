@@ -1,4 +1,5 @@
-use std::fmt;
+use alloc::boxed::Box;
+use core::fmt;
 
 #[cfg(feature = "std")]
 pub use std::error::Error;
@@ -24,7 +25,7 @@ impl fmt::Display for MemoryAccessError {
     }
 }
 
-impl std::error::Error for MemoryAccessError {
+impl Error for MemoryAccessError {
     #[cfg(feature = "std")]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {

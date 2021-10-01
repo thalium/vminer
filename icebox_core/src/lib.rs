@@ -1,5 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 mod addr;
 pub use addr::{GuestPhysAddr, GuestVirtAddr, MmPte};
 
