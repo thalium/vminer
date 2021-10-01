@@ -1,11 +1,11 @@
 [workspace]
 members = [
     "icebox",
-    "icebox_backend_dumb_dump",
-    "icebox_backend_kvm",
+    "backends/dumb_dump",
+    "backends/kvm",
     "icebox_core",
-    "icebox_os_linux",
     "kvm-common",
+    "os/linux",
     "patch",
     "phys_addr",
 ]

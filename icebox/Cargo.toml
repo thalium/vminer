@@ -10,9 +10,9 @@ std = []
 [dependencies]
 ibc = {path = "../icebox_core", package = "icebox_core"}
 
-icebox_backend_dumb_dump = {path = "../icebox_backend_dumb_dump", optional = true}
-icebox_backend_kvm = {path = "../icebox_backend_kvm", optional = true}
-icebox_os_linux = {path = "../icebox_os_linux", optional = true}
+icebox_backend_dumb_dump = {path = "../backends/dumb_dump", optional = true}
+icebox_backend_kvm = {path = "../backends/kvm", optional = true}
+icebox_os_linux = {path = "../os/linux", optional = true}
 
 anyhow = "1.0"
 kvm-common = {path = "../kvm-common"}

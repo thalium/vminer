@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-ibc = {path = "../icebox_core", package = "icebox_core"}
+ibc = {path = "../../icebox_core", package = "icebox_core"}
 
 memchr = {version = "2.4", default-features = false}
 
 [dev-dependencies]
-icebox_backend_dumb_dump = {path = "../icebox_backend_dumb_dump"}
+icebox_backend_dumb_dump = {path = "../../backends/dumb_dump"}
