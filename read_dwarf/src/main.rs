@@ -1,331 +1,533 @@
-use std::{borrow::Cow, collections::HashMap, fmt, fs, rc::Rc};
+use std::{cell::Cell, collections::{HashMap, VecDeque}, fmt, fs, rc::Rc};
 
 use fallible_iterator::FallibleIterator;
-use object::{Object, ObjectSection, ObjectSymbol};
+use gimli::{DebugStr, UnitOffset};
+
+mod read;
+
+// pub struct AllLinuxStructs {
+//     task_struct: TaskStructRepr,
+//     thread_info: ThreadInfoRepr,
+// }
+
+trait LinuxValue: 'static {
+    fn get_field(&self, name: &str) -> Option<&dyn LinuxValue>;
+    fn get_field_mut(&mut self, name: &str) -> Option<&mut dyn LinuxValue>;
+}
+
+struct ThreadInfo {}
+
+impl LinuxValue for ThreadInfo {
+    fn get_field(&self, name: &str) -> Option<&dyn LinuxValue> {
+        None
+    }
+
+    fn get_field_mut(&mut self, name: &str) -> Option<&mut dyn LinuxValue> {
+        None
+    }
+}
+struct TaskStruct {
+    thread_info: ThreadInfo,
+}
+
+impl LinuxValue for TaskStruct {
+    fn get_field(&self, name: &str) -> Option<&dyn LinuxValue> {
+        match name {
+            "thread_info" => Some(&self.thread_info),
+            _ => None,
+        }
+    }
+
+    fn get_field_mut(&mut self, name: &str) -> Option<&mut dyn LinuxValue> {
+        match name {
+            "thread_info" => Some(&mut self.thread_info),
+            _ => None,
+        }
+    }
+}
+
+trait ValueBuilder {
+    fn name(&self) -> &str;
+    fn size(&self) -> u64;
+    fn build(&self, mem: &[u8]) -> Box<dyn LinuxValue>;
+}
+
+#[derive(Debug)]
+struct StructRepr {
+    name: String,
+    size: u64,
+    offsets: Vec<(String, u64)>,
+    //offsets: Vec<(usize, Rc<dyn ValueBuilder>)>,
+}
+
+impl ValueBuilder for StructRepr {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    fn build(&self, mem: &[u8]) -> Box<dyn LinuxValue> {
+        todo!()
+        
+        // let mut members = HashMap::with_capacity(self.offsets.len());
+
+        // for (offset, builder) in &self.offsets {
+        //     let value = builder.build(&mem[*offset..]);
+        //     members.insert(builder.name().to_owned(), value);
+        // }
+
+        // Box::new(DynValue { members })
+    }
+}
+
+impl LinuxValue for u64 {
+    fn get_field(&self, _: &str) -> Option<&dyn LinuxValue> {
+        None
+    }
+
+    fn get_field_mut(&mut self, _: &str) -> Option<&mut dyn LinuxValue> {
+        None
+    }
+}
+
+struct U64Builder;
+impl ValueBuilder for U64Builder {
+    fn name(&self) -> &str {
+        "u64"
+    }
+
+    fn size(&self) -> u64 {
+        std::mem::size_of::<Self>() as u64
+    }
+
+    fn build(&self, mem: &[u8]) -> Box<dyn LinuxValue> {
+        let mut bytes = [0; 8];
+        bytes.copy_from_slice(&mem[..8]);
+        let val = u64::from_ne_bytes(bytes);
+        Box::new(val)
+    }
+}
+
+struct DynValue {
+    members: HashMap<String, Box<dyn LinuxValue>>,
+}
+
+impl LinuxValue for DynValue {
+    fn get_field(&self, name: &str) -> Option<&dyn LinuxValue> {
+        self.members.get(name).map(|v| v.as_ref())
+    }
+
+    fn get_field_mut(&mut self, name: &str) -> Option<&mut dyn LinuxValue> {
+        self.members.get_mut(name).map(|v| v.as_mut())
+    }
+}
+
+trait GimliReader: gimli::Reader<Offset = usize> {}
+impl<R: gimli::Reader<Offset = usize>> GimliReader for R {}
+
+#[derive(Debug)]
+enum ResolveTypeError {
+    Gimli(gimli::Error),
+    MissingAttr(gimli::DwAt),
+    WrongAttrType,
+    Other(&'static str),
+}
+
+impl From<gimli::Error> for ResolveTypeError {
+    #[track_caller]
+    fn from(error: gimli::Error) -> Self {
+        panic!("Dwarf: {:?}", error);
+        ResolveTypeError::Gimli(error)
+    }
+}
+
+type ResolveTypeResult<T> = Result<T, ResolveTypeError>;
+
+trait DwarfAttribute {
+    const DW_AT: gimli::DwAt;
+    type Target;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target>;
+
+    const NAME: &'static str;
+}
+
+struct DwAtType;
+impl DwarfAttribute for DwAtType {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_type;
+    type Target = UnitOffset;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        match value {
+            gimli::AttributeValue::UnitRef(offset) => Some(offset),
+            _ => None
+        }
+    }
+
+    const NAME: &'static str = "DwAtType";
+}
+
+struct DwAtByteSize;
+impl DwarfAttribute for DwAtByteSize {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_byte_size;
+    type Target = u64;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        value.udata_value()
+    }
+
+    const NAME: &'static str = "DwAtByteSize";
+}
+
+struct DwAtDataMemberLocation;
+impl DwarfAttribute for DwAtDataMemberLocation {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_data_member_location;
+    type Target = u64;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        value.udata_value()
+    }
+
+    const NAME: &'static str = "DwAtDataMemberLocation";
+}
+
+struct DwAtEncoding;
+impl DwarfAttribute for DwAtEncoding {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_encoding;
+    type Target = gimli::DwAte;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        match value {
+            gimli::AttributeValue::Encoding(ate) => Some(ate),
+            _ => None,
+        }
+    }
+
+    const NAME: &'static str = "DwAtEncoding";
+}
+
+struct DwarfNode<'a, 'u, 't, R: GimliReader>(gimli::EntriesTreeNode<'a, 'u, 't, R>);
+
+impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
+    fn entry<'me>(&'me self) -> DwarfEntry<'me, 'a, 'u, R> {
+        DwarfEntry(self.0.entry())
+    }
+
+    fn read_struct(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<LazyStruct> {
+        let entry = self.entry();
+        let size = entry.try_read::<DwAtByteSize>()?.unwrap_or(0);
+
+        let mut fields = Vec::new();
+
+        let mut children = self.0.children();
+        while let Some(node) = children.next()? {
+            let node = DwarfNode(node);
+            fields.push(node.entry().read_struct_member(debug_str)?);
+        }
+
+        Ok(LazyStruct { size, fields: fields.into() })
+    }
+
+    fn read_type(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<Option<(Option<String>, LazyType)>> {
+        let entry = self.entry();
+        let name = entry.try_read_name(debug_str)?;
+        println!("offset: 0x{:x}", entry.0.offset().0);
+
+        let typ = match entry.0.tag() {
+            gimli::DW_TAG_typedef => {
+                let offset = entry.read::<DwAtType>()?;
+                return Ok(Some((name, LazyType::unresolved(offset))));
+            }
+            gimli::DW_TAG_base_type => DwarfType::Base(entry.read_base_type()?),
+            gimli::DW_TAG_pointer_type => {
+                let offset = entry.try_read::<DwAtType>()?;
+                let typ = offset.map(|o| Rc::new(LazyType::unresolved(o)));
+                DwarfType::Ptr(typ)
+            }
+            gimli::DW_TAG_structure_type => DwarfType::Struct(self.read_struct(debug_str)?),
+            _ => return Ok(None),
+        };
+        
+        Ok(Some((name, LazyType::resolved(typ))))
+    }
+}
+
+struct DwarfEntry<'node, 'a, 'u, R: GimliReader>(&'node gimli::DebuggingInformationEntry<'a, 'u, R>);
+
+impl<'node, 'a, 'u, R: GimliReader> Clone for DwarfEntry<'node, 'a, 'u, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'node, 'a, 'u, R: GimliReader> Copy for DwarfEntry<'node, 'a, 'u, R> {}
+
+impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
+    fn read_attr(self, name: gimli::DwAt) -> ResolveTypeResult<gimli::AttributeValue<R>> {
+        self.0.attr_value(name)?.ok_or(ResolveTypeError::MissingAttr(name))
+    }
+
+    fn try_read_attr(self, name: gimli::DwAt) -> ResolveTypeResult<Option<gimli::AttributeValue<R>>> {
+        Ok(self.0.attr_value(name)?)
+    }
+
+    fn read<A: DwarfAttribute>(self) -> ResolveTypeResult<A::Target> {
+        let value = self.read_attr(A::DW_AT)?;
+        A::convert(value).ok_or(ResolveTypeError::WrongAttrType)
+    }
+
+    fn try_read<A: DwarfAttribute>(self) -> ResolveTypeResult<Option<A::Target>> {
+        match self.try_read_attr(A::DW_AT)? {
+            Some(value) => match A::convert(value) {
+                Some(value) => Ok(Some(value)),
+                None => Err(ResolveTypeError::WrongAttrType)
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn read_name(self, debug_str: &gimli::DebugStr<R>) -> ResolveTypeResult<String> {
+        let value = self.read_attr(gimli::DW_AT_name)?;
+        let name = value.string_value(debug_str).ok_or(ResolveTypeError::WrongAttrType)?;
+        Ok(name.to_string()?.into_owned())
+    }
+
+    fn try_read_name(self, debug_str: &gimli::DebugStr<R>) -> ResolveTypeResult<Option<String>> {
+        Ok(match self.try_read_attr(gimli::DW_AT_name)? {
+            Some(value) => {
+                let name = value.string_value(debug_str).ok_or(ResolveTypeError::WrongAttrType)?;
+                Some(name.to_string()?.into_owned())
+            }
+            None => None,
+        })
+    }
+
+    fn read_base_type(self) -> ResolveTypeResult<BaseType> {
+        let len = self.read::<DwAtByteSize>()?;
+        let ate = self.read::<DwAtEncoding>()?;
+
+        dbg!(ate);
+        let signed = match ate {
+            gimli::DW_ATE_signed | gimli::DW_ATE_signed_char => true,
+            _ => false
+        };
+
+        Ok(BaseType { len, signed })
+    }
+
+    fn read_struct_member(self, debug_str: &gimli::DebugStr<R>) -> ResolveTypeResult<(u64, Option<String>, LazyType)> {
+        let offset = self.read::<DwAtDataMemberLocation>()?;
+        let name = self.try_read_name(debug_str)?;
+        let typ = LazyType::unresolved(self.read::<DwAtType>()?);
+
+        Ok((offset, name, typ))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BaseType {
+    len: u64,
+    signed: bool,
+}
+
+#[derive(Debug, Clone)]
+struct LazyStruct {
+    size: u64,
+    fields: Rc<[(u64, Option<String>, LazyType)]>,
+}
+
+#[derive(Debug, Clone)]
+enum DwarfType {
+    Base(BaseType),
+    Ptr(Option<Rc<LazyType>>),
+    Struct(LazyStruct),
+}
+
+impl DwarfType {
+    fn is_fully_resolved(&self) -> bool {
+        match self {
+            DwarfType::Base(_) => true,
+            DwarfType::Ptr(ty) => ty.as_ref().map_or(true, |ty| ty.is_resolved()),
+            DwarfType::Struct(ty) => ty.fields.iter().all(|(_, _, ty)| ty.is_resolved()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum LazyTypeInner {
+    Unresolved(UnitOffset),
+    Resolved(DwarfType),
+}
+
+struct LazyType(Cell<LazyTypeInner>);
+
+impl LazyType {
+    const fn unresolved(offset: UnitOffset) -> Self {
+        Self(Cell::new(LazyTypeInner::Unresolved(offset)))
+    }
+
+    fn resolved(typ: DwarfType) -> Self {
+        Self(Cell::new(LazyTypeInner::Resolved(typ)))
+    }
+
+    fn with_inner<T>(&self, f: impl FnOnce(&LazyTypeInner) -> T) -> T {
+        let old = self.0.replace(LazyTypeInner::Unresolved(UnitOffset(0)));
+        let res = f(&old);
+        self.0.set(old);
+        res
+    }
+
+    fn offset(&self) -> Option<UnitOffset> {
+        self.with_inner(|ty| match ty {
+            LazyTypeInner::Unresolved(offset) => Some(*offset),
+            LazyTypeInner::Resolved(_) => None,
+        })
+    }
+
+    fn is_resolved(&self) -> bool {
+        self.with_inner(|ty| matches!(ty, LazyTypeInner::Resolved(_)))
+    }
+
+    fn into_resolved(self) -> Option<DwarfType> {
+        match self.0.into_inner() {
+            LazyTypeInner::Unresolved(_) => None,
+            LazyTypeInner::Resolved(ty) => Some(ty),
+        }
+    }
+
+    fn resolve(&self, f: impl FnOnce(UnitOffset) -> Option<DwarfType>, g: impl FnOnce(&DwarfType)) {
+        let res = self.with_inner(|ty| match ty {
+            LazyTypeInner::Unresolved(offset) => Some(f(*offset)),
+            LazyTypeInner::Resolved(ty) =>  {
+                g(ty);
+                None
+            }
+        });
+
+        match res {
+            Some(Some(ty)) => self.0.set(LazyTypeInner::Resolved(ty)),
+            Some(None) => (),
+            None => (),
+        }
+    }
+}
+
+impl fmt::Debug for LazyType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.with_inner(|l| l.fmt(f))
+    }
+}
+
+#[derive(Debug)]
+struct MidDataEntry {
+    offset: UnitOffset,
+    name: Option<String>,
+    typ: LazyType,
+}
+
+struct MidData {
+    types: Vec<MidDataEntry>,
+    unresolved: VecDeque<usize>,
+}
+
+impl MidData {
+    fn new() -> MidData {
+        MidData {
+            types: Vec::new(),
+            unresolved: VecDeque::new(),
+        }
+    }
+
+    fn find_by_offset(&self, offset: UnitOffset) -> Option<&MidDataEntry> {
+        match self
+            .types
+            .binary_search_by_key(&offset, |entry| entry.offset)
+        {
+            Ok(index) => self.types.get(index),
+            Err(_) => None,
+        }
+    }
+
+    fn find_by_offset_mut(&mut self, offset: UnitOffset) -> Option<&mut MidDataEntry> {
+        match self
+            .types
+            .binary_search_by_key(&offset, |entry| entry.offset)
+        {
+            Ok(index) => self.types.get_mut(index),
+            Err(_) => None,
+        }
+    }
+}
+
+fn fill<R: GimliReader>(
+    unit: &gimli::UnitHeader<R>,
+    abbrs: &gimli::Abbreviations,
+    debug_str: &gimli::DebugStr<R>,
+) -> ResolveTypeResult<Vec<StructRepr>> {
+    // First pass
+    let mut types = Vec::new();
+
+    let mut tree = unit.entries_tree(abbrs, None)?;
+    let mut root = tree.root()?;
+    let mut entries = root.children();
+
+    while let Some(node) = entries.next()? {
+        let node = DwarfNode(node);
+        let entry = node.entry();
+
+        let offset = entry.0.offset();
+
+        if let Some((name, typ)) = node.read_type(debug_str)? {
+            types.push(MidDataEntry {
+                offset, name, typ,
+            });
+        }
+    }
+
+    /*
+    TODO: Resolve types ?
+    let mut types = MidData {
+        unresolved: (0..types.len()).collect(),
+        types,
+    };
+
+    while let Some(index) = types.unresolved.pop_front() {
+        
+    }
+    */
+
+    let types = types.into_iter()
+        .filter_map(|typ| typ.name.zip(typ.typ.into_resolved()))
+        .filter_map(|(name, ty)| {
+            match ty {
+                DwarfType::Struct(LazyStruct { size, fields}) => {
+                    Some(StructRepr {
+                        size, name, offsets: fields.iter().filter_map(|(offset, name, _)| {
+                            name.as_ref().map(|name| (name.clone(), *offset))
+                        }).collect(),
+                    })
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    Ok(types)
+
+}
 
 fn main() {
     let file = std::env::args_os().nth(1).expect("file name");
     let content = fs::read(&file).unwrap();
     let obj = object::File::parse(&*content).unwrap();
 
-    parse_dwarf(&obj).unwrap();
-}
-
-type RelocationMap = HashMap<usize, object::Relocation>;
-
-#[derive(Clone)]
-struct Relocate<R> {
-    relocations: Rc<HashMap<usize, object::Relocation>>,
-    section: R,
-    reader: R,
-}
-
-impl<R> fmt::Debug for Relocate<R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Relocate").finish_non_exhaustive()
-    }
-}
-
-impl<R: gimli::Reader<Offset = usize>> Relocate<R> {
-    fn relocate(&self, offset: usize, value: u64) -> u64 {
-        if let Some(relocation) = self.relocations.get(&offset) {
-            match relocation.kind() {
-                object::RelocationKind::Absolute => {
-                    if relocation.has_implicit_addend() {
-                        // Use the explicit addend too, because it may have the symbol value.
-                        return value.wrapping_add(relocation.addend() as u64);
-                    } else {
-                        return relocation.addend() as u64;
-                    }
-                }
-                _ => {}
-            }
-        };
-        value
-    }
-}
-
-impl<R: gimli::Reader<Offset = usize>> gimli::Reader for Relocate<R> {
-    type Endian = R::Endian;
-    type Offset = R::Offset;
-
-    fn read_address(&mut self, address_size: u8) -> gimli::Result<u64> {
-        let offset = self.reader.offset_from(&self.section);
-        let value = self.reader.read_address(address_size)?;
-        Ok(self.relocate(offset, value))
-    }
-
-    fn read_length(&mut self, format: gimli::Format) -> gimli::Result<usize> {
-        let offset = self.reader.offset_from(&self.section);
-        let value = self.reader.read_length(format)?;
-        <usize as gimli::ReaderOffset>::from_u64(self.relocate(offset, value as u64))
-    }
-
-    fn read_offset(&mut self, format: gimli::Format) -> gimli::Result<usize> {
-        let offset = self.reader.offset_from(&self.section);
-        let value = self.reader.read_offset(format)?;
-        <usize as gimli::ReaderOffset>::from_u64(self.relocate(offset, value as u64))
-    }
-
-    fn read_sized_offset(&mut self, size: u8) -> gimli::Result<usize> {
-        let offset = self.reader.offset_from(&self.section);
-        let value = self.reader.read_sized_offset(size)?;
-        <usize as gimli::ReaderOffset>::from_u64(self.relocate(offset, value as u64))
-    }
-
-    #[inline]
-    fn split(&mut self, len: Self::Offset) -> gimli::Result<Self> {
-        let mut other = self.clone();
-        other.reader.truncate(len)?;
-        self.reader.skip(len)?;
-        Ok(other)
-    }
-
-    // All remaining methods simply delegate to `self.reader`.
-
-    #[inline]
-    fn endian(&self) -> Self::Endian {
-        self.reader.endian()
-    }
-
-    #[inline]
-    fn len(&self) -> Self::Offset {
-        self.reader.len()
-    }
-
-    #[inline]
-    fn empty(&mut self) {
-        self.reader.empty()
-    }
-
-    #[inline]
-    fn truncate(&mut self, len: Self::Offset) -> gimli::Result<()> {
-        self.reader.truncate(len)
-    }
-
-    #[inline]
-    fn offset_from(&self, base: &Self) -> Self::Offset {
-        self.reader.offset_from(&base.reader)
-    }
-
-    #[inline]
-    fn offset_id(&self) -> gimli::ReaderOffsetId {
-        self.reader.offset_id()
-    }
-
-    #[inline]
-    fn lookup_offset_id(&self, id: gimli::ReaderOffsetId) -> Option<Self::Offset> {
-        self.reader.lookup_offset_id(id)
-    }
-
-    #[inline]
-    fn find(&self, byte: u8) -> gimli::Result<Self::Offset> {
-        self.reader.find(byte)
-    }
-
-    #[inline]
-    fn skip(&mut self, len: Self::Offset) -> gimli::Result<()> {
-        self.reader.skip(len)
-    }
-
-    #[inline]
-    fn to_slice(&self) -> gimli::Result<Cow<[u8]>> {
-        self.reader.to_slice()
-    }
-
-    #[inline]
-    fn to_string(&self) -> gimli::Result<Cow<str>> {
-        self.reader.to_string()
-    }
-
-    #[inline]
-    fn to_string_lossy(&self) -> gimli::Result<Cow<str>> {
-        self.reader.to_string_lossy()
-    }
-
-    #[inline]
-    fn read_slice(&mut self, buf: &mut [u8]) -> gimli::Result<()> {
-        self.reader.read_slice(buf)
-    }
-}
-
-fn add_relocations(
-    relocations: &mut RelocationMap,
-    file: &object::File,
-    section: &object::Section,
-) {
-    for (offset64, mut relocation) in section.relocations() {
-        let offset = offset64 as usize;
-        if offset as u64 != offset64 {
-            continue;
-        }
-        let offset = offset as usize;
-        match relocation.kind() {
-            object::RelocationKind::Absolute => {
-                match relocation.target() {
-                    object::RelocationTarget::Symbol(symbol_idx) => {
-                        match file.symbol_by_index(symbol_idx) {
-                            Ok(symbol) => {
-                                let addend =
-                                    symbol.address().wrapping_add(relocation.addend() as u64);
-                                relocation.set_addend(addend as i64);
-                            }
-                            Err(_) => {
-                                eprintln!(
-                                    "Relocation with invalid symbol for section {} at offset 0x{:08x}",
-                                    section.name().unwrap(),
-                                    offset
-                                );
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                if relocations.insert(offset, relocation).is_some() {
-                    eprintln!(
-                        "Multiple relocations for section {} at offset 0x{:08x}",
-                        section.name().unwrap(),
-                        offset
-                    );
-                }
-            }
-            _ => {
-                eprintln!(
-                    "Unsupported relocation for section {} at offset 0x{:08x}",
-                    section.name().unwrap(),
-                    offset
-                );
-            }
-        }
-    }
-}
-
-fn load_file_section<'input, Endian: gimli::Endianity>(
-    id: gimli::SectionId,
-    file: &object::File<'input>,
-    endian: Endian,
-) -> object::Result<Relocate<gimli::EndianSlice<'input, Endian>>> {
-    let mut relocations = RelocationMap::new();
-    let name = id.name();
-
-    let data = match file.section_by_name(&name) {
-        Some(ref section) => {
-            add_relocations(&mut relocations, file, section);
-            match section.uncompressed_data()? {
-                Cow::Borrowed(b) => b,
-                Cow::Owned(_) => panic!("Unsupported compressed data"),
-            }
-        }
-        None => &[],
-    };
-    let reader = gimli::EndianSlice::new(data, endian);
-    let section = reader;
-    let relocations = Rc::new(relocations);
-    Ok(Relocate {
-        relocations,
-        section,
-        reader,
-    })
-}
-
-#[derive(Debug)]
-pub enum Error {
-    GimliError(gimli::Error),
-    ObjectError(object::Error),
-}
-
-impl fmt::Display for Error {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> ::std::result::Result<(), fmt::Error> {
-        match self {
-            Error::GimliError(_) => f.write_str("failed to read DWARF data"),
-            Error::ObjectError(_) => f.write_str("failed to read ELF"),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(match self {
-            Error::GimliError(err) => err,
-            Error::ObjectError(err) => err,
-        })
-    }
-}
-
-impl From<gimli::Error> for Error {
-    fn from(err: gimli::Error) -> Self {
-        Error::GimliError(err)
-    }
-}
-
-impl From<object::Error> for Error {
-    fn from(err: object::Error) -> Self {
-        Error::ObjectError(err)
-    }
-}
-
-fn parse_entry<R: gimli::Reader>(
-    entry: &gimli::DebuggingInformationEntry<R>,
-    debug_str: &gimli::DebugStr<R>,
-    level: usize,
-) -> gimli::Result<()>
-where
-    R::Offset: fmt::LowerHex,
-{
-    println!(
-        "{:width$}{}: {:?}",
-        "",
-        entry.tag().static_string().unwrap(),
-        entry.offset(),
-        width = level * 2,
-    );
-    entry.attrs().for_each(|attr| {
-        let name = attr.name().static_string().unwrap();
-        let value = match attr.string_value(debug_str) {
-            Some(value) => value.to_string_lossy()?.to_string(),
-            None => format!("{:?}", attr.value()),
-        };
-        println!("{:width$}{}: {}", "", name, value, width = 2 * (level + 2));
-        Ok(())
-    })?;
-    Ok(())
-}
-
-fn traverse_tree<R: gimli::Reader>(
-    node: gimli::EntriesTreeNode<R>,
-    debug_str: &gimli::DebugStr<R>,
-    level: usize,
-) -> gimli::Result<()>
-where
-    R::Offset: fmt::LowerHex,
-{
-    parse_entry(node.entry(), debug_str, level)?;
-
-    let mut children = node.children();
-    while let Some(child) = children.next()? {
-        traverse_tree(child, debug_str, level + 1)?;
-    }
-    Ok(())
-}
-
-fn parse_dwarf(obj: &object::File) -> Result<(), Error> {
-    let endian = match obj.is_little_endian() {
-        true => gimli::RunTimeEndian::Little,
-        false => gimli::RunTimeEndian::Big,
-    };
-
-    let dwarf = gimli::Dwarf::load(|section| load_file_section(section, obj, endian))?;
-
+    let dwarf = read::load_dwarf(&obj).unwrap();
     dwarf.units().for_each(|unit| {
-        println!("\n=== Parsing unit ===");
-        println!("offset: {:?}\ntype: {:?}\n", unit.offset(), unit.version());
         let abbrs = unit.abbreviations(&dwarf.debug_abbrev)?;
-        let mut tree = unit.entries_tree(&abbrs, None)?;
-        traverse_tree(tree.root()?, &dwarf.debug_str, 0)?;
+        let types = fill(&unit, &abbrs, &dwarf.debug_str).unwrap();
+        dbg!(types);
         Ok(())
-    })?;
-
-    Ok(())
+    }).unwrap();
 }
