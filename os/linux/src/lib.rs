@@ -1,6 +1,6 @@
 extern crate alloc;
 
-mod profile;
+pub mod profile;
 pub use profile::Profile;
 
 use ibc::{Backend, GuestVirtAddr, Os};
@@ -38,7 +38,6 @@ impl Linux {
         let mut addr = GuestVirtAddr(0);
         backend.read_memory(current_task, bytemuck::bytes_of_mut(&mut addr))?;
 
-        println!("0x{:016x}", addr);
         let addr = backend.virtual_to_physical(addr)?.unwrap();
         let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
 

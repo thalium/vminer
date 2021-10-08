@@ -1,6 +1,8 @@
 use alloc::{string::String, vec::Vec};
 use hashbrown::HashMap;
 
+use crate::GuestVirtAddr;
+
 #[derive(Debug)]
 pub struct StructField {
     pub name: String,
@@ -31,12 +33,14 @@ pub struct Struct<'a> {
 
 pub struct SymbolsIndexer {
     structs: HashMap<String, OwnedStruct>,
+    addresses: HashMap<String, GuestVirtAddr>,
 }
 
 impl SymbolsIndexer {
     pub fn new() -> Self {
         Self {
             structs: HashMap::new(),
+            addresses: HashMap::new(),
         }
     }
 
@@ -47,11 +51,25 @@ impl SymbolsIndexer {
     pub fn insert_struct(&mut self, structure: OwnedStruct) {
         self.structs.insert(structure.name.clone(), structure);
     }
+
+    pub fn get_addr(&self, name: &str) -> Option<GuestVirtAddr> {
+        self.addresses.get(name).copied()
+    }
+
+    pub fn insert_addr(&mut self, name: String, addr: GuestVirtAddr) {
+        self.addresses.insert(name, addr);
+    }
 }
 
 impl Extend<OwnedStruct> for SymbolsIndexer {
     fn extend<I: IntoIterator<Item = OwnedStruct>>(&mut self, iter: I) {
         self.structs
             .extend(iter.into_iter().map(|s| (s.name.clone(), s)))
+    }
+}
+
+impl Extend<(String, GuestVirtAddr)> for SymbolsIndexer {
+    fn extend<I: IntoIterator<Item = (String, GuestVirtAddr)>>(&mut self, iter: I) {
+        self.addresses.extend(iter)
     }
 }

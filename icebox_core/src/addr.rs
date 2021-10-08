@@ -1,5 +1,6 @@
 use super::mask;
 use core::{fmt, ops::Add};
+use std::ops::Sub;
 
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
@@ -74,6 +75,14 @@ impl Add<u64> for GuestVirtAddr {
 
     fn add(self, rhs: u64) -> Self::Output {
         Self(self.0 + rhs)
+    }
+}
+
+impl Sub<GuestVirtAddr> for GuestVirtAddr {
+    type Output = u64;
+
+    fn sub(self, rhs: GuestVirtAddr) -> u64 {
+        self.0 - rhs.0
     }
 }
 

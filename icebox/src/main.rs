@@ -24,7 +24,11 @@ fn main() {
     let _ = dbg!(os::Linux::quick_check(&vm));
     //println!("0x{:x}", addr);
 
-    let mut profile = icebox_os_linux::Profile::new("../kallsyms".as_ref());
+    let mut syms = ibc::SymbolsIndexer::new();
+    let kallsyms = std::io::BufReader::new(std::fs::File::open("../kallsyms").unwrap());
+    icebox_os_linux::profile::parse_kallsyms(kallsyms, &mut syms).unwrap();
+
+    let mut profile = icebox_os_linux::Profile::new(syms);
     profile.read_object_file("../elf");
 
     let linux = os::Linux::create(profile);
