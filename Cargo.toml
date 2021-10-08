@@ -1,9 +1,10 @@
 [workspace]
 members = [
-    "icebox",
     "backends/dumb_dump",
     "backends/kvm",
+    "icebox",
     "icebox_core",
+    "icebox_dwarf",
     "kvm-common",
     "os/linux",
     "patch",

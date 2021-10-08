@@ -10,3 +10,4 @@ std = []
 kvm-common = {path = "../kvm-common"}
 
 bytemuck = {version = "1.7", features = ["derive"]}
+hashbrown = {version = "0.11"}
