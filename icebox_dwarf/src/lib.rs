@@ -9,6 +9,7 @@ use core::{cell::Cell, fmt};
 use gimli::{DebugStr, UnitOffset};
 use hashbrown::HashMap;
 
+#[cfg(feature = "object")]
 mod read;
 
 // pub struct AllLinuxStructs {
@@ -556,18 +557,19 @@ fn fill<R: GimliReader>(
     Ok(())
 }
 
+#[cfg(feature = "object")]
 pub fn load_types(
     obj: &object::File,
     symbols: &mut ibc::SymbolsIndexer,
 ) -> Result<(), read::Error> {
     let dwarf = read::load_dwarf(obj)?;
-    load_types_from_dwarf(&dwarf, symbols)
+    Ok(load_types_from_dwarf(&dwarf, symbols)?)
 }
 
 pub fn load_types_from_dwarf<R>(
     dwarf: &gimli::Dwarf<R>,
     symbols: &mut ibc::SymbolsIndexer,
-) -> Result<(), read::Error>
+) -> Result<(), gimli::Error>
 where
     R: gimli::Reader<Offset = usize>,
 {

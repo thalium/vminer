@@ -1,11 +1,13 @@
 use alloc::{string::String, vec::Vec};
 use hashbrown::HashMap;
 
+#[derive(Debug)]
 pub struct StructField {
     pub name: String,
     pub offset: u64,
 }
 
+#[derive(Debug)]
 pub struct OwnedStruct {
     pub size: u64,
     pub name: String,
@@ -21,6 +23,7 @@ impl OwnedStruct {
     }
 }
 
+#[derive(Debug)]
 pub struct Struct<'a> {
     pub name: &'a str,
     pub fields: &'a [StructField],
@@ -41,7 +44,7 @@ impl SymbolsIndexer {
         self.structs.get(name).map(OwnedStruct::borrow)
     }
 
-    pub fn insert(&mut self, structure: OwnedStruct) {
+    pub fn insert_struct(&mut self, structure: OwnedStruct) {
         self.structs.insert(structure.name.clone(), structure);
     }
 }

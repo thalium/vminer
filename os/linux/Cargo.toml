@@ -3,10 +3,19 @@ name = "icebox_os_linux"
 version = "0.1.0"
 edition = "2018"
 
+[features]
+default = ["object"]
+
+std = ["ibc/std"]
+object = ["obj", "icebox_dwarf/object"]
+
 [dependencies]
 ibc = {path = "../../icebox_core", package = "icebox_core"}
+icebox_dwarf = {path = "../../icebox_dwarf"}
 
+bytemuck = {version = "1.7", features = ["derive"]}
 memchr = {version = "2.4", default-features = false}
+obj = {package = "object", version = "0.26", default-features = false, optional = true}
 
 [dev-dependencies]
 icebox_backend_dumb_dump = {path = "../../backends/dumb_dump"}

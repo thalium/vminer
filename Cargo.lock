@@ -127,9 +127,12 @@ dependencies = [
 name = "icebox_os_linux"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "icebox_backend_dumb_dump",
  "icebox_core",
+ "icebox_dwarf",
  "memchr",
+ "object",
 ]
 
 [[package]]

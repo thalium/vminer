@@ -1,10 +1,72 @@
+extern crate alloc;
+
+mod profile;
+pub use profile::Profile;
+
 use ibc::{Backend, GuestVirtAddr, Os};
 
-pub struct Linux;
+pub struct Linux {
+    profile: Profile,
+}
+
+fn per_cpu<B: Backend>(backend: &B) -> ibc::GuestVirtAddr {
+    let sregs = backend.get_sregs();
+
+    let per_cpu = ibc::GuestVirtAddr(sregs.gs.base);
+    assert!(per_cpu.0 > 0x7fffffffffffffff);
+
+    per_cpu
+}
 
 impl Linux {
     pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
         (addr.0 as i64) < 0
+    }
+
+    pub fn create(profile: Profile) -> Self {
+        Linux { profile }
+    }
+
+    pub fn read_current_task<B: Backend>(
+        &self,
+        backend: &B,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let current_task = per_cpu(backend)
+            + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
+        let current_task = backend.virtual_to_physical(current_task)?.unwrap();
+
+        let mut addr = GuestVirtAddr(0);
+        backend.read_memory(current_task, bytemuck::bytes_of_mut(&mut addr))?;
+
+        println!("0x{:016x}", addr);
+        let addr = backend.virtual_to_physical(addr)?.unwrap();
+        let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
+
+        for win in task_struct.fields[..100].windows(2) {
+            match win {
+                [current, next] => {
+                    let size = (next.offset - current.offset) as usize;
+                    let mut buf = [0; 1024];
+                    let buf = &mut buf[..size];
+                    backend.read_memory(addr + current.offset, buf)?;
+
+                    match size {
+                        4 => {
+                            let x: &u32 = bytemuck::from_bytes(buf);
+                            println!("{} ({}): {}", current.name, size, x);
+                        }
+                        8 => {
+                            let x: &u64 = bytemuck::from_bytes(buf);
+                            println!("{} ({}): {}", current.name, size, x);
+                        }
+                        _ => println!("{} ({}): {:02x?}", current.name, size, buf),
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(())
     }
 }
 
