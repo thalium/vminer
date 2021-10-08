@@ -335,11 +335,7 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
     fn read_base_type(self) -> ResolveTypeResult<BaseType> {
         let len = self.read::<DwAtByteSize>()?;
         let ate = self.read::<DwAtEncoding>()?;
-
-        let signed = match ate {
-            gimli::DW_ATE_signed | gimli::DW_ATE_signed_char => true,
-            _ => false,
-        };
+        let signed = matches!(ate, gimli::DW_ATE_signed | gimli::DW_ATE_signed_char);
 
         Ok(BaseType { len, signed })
     }

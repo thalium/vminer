@@ -1,6 +1,8 @@
 use icebox::*;
 
 fn main() {
+    env_logger::init();
+
     // let mut args = std::env::args();
     // let pid = args.nth(1).expect("missing pid");
     // let pid: i32 = pid.parse().unwrap();

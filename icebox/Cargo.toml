@@ -15,4 +15,5 @@ icebox_backend_kvm = {path = "../backends/kvm", optional = true}
 icebox_os_linux = {path = "../os/linux", optional = true}
 
 anyhow = "1.0"
+env_logger = "0.9"
 kvm-common = {path = "../kvm-common"}

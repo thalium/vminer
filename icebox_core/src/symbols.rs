@@ -31,6 +31,7 @@ pub struct Struct<'a> {
     pub fields: &'a [StructField],
 }
 
+#[derive(Debug, Default)]
 pub struct SymbolsIndexer {
     structs: HashMap<String, OwnedStruct>,
     addresses: HashMap<String, GuestVirtAddr>,

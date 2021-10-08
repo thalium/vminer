@@ -30,7 +30,7 @@ impl<R: gimli::Reader<Offset = usize>> Relocate<R> {
                         return relocation.addend() as u64;
                     }
                 }
-                _ => {}
+                _ => log::debug!("Unsupported relocation kind in ELF"),
             }
         };
         value
@@ -154,24 +154,21 @@ fn add_relocations(
         let offset = offset as usize;
         match relocation.kind() {
             object::RelocationKind::Absolute => {
-                match relocation.target() {
-                    object::RelocationTarget::Symbol(symbol_idx) => {
-                        match file.symbol_by_index(symbol_idx) {
-                            Ok(symbol) => {
-                                let addend =
-                                    symbol.address().wrapping_add(relocation.addend() as u64);
-                                relocation.set_addend(addend as i64);
-                            }
-                            Err(_) => {
-                                log::warn!(
-                                    "Relocation with invalid symbol for section {} at offset 0x{:08x}",
-                                    section.name().unwrap_or("<unknown name>"),
-                                    offset
-                                );
-                            }
+                if let object::RelocationTarget::Symbol(symbol_idx) = relocation.target() {
+                    match file.symbol_by_index(symbol_idx) {
+                        Ok(symbol) => {
+                            let addend =
+                                symbol.address().wrapping_add(relocation.addend() as u64);
+                            relocation.set_addend(addend as i64);
+                        }
+                        Err(_) => {
+                            log::warn!(
+                                "Relocation with invalid symbol for section {} at offset 0x{:08x}",
+                                section.name().unwrap_or("<unknown name>"),
+                                offset
+                            );
                         }
                     }
-                    _ => {}
                 }
                 if relocations.insert(offset, relocation).is_some() {
                     log::warn!(
@@ -195,8 +192,8 @@ fn add_relocations(
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
-    GimliError(gimli::Error),
-    ObjectError(object::Error),
+    Gimli(gimli::Error),
+    Object(object::Error),
     CompressedSection,
 }
 
@@ -204,8 +201,8 @@ impl fmt::Display for Error {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            Error::GimliError(_) => f.write_str("failed to read DWARF data"),
-            Error::ObjectError(_) => f.write_str("failed to read ELF"),
+            Error::Gimli(_) => f.write_str("failed to read DWARF data"),
+            Error::Object(_) => f.write_str("failed to read ELF"),
             Error::CompressedSection => f.write_str("compressed DWARF sections are not supported"),
         }
     }
@@ -224,13 +221,13 @@ impl std::error::Error for Error {
 
 impl From<gimli::Error> for Error {
     fn from(err: gimli::Error) -> Self {
-        Error::GimliError(err)
+        Error::Gimli(err)
     }
 }
 
 impl From<object::Error> for Error {
     fn from(err: object::Error) -> Self {
-        Error::ObjectError(err)
+        Error::Object(err)
     }
 }
 
@@ -242,7 +239,7 @@ fn load_file_section<'input, Endian: gimli::Endianity>(
     let mut relocations = RelocationMap::new();
     let name = id.name();
 
-    let data = match file.section_by_name(&name) {
+    let data = match file.section_by_name(name) {
         Some(ref section) => {
             add_relocations(&mut relocations, file, section);
             match section.uncompressed_data()? {
