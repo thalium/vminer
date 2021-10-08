@@ -15,6 +15,7 @@ mod os;
 pub use os::Os;
 
 pub mod symbols;
+pub use symbols::SymbolsIndexer;
 
 pub const fn mask(size: u32) -> u64 {
     !(!0 << size)

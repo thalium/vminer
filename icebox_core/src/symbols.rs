@@ -1,3 +1,4 @@
+use alloc::{string::String, vec::Vec};
 use hashbrown::HashMap;
 
 pub struct StructField {
@@ -6,6 +7,7 @@ pub struct StructField {
 }
 
 pub struct OwnedStruct {
+    pub size: u64,
     pub name: String,
     pub fields: Vec<StructField>,
 }
@@ -41,5 +43,12 @@ impl SymbolsIndexer {
 
     pub fn insert(&mut self, structure: OwnedStruct) {
         self.structs.insert(structure.name.clone(), structure);
+    }
+}
+
+impl Extend<OwnedStruct> for SymbolsIndexer {
+    fn extend<I: IntoIterator<Item = OwnedStruct>>(&mut self, iter: I) {
+        self.structs
+            .extend(iter.into_iter().map(|s| (s.name.clone(), s)))
     }
 }

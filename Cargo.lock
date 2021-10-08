@@ -118,6 +118,7 @@ version = "0.1.0"
 dependencies = [
  "gimli",
  "hashbrown",
+ "icebox_core",
  "log",
  "object",
 ]

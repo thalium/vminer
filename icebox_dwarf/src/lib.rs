@@ -494,10 +494,10 @@ fn fill<R: GimliReader>(
     unit: &gimli::UnitHeader<R>,
     abbrs: &gimli::Abbreviations,
     debug_str: &gimli::DebugStr<R>,
-    types: &mut Vec<StructRepr>,
+    symbols: &mut ibc::SymbolsIndexer,
 ) -> gimli::Result<()> {
     // First pass
-    let mut types_infos = Vec::new();
+    let mut types = Vec::new();
 
     let mut tree = unit.entries_tree(abbrs, None)?;
     let root = tree.root()?;
@@ -511,7 +511,7 @@ fn fill<R: GimliReader>(
 
         match node.read_type(debug_str) {
             Ok(Some((name, typ))) => {
-                types_infos.push(MidDataEntry { offset, name, typ });
+                types.push(MidDataEntry { offset, name, typ });
             }
             Ok(None) => (),
             Err(ResolveTypeError::Gimli(err)) => return Err(err),
@@ -531,18 +531,21 @@ fn fill<R: GimliReader>(
     }
     */
 
-    types.extend(
-        types_infos
+    symbols.extend(
+        types
             .into_iter()
             .filter_map(|typ| typ.name.zip(typ.typ.into_resolved()))
             .filter_map(|(name, ty)| match ty {
-                DwarfType::Struct(LazyStruct { size, fields }) => Some(StructRepr {
+                DwarfType::Struct(LazyStruct { size, fields }) => Some(ibc::symbols::OwnedStruct {
                     size,
                     name,
-                    offsets: fields
+                    fields: fields
                         .iter()
-                        .filter_map(|(offset, name, _)| {
-                            name.as_ref().map(|name| (name.clone(), *offset))
+                        .filter_map(|&(offset, ref name, _)| {
+                            name.as_ref().map(|name| ibc::symbols::StructField {
+                                name: name.clone(),
+                                offset,
+                            })
                         })
                         .collect(),
                 }),
@@ -553,22 +556,26 @@ fn fill<R: GimliReader>(
     Ok(())
 }
 
-pub fn load_types(obj: &object::File) -> Result<Vec<StructRepr>, read::Error> {
+pub fn load_types(
+    obj: &object::File,
+    symbols: &mut ibc::SymbolsIndexer,
+) -> Result<(), read::Error> {
     let dwarf = read::load_dwarf(obj)?;
-    load_types_from_dwarf(&dwarf)
+    load_types_from_dwarf(&dwarf, symbols)
 }
 
-pub fn load_types_from_dwarf<R>(dwarf: &gimli::Dwarf<R>) -> Result<Vec<StructRepr>, read::Error>
+pub fn load_types_from_dwarf<R>(
+    dwarf: &gimli::Dwarf<R>,
+    symbols: &mut ibc::SymbolsIndexer,
+) -> Result<(), read::Error>
 where
     R: gimli::Reader<Offset = usize>,
 {
-    let mut types = Vec::new();
-
     let mut units = dwarf.units();
     while let Some(unit) = units.next()? {
         let abbrs = unit.abbreviations(&dwarf.debug_abbrev)?;
-        fill(&unit, &abbrs, &dwarf.debug_str, &mut types)?;
+        fill(&unit, &abbrs, &dwarf.debug_str, symbols)?;
     }
 
-    Ok(types)
+    Ok(())
 }
