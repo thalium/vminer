@@ -9,6 +9,7 @@ members = [
     "os/linux",
     "patch",
     "phys_addr",
+    "kvm_dump_live",
 ]
 
 [profile.dev]
