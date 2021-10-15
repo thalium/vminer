@@ -12,8 +12,8 @@ pub extern "C" fn payload() -> libc::c_int {
 }
 
 fn send_fds(vcpu1: RawFd) -> io::Result<()> {
-    let regs = unsafe { kvm_common::get_regs(vcpu1)? };
-    let sregs = unsafe { kvm_common::get_sregs(vcpu1)? };
+    let regs = unsafe { kvm::get_regs(vcpu1)? };
+    let sregs = unsafe { kvm::get_sregs(vcpu1)? };
 
     let mut socket = UnixStream::connect("/tmp/get_fds")?;
 

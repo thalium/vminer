@@ -1,0 +1,8 @@
+[package]
+name = "kvm"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+bytemuck = {version = "1.7", features = ["derive"]}
+libc = "0.2.94"

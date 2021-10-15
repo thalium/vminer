@@ -219,6 +219,7 @@ dependencies = [
  "env_logger",
  "gimli",
  "hashbrown",
+ "kvm",
  "libc",
  "log",
  "memchr",
@@ -234,6 +235,14 @@ checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
 dependencies = [
  "autocfg",
  "hashbrown",
+]
+
+[[package]]
+name = "kvm"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "libc",
 ]
 
 [[package]]
@@ -294,6 +303,15 @@ name = "os_str_bytes"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6acbef58a60fe69ab50510a55bc8cdd4d6cf2283d27ad338f54cb52747a9cf2d"
+
+[[package]]
+name = "patch"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "kvm",
+ "libc",
+]
 
 [[package]]
 name = "proc-macro-error"

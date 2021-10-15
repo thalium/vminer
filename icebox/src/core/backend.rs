@@ -4,7 +4,6 @@ use crate::core::mask;
 use crate::core::GuestPhysAddr;
 use crate::core::GuestVirtAddr;
 use crate::core::MmPte;
-use crate::kvm::x86_64 as kvm;
 
 pub trait Backend {
     fn get_regs(&self) -> &kvm::kvm_regs;

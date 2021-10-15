@@ -7,7 +7,6 @@ use std::{
 };
 
 use crate::core::{Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult};
-use crate::kvm::x86_64 as kvm;
 
 pub enum Mem {
     Bytes(Vec<u8>),

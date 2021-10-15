@@ -8,7 +8,6 @@ use std::{
 };
 
 use crate::core::{Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult};
-use crate::kvm::x86_64 as kvm;
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
