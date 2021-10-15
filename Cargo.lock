@@ -84,6 +84,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "check"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "icebox",
+]
+
+[[package]]
 name = "clap"
 version = "3.0.0-beta.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -215,8 +223,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
- "clap",
- "env_logger",
  "gimli",
  "hashbrown",
  "kvm",
@@ -243,6 +249,15 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "libc",
+]
+
+[[package]]
+name = "kvm_dump_live"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "icebox",
 ]
 
 [[package]]

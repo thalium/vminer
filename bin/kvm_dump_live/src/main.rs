@@ -29,7 +29,7 @@ struct Args {
     mem_size: u64,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let args = Args::parse();
     let vm = kvm::Kvm::connect(args.pid, args.mem_size)?;
