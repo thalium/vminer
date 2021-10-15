@@ -2,9 +2,9 @@ use std::{
     fs,
     io::{self, Read, Seek, Write},
     mem,
-    os::unix::prelude::*,
     path::Path,
 };
+use sync_file::SyncFile;
 
 use crate::core::{
     self as ice,
@@ -14,7 +14,7 @@ use crate::core::{
 
 pub enum Mem {
     Bytes(Vec<u8>),
-    File(fs::File),
+    File(SyncFile),
 }
 
 pub struct DumbDump {
@@ -27,7 +27,7 @@ const MEM_OFFSET: u64 =
 
 impl DumbDump {
     pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let mut f = fs::File::open(path)?;
+        let mut f = SyncFile::open(path)?;
 
         let mut buf = [0; mem::size_of::<x86_64::Registers>()];
         f.read_exact(&mut buf)?;
@@ -57,7 +57,7 @@ impl DumbDump {
                 out.write_all(b)?;
             }
             Mem::File(f) => {
-                let mut f = f;
+                let mut f = f.clone();
                 f.rewind()?;
                 io::copy(&mut f, &mut out)?;
             }

@@ -230,6 +230,7 @@ dependencies = [
  "memchr",
  "object",
  "serde",
+ "sync_file",
 ]
 
 [[package]]
@@ -419,6 +420,12 @@ dependencies = [
  "quote",
  "unicode-xid",
 ]
+
+[[package]]
+name = "sync_file"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b516be21a995f9083c7153ab4ab4c98c208909b178fffc013513da3f4c5b3f8c"
 
 [[package]]
 name = "termcolor"
