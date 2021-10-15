@@ -213,8 +213,8 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(match self {
-            Error::GimliError(err) => err,
-            Error::ObjectError(err) => err,
+            Error::Gimli(err) => err,
+            Error::Object(err) => err,
             Error::CompressedSection => return None,
         })
     }

@@ -6,7 +6,11 @@ use std::{
     path::Path,
 };
 
-use crate::core::{Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult};
+use crate::core::{
+    self as ice,
+    arch::{self, x86_64},
+    Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult,
+};
 
 pub enum Mem {
     Bytes(Vec<u8>),
@@ -14,27 +18,33 @@ pub enum Mem {
 }
 
 pub struct DumbDump {
-    pub regs: kvm::kvm_regs,
-    pub sregs: kvm::kvm_sregs,
+    vcpus: Vec<arch::x86_64::Vcpu>,
     pub mem: Mem,
 }
 
-const MEM_OFFSET: u64 = (mem::size_of::<kvm::kvm_regs>() + mem::size_of::<kvm::kvm_sregs>()) as _;
+const MEM_OFFSET: u64 =
+    (mem::size_of::<x86_64::Registers>() + mem::size_of::<x86_64::SpecialRegisters>()) as _;
 
 impl DumbDump {
     pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut f = fs::File::open(path)?;
 
-        let mut buf = [0; mem::size_of::<kvm::kvm_regs>()];
+        let mut buf = [0; mem::size_of::<x86_64::Registers>()];
         f.read_exact(&mut buf)?;
-        let regs = *bytemuck::from_bytes(&buf);
+        let registers = *bytemuck::from_bytes(&buf);
 
-        let mut buf = [0; mem::size_of::<kvm::kvm_sregs>()];
+        let mut buf = [0; mem::size_of::<x86_64::SpecialRegisters>()];
         f.read_exact(&mut buf)?;
-        let sregs = *bytemuck::from_bytes(&buf);
+        let special_registers = *bytemuck::from_bytes(&buf);
 
         let mem = Mem::File(f);
-        Ok(DumbDump { regs, sregs, mem })
+        Ok(DumbDump {
+            vcpus: vec![x86_64::Vcpu {
+                registers,
+                special_registers,
+            }],
+            mem,
+        })
     }
 
     pub fn write<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
@@ -42,8 +52,8 @@ impl DumbDump {
 
         match &self.mem {
             Mem::Bytes(b) => {
-                out.write_all(bytemuck::bytes_of(&self.regs))?;
-                out.write_all(bytemuck::bytes_of(&self.sregs))?;
+                out.write_all(bytemuck::bytes_of(&self.vcpus[0].registers))?;
+                out.write_all(bytemuck::bytes_of(&self.vcpus[0].special_registers))?;
                 out.write_all(b)?;
             }
             Mem::File(f) => {
@@ -56,26 +66,26 @@ impl DumbDump {
         Ok(())
     }
 
-    pub fn dump_vm<B: Backend>(backend: &B) -> io::Result<DumbDump> {
+    pub fn dump_vm<B: Backend<arch::X86_64>>(backend: &B) -> io::Result<DumbDump> {
         let mut mem = vec![0; 2 << 30];
         backend.read_memory(GuestPhysAddr(0), &mut mem).unwrap();
 
+        let vcpu = &backend.vcpus()[0];
+
         let dump = DumbDump {
-            regs: *backend.get_regs(),
-            sregs: *backend.get_sregs(),
+            vcpus: vec![x86_64::Vcpu {
+                registers: vcpu.registers,
+                special_registers: vcpu.special_registers,
+            }],
             mem: Mem::Bytes(mem),
         };
         Ok(dump)
     }
 }
 
-impl Backend for DumbDump {
-    fn get_regs(&self) -> &kvm::kvm_regs {
-        &self.regs
-    }
-
-    fn get_sregs(&self) -> &kvm::kvm_sregs {
-        &self.sregs
+impl Backend<ice::arch::X86_64> for DumbDump {
+    fn vcpus(&self) -> &[x86_64::Vcpu] {
+        &self.vcpus
     }
 
     fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {

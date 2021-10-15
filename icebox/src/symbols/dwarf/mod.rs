@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-extern crate alloc;
-
 use alloc::{boxed::Box, collections::VecDeque, rc::Rc, string::String, vec::Vec};
 use core::{cell::Cell, fmt};
 
@@ -533,13 +531,13 @@ fn fill<R: GimliReader>(
             .into_iter()
             .filter_map(|typ| typ.name.zip(typ.typ.into_resolved()))
             .filter_map(|(name, ty)| match ty {
-                DwarfType::Struct(LazyStruct { size, fields }) => Some(ice::OwnedStruct {
+                DwarfType::Struct(LazyStruct { size, fields }) => Some(ice::symbols::OwnedStruct {
                     size,
                     name,
                     fields: fields
                         .iter()
                         .filter_map(|&(offset, ref name, _)| {
-                            name.as_ref().map(|name| ice::StructField {
+                            name.as_ref().map(|name| ice::symbols::StructField {
                                 name: name.clone(),
                                 offset,
                             })

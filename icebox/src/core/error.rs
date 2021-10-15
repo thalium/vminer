@@ -1,13 +1,11 @@
+use alloc::boxed::Box;
 use core::fmt;
 
-//#[cfg(feature = "std")]
+#[cfg(feature = "std")]
 pub use std::error::Error;
 
-//#[cfg(not(feature = "std"))]
-//pub trait Error: fmt::Display + fmt::Debug {}
-
-//#[cfg(not(feature = "std"))]
-//use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+pub trait Error: fmt::Display + fmt::Debug {}
 
 #[derive(Debug)]
 #[non_exhaustive]

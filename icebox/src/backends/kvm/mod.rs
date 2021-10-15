@@ -7,7 +7,9 @@ use std::{
     ptr,
 };
 
-use crate::core::{Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult};
+use crate::core::{
+    self as ice, arch::x86_64, Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult,
+};
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
@@ -290,21 +292,25 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm::kvm_regs, kvm::kvm_sregs)> {
+pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
     let socket_path = "/tmp/get_fds";
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path).context("bind").unwrap();
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777)).unwrap();
 
     let handle = std::thread::spawn(move || -> anyhow::Result<_> {
+        const REGISTER_SIZE: usize = mem::size_of::<x86_64::Registers>();
         let (mut socket, _) = listener.accept().context("accept")?;
-        let mut regs = [0; mem::size_of::<kvm::kvm_regs>()];
-        let mut sregs = [0; mem::size_of::<kvm::kvm_sregs>()];
+        let mut regs = [0; REGISTER_SIZE + mem::size_of::<x86_64::SpecialRegisters>()];
+
         socket.read_exact(&mut regs)?;
-        let regs = *bytemuck::from_bytes(&regs);
-        socket.read_exact(&mut sregs)?;
-        let sregs = *bytemuck::from_bytes(&sregs);
-        Ok((regs, sregs))
+        let registers = *bytemuck::from_bytes(&regs[..REGISTER_SIZE]);
+        let special_registers = *bytemuck::from_bytes(&regs[REGISTER_SIZE..]);
+
+        Ok(vec![x86_64::Vcpu {
+            registers,
+            special_registers,
+        }])
     });
 
     attach(pid, &[]).unwrap();
@@ -318,8 +324,7 @@ pub struct Kvm {
     mem: fs::File,
     mem_offset: u64,
     mem_size: u64,
-    regs: kvm::kvm_regs,
-    sregs: kvm::kvm_sregs,
+    vcpus: Vec<x86_64::Vcpu>,
 }
 
 impl Kvm {
@@ -367,26 +372,20 @@ impl Kvm {
             .write(true)
             .open(format!("/proc/{}/mem", pid))?;
 
-        let (regs, sregs) = get_regs(pid)?;
+        let vcpus = get_regs(pid)?;
 
         Ok(Kvm {
             mem,
             mem_offset,
             mem_size,
-
-            regs,
-            sregs,
+            vcpus,
         })
     }
 }
 
-impl Backend for Kvm {
-    fn get_regs(&self) -> &kvm::kvm_regs {
-        &self.regs
-    }
-
-    fn get_sregs(&self) -> &kvm::kvm_sregs {
-        &self.sregs
+impl Backend<ice::arch::X86_64> for Kvm {
+    fn vcpus(&self) -> &[x86_64::Vcpu] {
+        &self.vcpus
     }
 
     fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {

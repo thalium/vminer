@@ -225,7 +225,6 @@ dependencies = [
  "bytemuck",
  "gimli",
  "hashbrown",
- "kvm",
  "libc",
  "log",
  "memchr",
@@ -241,14 +240,6 @@ checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
 dependencies = [
  "autocfg",
  "hashbrown",
-]
-
-[[package]]
-name = "kvm"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "libc",
 ]
 
 [[package]]
@@ -324,7 +315,6 @@ name = "patch"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "kvm",
  "libc",
 ]
 

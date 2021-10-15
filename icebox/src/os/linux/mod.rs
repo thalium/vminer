@@ -3,23 +3,23 @@ extern crate alloc;
 pub mod profile;
 pub use profile::Profile;
 
-use crate::core as ice;
+use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr};
 
 pub struct Linux {
     profile: Profile,
 }
 
-fn per_cpu<B: ice::Backend>(backend: &B) -> ice::GuestVirtAddr {
-    let sregs = backend.get_sregs();
+fn per_cpu<B: ice::Backend<ice::arch::X86_64>>(backend: &B) -> GuestVirtAddr {
+    let sregs = &backend.vcpus()[0].special_registers;
 
-    let per_cpu = ice::GuestVirtAddr(sregs.gs.base);
+    let per_cpu = GuestVirtAddr(sregs.gs.base);
     assert!(per_cpu.0 > 0x7fffffffffffffff);
 
     per_cpu
 }
 
 impl Linux {
-    pub const fn is_kernel_addr(addr: ice::GuestVirtAddr) -> bool {
+    pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
         (addr.0 as i64) < 0
     }
 
@@ -27,18 +27,23 @@ impl Linux {
         Linux { profile }
     }
 
-    pub fn read_current_task<B: ice::Backend>(
+    pub fn read_current_task<B: ice::Backend<ice::arch::X86_64>>(
         &self,
         backend: &B,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let sregs = &backend.vcpus()[0].special_registers;
+        let mmu_addr = GuestPhysAddr(sregs.cr3);
+
         let current_task = per_cpu(backend)
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
-        let current_task = backend.virtual_to_physical(current_task)?.unwrap();
+        let current_task = backend
+            .virtual_to_physical(mmu_addr, current_task)?
+            .unwrap();
 
-        let mut addr = ice::GuestVirtAddr(0);
+        let mut addr = GuestVirtAddr(0);
         backend.read_memory(current_task, bytemuck::bytes_of_mut(&mut addr))?;
 
-        let addr = backend.virtual_to_physical(addr)?.unwrap();
+        let addr = backend.virtual_to_physical(mmu_addr, addr)?.unwrap();
         let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
 
         for win in task_struct.fields[..100].windows(2) {
@@ -70,19 +75,27 @@ impl Linux {
 }
 
 impl ice::Os for Linux {
-    fn quick_check<B: ice::Backend>(backend: &B) -> ice::MemoryAccessResult<bool> {
+    fn quick_check<Arch: ice::Architecture, B: ice::Backend<Arch>>(
+        backend: &B,
+    ) -> ice::MemoryAccessResult<bool> {
         const OFFSET: usize = 0x1000;
         const TARGET: &[u8] = b"Linux version";
 
         const KERNEL_START: u64 = 0xffffffff80000000;
         const KERNEL_END: u64 = 0xfffffffffff00000;
 
+        let sregs = (&backend.vcpus()[0] as &dyn core::any::Any)
+            .downcast_ref::<ice::arch::x86_64::Vcpu>()
+            .ok_or_else(|| todo!())?
+            .special_registers;
+        let mmu_addr = GuestPhysAddr(sregs.cr3);
+
         let mut buf = [0; OFFSET + TARGET.len()];
         let finder = memchr::memmem::Finder::new(TARGET);
 
         for addr in (KERNEL_START..KERNEL_END).step_by(OFFSET) {
-            let addr = ice::GuestVirtAddr(addr);
-            if let Ok(Some(paddr)) = backend.virtual_to_physical(addr) {
+            let addr = GuestVirtAddr(addr);
+            if let Ok(Some(paddr)) = backend.virtual_to_physical(mmu_addr, addr) {
                 backend.read_memory(paddr, &mut buf)?;
 
                 if finder.find(&buf).is_some() {

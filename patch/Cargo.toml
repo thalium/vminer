@@ -6,7 +6,7 @@ edition = "2018"
 [lib]
 crate-type = ["cdylib"]
 
-[dependencies]
+
+[target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 bytemuck = { version = "1.7", features = ["derive"]}
-kvm = {path = "../kvm"}

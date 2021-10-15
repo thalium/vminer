@@ -1,6 +1,6 @@
 use super::mask;
+use core::ops::Sub;
 use core::{fmt, ops::Add};
-use std::ops::Sub;
 
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]

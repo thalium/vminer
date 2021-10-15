@@ -1,8 +1,7 @@
-use crate::core::backend::Backend;
-use crate::core::error::MemoryAccessResult;
+use super::{Architecture, Backend, MemoryAccessResult};
 
 pub trait Os {
-    fn quick_check<B: Backend>(_backend: &B) -> MemoryAccessResult<bool> {
+    fn quick_check<Arch: Architecture, B: Backend<Arch>>(_backend: &B) -> MemoryAccessResult<bool> {
         Ok(false)
     }
 }

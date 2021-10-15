@@ -1,10 +1,7 @@
-//#[cfg(not(feature = "std"))]
-//use alloc::{string::String, vec::Vec};
-
+use alloc::{string::String, vec::Vec};
 use hashbrown::HashMap;
 
-extern crate core;
-use crate::core::addr::GuestVirtAddr;
+use super::GuestVirtAddr;
 
 #[derive(Debug)]
 pub struct StructField {

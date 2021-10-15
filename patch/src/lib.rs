@@ -1,7 +1,11 @@
+#![cfg(target_os = "linux")]
+
 use std::{
     io::{self, Write},
     os::unix::{net::UnixStream, prelude::*},
 };
+
+mod kvm;
 
 #[no_mangle]
 pub extern "C" fn payload() -> libc::c_int {
