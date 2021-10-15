@@ -29,7 +29,6 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
-    println!("{:?}", args);
     let vm = icebox_backend_kvm::Kvm::connect(args.pid, args.mem_size)?;
     icebox_backend_dumb_dump::DumbDump::dump_vm(&vm)?.write(args.output)?;
     Ok(())
