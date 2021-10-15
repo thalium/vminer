@@ -4,11 +4,11 @@ use crate::core::mask;
 use crate::core::GuestPhysAddr;
 use crate::core::GuestVirtAddr;
 use crate::core::MmPte;
-use crate::kvm_common::x86_64 as kvm_common;
+use crate::kvm::x86_64 as kvm;
 
 pub trait Backend {
-    fn get_regs(&self) -> &kvm_common::kvm_regs;
-    fn get_sregs(&self) -> &kvm_common::kvm_sregs;
+    fn get_regs(&self) -> &kvm::kvm_regs;
+    fn get_sregs(&self) -> &kvm::kvm_sregs;
 
     fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
     fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> MemoryAccessResult<()>;

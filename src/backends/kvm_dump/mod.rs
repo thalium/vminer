@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::core::{Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult};
-use crate::kvm_common::x86_64 as kvm_common;
+use crate::kvm::x86_64 as kvm;
 
 pub enum Mem {
     Bytes(Vec<u8>),
@@ -15,23 +15,22 @@ pub enum Mem {
 }
 
 pub struct DumbDump {
-    pub regs: kvm_common::kvm_regs,
-    pub sregs: kvm_common::kvm_sregs,
+    pub regs: kvm::kvm_regs,
+    pub sregs: kvm::kvm_sregs,
     pub mem: Mem,
 }
 
-const MEM_OFFSET: u64 =
-    (mem::size_of::<kvm_common::kvm_regs>() + mem::size_of::<kvm_common::kvm_sregs>()) as _;
+const MEM_OFFSET: u64 = (mem::size_of::<kvm::kvm_regs>() + mem::size_of::<kvm::kvm_sregs>()) as _;
 
 impl DumbDump {
     pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut f = fs::File::open(path)?;
 
-        let mut buf = [0; mem::size_of::<kvm_common::kvm_regs>()];
+        let mut buf = [0; mem::size_of::<kvm::kvm_regs>()];
         f.read_exact(&mut buf)?;
         let regs = *bytemuck::from_bytes(&buf);
 
-        let mut buf = [0; mem::size_of::<kvm_common::kvm_sregs>()];
+        let mut buf = [0; mem::size_of::<kvm::kvm_sregs>()];
         f.read_exact(&mut buf)?;
         let sregs = *bytemuck::from_bytes(&buf);
 
@@ -72,11 +71,11 @@ impl DumbDump {
 }
 
 impl Backend for DumbDump {
-    fn get_regs(&self) -> &kvm_common::kvm_regs {
+    fn get_regs(&self) -> &kvm::kvm_regs {
         &self.regs
     }
 
-    fn get_sregs(&self) -> &kvm_common::kvm_sregs {
+    fn get_sregs(&self) -> &kvm::kvm_sregs {
         &self.sregs
     }
 

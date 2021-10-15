@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::core::{Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult};
-use crate::kvm_common::x86_64 as kvm_common;
+use crate::kvm::x86_64 as kvm;
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
@@ -291,7 +291,7 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm_common::kvm_regs, kvm_common::kvm_sregs)> {
+pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm::kvm_regs, kvm::kvm_sregs)> {
     let socket_path = "/tmp/get_fds";
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path).context("bind").unwrap();
@@ -299,8 +299,8 @@ pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<(kvm_common::kvm_regs, kvm_c
 
     let handle = std::thread::spawn(move || -> anyhow::Result<_> {
         let (mut socket, _) = listener.accept().context("accept")?;
-        let mut regs = [0; mem::size_of::<kvm_common::kvm_regs>()];
-        let mut sregs = [0; mem::size_of::<kvm_common::kvm_sregs>()];
+        let mut regs = [0; mem::size_of::<kvm::kvm_regs>()];
+        let mut sregs = [0; mem::size_of::<kvm::kvm_sregs>()];
         socket.read_exact(&mut regs)?;
         let regs = *bytemuck::from_bytes(&regs);
         socket.read_exact(&mut sregs)?;
@@ -319,8 +319,8 @@ pub struct Kvm {
     mem: fs::File,
     mem_offset: u64,
     mem_size: u64,
-    regs: kvm_common::kvm_regs,
-    sregs: kvm_common::kvm_sregs,
+    regs: kvm::kvm_regs,
+    sregs: kvm::kvm_sregs,
 }
 
 impl Kvm {
@@ -382,11 +382,11 @@ impl Kvm {
 }
 
 impl Backend for Kvm {
-    fn get_regs(&self) -> &kvm_common::kvm_regs {
+    fn get_regs(&self) -> &kvm::kvm_regs {
         &self.regs
     }
 
-    fn get_sregs(&self) -> &kvm_common::kvm_sregs {
+    fn get_sregs(&self) -> &kvm::kvm_sregs {
         &self.sregs
     }
 
