@@ -157,8 +157,7 @@ fn add_relocations(
                 if let object::RelocationTarget::Symbol(symbol_idx) = relocation.target() {
                     match file.symbol_by_index(symbol_idx) {
                         Ok(symbol) => {
-                            let addend =
-                                symbol.address().wrapping_add(relocation.addend() as u64);
+                            let addend = symbol.address().wrapping_add(relocation.addend() as u64);
                             relocation.set_addend(addend as i64);
                         }
                         Err(_) => {
