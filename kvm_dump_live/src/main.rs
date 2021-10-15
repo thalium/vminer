@@ -1,11 +1,11 @@
-use clap::Parser;
+use clap::Clap;
 
 fn parse_hex(src: &str) -> Result<u64, std::num::ParseIntError> {
     let sub = src.trim_start_matches("0x");
     u64::from_str_radix(sub, 16)
 }
 
-#[derive(Parser, Debug)]
+#[derive(Clap, Debug)]
 struct Args {
     #[clap(short = 'p', long = "pid", about = "input KVM PID")]
     pid: i32,
