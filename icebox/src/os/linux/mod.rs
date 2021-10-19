@@ -27,6 +27,7 @@ impl Linux {
         Linux { profile }
     }
 
+    #[cfg(feature = "std")]
     pub fn read_current_task<B: ice::Backend<ice::arch::X86_64>>(
         &self,
         backend: &B,

@@ -27,6 +27,23 @@ jobs:
       - name: cargo check
         run: cargo check
 
+  check-no_std:
+    name: Check no_std
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          target: aarch64-unknown-none
+          toolchain: stable
+          override: true
+
+      - name: cargo check
+        run: cargo check -p icebox
+
   fmt:
     name: Check formatting
     runs-on: ubuntu-latest

@@ -19,7 +19,7 @@ pub enum Mem {
 
 pub struct DumbDump {
     vcpus: Vec<arch::x86_64::Vcpu>,
-    pub mem: Mem,
+    mem: Mem,
 }
 
 const MEM_OFFSET: u64 =

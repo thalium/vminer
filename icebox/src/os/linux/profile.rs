@@ -1,7 +1,6 @@
 extern crate alloc;
 
 use alloc::string::String;
-use std::io;
 
 use crate::core as ice;
 use crate::symbols::dwarf;
@@ -30,14 +29,14 @@ impl Profile {
         }
     }
 
-    //#[cfg(feature = "object")]
+    #[cfg(all(feature = "object", feature = "std"))]
     pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) {
         let content = std::fs::read(path).unwrap();
         let obj = object::File::parse(&*content).unwrap();
         self.read_object(&obj);
     }
 
-    //#[cfg(feature = "object")]
+    #[cfg(feature = "object")]
     pub fn read_object(&mut self, obj: &object::File) {
         dwarf::load_types(obj, &mut self.syms).unwrap()
     }
@@ -50,7 +49,11 @@ pub struct Sym {
     kind: u8,
 }
 
-pub fn parse_kallsyms<R: io::BufRead>(mut r: R, syms: &mut ice::SymbolsIndexer) -> io::Result<()> {
+#[cfg(feature = "std")]
+pub fn parse_kallsyms<R: std::io::BufRead>(
+    mut r: R,
+    syms: &mut ice::SymbolsIndexer,
+) -> std::io::Result<()> {
     let mut line = String::with_capacity(200);
 
     loop {

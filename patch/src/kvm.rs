@@ -15,7 +15,6 @@ pub const KVM_GET_SREGS: u64 = 2167975555;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct kvm_regs {
     pub rax: u64,
     pub rbx: u64,

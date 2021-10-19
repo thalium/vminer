@@ -53,7 +53,6 @@ pub struct Registers {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Segment {
     pub base: u64,
     pub limit: u32,
@@ -72,7 +71,6 @@ pub struct Segment {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dtable {
     pub base: u64,
     pub limit: u16,
@@ -81,7 +79,6 @@ pub struct Dtable {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SpecialRegisters {
     pub cs: Segment,
     pub ds: Segment,
