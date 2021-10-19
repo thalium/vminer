@@ -1,6 +1,6 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod inner {
-    use clap::Clap;
+    use clap::Parser;
 
     use icebox::backends::kvm;
     use icebox::backends::kvm_dump;
@@ -10,7 +10,7 @@ mod inner {
         u64::from_str_radix(sub, 16)
     }
 
-    #[derive(Clap, Debug)]
+    #[derive(Parser, Debug)]
     struct Args {
         #[clap(short = 'p', long = "pid", about = "input KVM PID")]
         pid: i32,

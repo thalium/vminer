@@ -4,7 +4,7 @@ use std::{
     mem,
     path::Path,
 };
-use sync_file::SyncFile;
+use sync_file::{ReadAt, SyncFile, WriteAt};
 
 use crate::core::{
     self as ice,
