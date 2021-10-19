@@ -7,8 +7,13 @@ env:
 
 jobs:
   test:
+    strategy:
+      matrix:
+        runner:
+          - ubuntu-latest
+          - windows-latest
     name: Check
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
