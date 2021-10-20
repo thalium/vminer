@@ -4,7 +4,7 @@ use std::{
     mem,
     path::Path,
 };
-use sync_file::{ReadAt, SyncFile, WriteAt};
+use sync_file::{ReadAt, SyncFile};
 
 use crate::core::{
     self as ice,
@@ -102,24 +102,6 @@ impl Backend<ice::arch::X86_64> for DumbDump {
             }
             Mem::File(f) => f
                 .read_exact_at(buf, addr.0 + MEM_OFFSET)
-                .map_err(|e| MemoryAccessError::Io(e.into())),
-        }
-    }
-
-    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> MemoryAccessResult<()> {
-        match &mut self.mem {
-            Mem::Bytes(mem) => {
-                let start = addr.0 as usize;
-                match mem.get_mut(start..start + buf.len()) {
-                    Some(mem) => {
-                        mem.copy_from_slice(buf);
-                        Ok(())
-                    }
-                    None => Err(MemoryAccessError::OutOfBounds),
-                }
-            }
-            Mem::File(f) => f
-                .write_all_at(buf, addr.0 + MEM_OFFSET)
                 .map_err(|e| MemoryAccessError::Io(e.into())),
         }
     }

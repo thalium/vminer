@@ -4,7 +4,6 @@ pub trait Backend<Arch: Architecture> {
     fn vcpus(&self) -> &[Arch::Vcpu];
 
     fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
-    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> MemoryAccessResult<()>;
 
     fn virtual_to_physical(
         &self,

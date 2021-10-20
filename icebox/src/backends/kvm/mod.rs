@@ -396,13 +396,4 @@ impl Backend<ice::arch::X86_64> for Kvm {
             .read_exact_at(buf, self.mem_offset + addr.0)
             .map_err(|e| MemoryAccessError::Io(e.into()))
     }
-
-    fn write_memory(&mut self, addr: GuestPhysAddr, buf: &[u8]) -> MemoryAccessResult<()> {
-        if addr.0 + buf.len() as u64 > self.mem_size {
-            return Err(MemoryAccessError::OutOfBounds);
-        }
-        self.mem
-            .write_all_at(buf, self.mem_offset + addr.0)
-            .map_err(|e| MemoryAccessError::Io(e.into()))
-    }
 }
