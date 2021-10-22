@@ -14,6 +14,7 @@ impl Architecture for X86_64 {
     }
 }
 
+#[derive(Clone)]
 pub struct Vcpu {
     pub registers: Registers,
     pub special_registers: SpecialRegisters,

@@ -14,7 +14,7 @@ fn main() {
     let vm = kvm_dump::DumbDump::read("linux.dump").unwrap();
 
     //let addr = virtual_to_physical(&vm, GuestVirtAddr(vm.get_regs().rip)).unwrap();
-    let _ = dbg!(os::linux::Linux::quick_check(&vm));
+    let _ = dbg!(os::Linux::quick_check(&vm));
     //println!("0x{:x}", addr);
 
     let mut syms = ice::SymbolsIndexer::new();
@@ -24,7 +24,7 @@ fn main() {
     let mut profile = os::linux::Profile::new(syms);
     profile.read_object_file("../elf");
 
-    let linux = os::linux::Linux::create(profile);
+    let linux = os::Linux::create(profile);
     let kaslr = dbg!(linux.get_aslr(&vm).unwrap());
     linux.read_all_tasks(&vm, kaslr).unwrap();
     //linux.read_current_task(&vm).unwrap();

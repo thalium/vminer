@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use std::io;
+use std::{io, mem};
 
 macro_rules! check {
     ($e:expr) => {
@@ -86,15 +86,19 @@ pub struct kvm_sregs {
 }
 
 #[inline]
-pub unsafe fn get_regs(vcpu_fd: i32) -> io::Result<kvm_regs> {
-    let mut regs = kvm_regs::zeroed();
-    check!(libc::ioctl(vcpu_fd, KVM_GET_REGS, &mut regs))?;
-    Ok(regs)
+pub fn get_regs(vcpu_fd: i32) -> io::Result<kvm_regs> {
+    unsafe {
+        let mut regs = mem::MaybeUninit::uninit();
+        check!(libc::ioctl(vcpu_fd, KVM_GET_REGS, regs.as_mut_ptr()))?;
+        Ok(regs.assume_init())
+    }
 }
 
 #[inline]
-pub unsafe fn get_sregs(vcpu_fd: i32) -> io::Result<kvm_sregs> {
-    let mut sregs = kvm_sregs::zeroed();
-    check!(libc::ioctl(vcpu_fd, KVM_GET_SREGS, &mut sregs))?;
-    Ok(sregs)
+pub fn get_sregs(vcpu_fd: i32) -> io::Result<kvm_sregs> {
+    unsafe {
+        let mut sregs = mem::MaybeUninit::uninit();
+        check!(libc::ioctl(vcpu_fd, KVM_GET_SREGS, sregs.as_mut_ptr()))?;
+        Ok(sregs.assume_init())
+    }
 }

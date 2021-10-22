@@ -1,7 +1,7 @@
 use crate::core::{
     self as ice,
     arch::{self, x86_64},
-    Backend, GuestPhysAddr,
+    Backend, GuestPhysAddr, Memory,
 };
 use std::{
     fs,
@@ -63,16 +63,12 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
 
 impl DumbDump<Vec<u8>> {
     pub fn dump_vm<B: Backend<arch::X86_64>>(backend: &B) -> io::Result<Self> {
-        let mut mem = vec![0; 2 << 30];
-        backend.read_memory(GuestPhysAddr(0), &mut mem).unwrap();
-
-        let vcpu = &backend.vcpus()[0];
+        let memory = backend.memory();
+        let mut mem = vec![0; memory.size() as usize];
+        memory.read(GuestPhysAddr(0), &mut mem).unwrap();
 
         let dump = DumbDump {
-            vcpus: vec![x86_64::Vcpu {
-                registers: vcpu.registers,
-                special_registers: vcpu.special_registers,
-            }],
+            vcpus: backend.vcpus().to_vec(),
             mem,
         };
         Ok(dump)

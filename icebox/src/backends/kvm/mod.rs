@@ -178,7 +178,7 @@ fn get_dlerror(
 }
 
 #[allow(clippy::fn_to_numeric_cast, clippy::unnecessary_cast)]
-fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
+fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     let our_libdl = find_lib(std::process::id() as _, "libdl-2").context("our libdl")?;
     let their_libdl = find_lib(pid, "libdl-2").context("their libdl")?;
     let their_dlopen = their_libdl + (libc::dlopen as u64 - our_libdl);
@@ -268,9 +268,13 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
         anyhow::bail!("dlsym failed: {}", err);
     }
 
-    // payload
+    // payload(fds)
+    tracee.poke_data(mmap_addr, bytemuck::cast_slice(fds))?;
+
     new_regs.rip = (rip as u64) + 2;
     new_regs.rax = payload;
+    new_regs.rdi = mmap_addr as u64;
+    new_regs.rsi = fds.len() as u64;
     tracee.set_registers(&new_regs).context("set regs3")?;
     tracee.restart().context("continue 2")?;
 
@@ -280,8 +284,6 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     tracee.set_registers(&old_regs)?;
     tracee.continu()?;
 
-    dbg!(new_regs.rax);
-
     if new_regs.rax != 0 {
         let err = io::Error::from_raw_os_error(new_regs.rax as _);
         bail!("Payload failed: {}", err);
@@ -290,28 +292,62 @@ fn attach(pid: libc::pid_t, _fds: &[i32]) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
+fn get_vcpus_fds(pid: libc::pid_t) -> anyhow::Result<Vec<i32>> {
+    fn read_one(entry: io::Result<fs::DirEntry>) -> Option<i32> {
+        let (path, fd_name) = entry
+            .and_then(|entry| {
+                let path = entry.path();
+                let fd_name = path.read_link()?;
+                Ok((path, fd_name))
+            })
+            .map_err(|e| log::warn!("Failed to read fd: {}", e))
+            .ok()?;
+
+        let fd_name = fd_name.to_str()?;
+
+        // KVM vCPUs fds look like "anon_inode:kvm-vcpu:1"
+        if fd_name.starts_with("anon_inode:kvm-vcpu:") {
+            let num = path.file_name()?.to_str()?;
+            return num.parse().ok();
+        }
+
+        None
+    }
+
+    let fds = fs::read_dir(format!("/proc/{}/fd", pid))?
+        .flat_map(read_one)
+        .collect();
+    Ok(fds)
+}
+
+fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
+    let fds = get_vcpus_fds(pid)?;
+    let n_fds = fds.len();
+
     let socket_path = "/tmp/get_fds";
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path).context("bind").unwrap();
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777)).unwrap();
 
     let handle = std::thread::spawn(move || -> anyhow::Result<_> {
-        const REGISTER_SIZE: usize = mem::size_of::<x86_64::Registers>();
+        let mut registers = bytemuck::Zeroable::zeroed();
+        let mut special_registers = bytemuck::Zeroable::zeroed();
+
         let (mut socket, _) = listener.accept().context("accept")?;
-        let mut regs = [0; REGISTER_SIZE + mem::size_of::<x86_64::SpecialRegisters>()];
 
-        socket.read_exact(&mut regs)?;
-        let registers = *bytemuck::from_bytes(&regs[..REGISTER_SIZE]);
-        let special_registers = *bytemuck::from_bytes(&regs[REGISTER_SIZE..]);
-
-        Ok(vec![x86_64::Vcpu {
-            registers,
-            special_registers,
-        }])
+        (0..n_fds)
+            .map(|_| {
+                socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
+                socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
+                Ok(x86_64::Vcpu {
+                    registers,
+                    special_registers,
+                })
+            })
+            .collect()
     });
 
-    attach(pid, &[]).unwrap();
+    attach(pid, &fds).unwrap();
     println!("Payload succeded");
 
     let regs = handle.join().unwrap()?;
