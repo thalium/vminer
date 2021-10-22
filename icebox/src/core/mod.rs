@@ -10,6 +10,11 @@ pub use backend::Backend;
 mod error;
 pub use error::{Error, MemoryAccessError, MemoryAccessResult};
 
+mod mem;
+#[cfg(feature = "std")]
+pub use mem::File;
+pub use mem::Memory;
+
 mod os;
 pub use os::Os;
 

@@ -87,7 +87,7 @@ impl ice::Os for Linux {
 
         let sregs = (&backend.vcpus()[0] as &dyn core::any::Any)
             .downcast_ref::<ice::arch::x86_64::Vcpu>()
-            .ok_or_else(|| todo!())?
+            .expect("TODO")
             .special_registers;
         let mmu_addr = GuestPhysAddr(sregs.cr3);
 

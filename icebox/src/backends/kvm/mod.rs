@@ -7,9 +7,7 @@ use std::{
     ptr,
 };
 
-use crate::core::{
-    self as ice, arch::x86_64, Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult,
-};
+use crate::core::{self as ice, arch::x86_64, Backend};
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
@@ -321,9 +319,7 @@ pub fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
 }
 
 pub struct Kvm {
-    mem: fs::File,
-    mem_offset: u64,
-    mem_size: u64,
+    mem: ice::File,
     vcpus: Vec<x86_64::Vcpu>,
 }
 
@@ -343,8 +339,8 @@ impl Kvm {
                     let i = line.find('-')?;
                     let (start_addr, line) = line.split_at(i);
                     let start_addr = u64::from_str_radix(start_addr, 16).ok()?;
-
                     let i = line.find(' ')?;
+
                     let (end_addr, line) = line.split_at(i);
                     let end_addr = u64::from_str_radix(&end_addr[1..], 16).ok()?;
 
@@ -367,33 +363,25 @@ impl Kvm {
         };
 
         // Map VM memory in our address space
-        let mem = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(format!("/proc/{}/mem", pid))?;
-
+        let mem = ice::File::open(
+            format!("/proc/{}/mem", pid),
+            mem_offset,
+            mem_offset + mem_size,
+        )?;
         let vcpus = get_regs(pid)?;
 
-        Ok(Kvm {
-            mem,
-            mem_offset,
-            mem_size,
-            vcpus,
-        })
+        Ok(Kvm { mem, vcpus })
     }
 }
 
 impl Backend<ice::arch::X86_64> for Kvm {
+    type Memory = ice::File;
+
     fn vcpus(&self) -> &[x86_64::Vcpu] {
         &self.vcpus
     }
 
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        if addr.0 + buf.len() as u64 > self.mem_size {
-            return Err(MemoryAccessError::OutOfBounds);
-        }
-        self.mem
-            .read_exact_at(buf, self.mem_offset + addr.0)
-            .map_err(|e| MemoryAccessError::Io(e.into()))
+    fn memory(&self) -> &Self::Memory {
+        &self.mem
     }
 }

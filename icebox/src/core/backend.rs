@@ -1,9 +1,15 @@
-use super::{mask, Architecture, GuestPhysAddr, GuestVirtAddr, MemoryAccessResult, MmPte};
+use super::{mask, Architecture, GuestPhysAddr, GuestVirtAddr, Memory, MemoryAccessResult, MmPte};
 
 pub trait Backend<Arch: Architecture> {
+    type Memory: Memory;
+
     fn vcpus(&self) -> &[Arch::Vcpu];
 
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
+    fn memory(&self) -> &Self::Memory;
+
+    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        self.memory().read(addr, buf)
+    }
 
     fn virtual_to_physical(
         &self,

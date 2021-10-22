@@ -1,23 +1,16 @@
+use crate::core::{
+    self as ice,
+    arch::{self, x86_64},
+    Backend, GuestPhysAddr,
+};
 use std::{
     fs,
     io::{self, Read, Seek, Write},
     mem,
     path::Path,
 };
-use sync_file::{ReadAt, SyncFile};
 
-use crate::core::{
-    self as ice,
-    arch::{self, x86_64},
-    Backend, GuestPhysAddr, MemoryAccessError, MemoryAccessResult,
-};
-
-pub enum Mem {
-    Bytes(Vec<u8>),
-    File(SyncFile),
-}
-
-pub struct DumbDump {
+pub struct DumbDump<Mem> {
     vcpus: Vec<arch::x86_64::Vcpu>,
     mem: Mem,
 }
@@ -25,9 +18,9 @@ pub struct DumbDump {
 const MEM_OFFSET: u64 =
     (mem::size_of::<x86_64::Registers>() + mem::size_of::<x86_64::SpecialRegisters>()) as _;
 
-impl DumbDump {
+impl DumbDump<ice::File> {
     pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let mut f = SyncFile::open(path)?;
+        let mut f = fs::File::open(path)?;
 
         let mut buf = [0; mem::size_of::<x86_64::Registers>()];
         f.read_exact(&mut buf)?;
@@ -37,36 +30,39 @@ impl DumbDump {
         f.read_exact(&mut buf)?;
         let special_registers = *bytemuck::from_bytes(&buf);
 
-        let mem = Mem::File(f);
+        let end = f.seek(io::SeekFrom::End(0))?;
+
         Ok(DumbDump {
             vcpus: vec![x86_64::Vcpu {
                 registers,
                 special_registers,
             }],
-            mem,
+            mem: ice::File::new(f, MEM_OFFSET, end),
         })
     }
+}
 
+impl<Mem: ice::Memory> DumbDump<Mem> {
     pub fn write<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let mut out = fs::File::create(path)?;
 
-        match &self.mem {
-            Mem::Bytes(b) => {
-                out.write_all(bytemuck::bytes_of(&self.vcpus[0].registers))?;
-                out.write_all(bytemuck::bytes_of(&self.vcpus[0].special_registers))?;
-                out.write_all(b)?;
-            }
-            Mem::File(f) => {
-                let mut f = f.clone();
-                f.rewind()?;
-                io::copy(&mut f, &mut out)?;
-            }
+        out.write_all(bytemuck::bytes_of(&self.vcpus[0].registers))?;
+        out.write_all(bytemuck::bytes_of(&self.vcpus[0].special_registers))?;
+
+        let size = self.mem.size();
+        let mut buf = [0; 4096];
+
+        for addr in (0..size).step_by(buf.len() as _) {
+            self.mem.read(GuestPhysAddr(addr), &mut buf)?;
+            out.write_all(&buf)?;
         }
 
         Ok(())
     }
+}
 
-    pub fn dump_vm<B: Backend<arch::X86_64>>(backend: &B) -> io::Result<DumbDump> {
+impl DumbDump<Vec<u8>> {
+    pub fn dump_vm<B: Backend<arch::X86_64>>(backend: &B) -> io::Result<Self> {
         let mut mem = vec![0; 2 << 30];
         backend.read_memory(GuestPhysAddr(0), &mut mem).unwrap();
 
@@ -77,32 +73,20 @@ impl DumbDump {
                 registers: vcpu.registers,
                 special_registers: vcpu.special_registers,
             }],
-            mem: Mem::Bytes(mem),
+            mem,
         };
         Ok(dump)
     }
 }
 
-impl Backend<ice::arch::X86_64> for DumbDump {
+impl<Mem: ice::Memory> Backend<ice::arch::X86_64> for DumbDump<Mem> {
+    type Memory = Mem;
+
     fn vcpus(&self) -> &[x86_64::Vcpu] {
         &self.vcpus
     }
 
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        match &self.mem {
-            Mem::Bytes(mem) => {
-                let start = addr.0 as usize;
-                match mem.get(start..start + buf.len()) {
-                    Some(mem) => {
-                        buf.copy_from_slice(mem);
-                        Ok(())
-                    }
-                    None => Err(MemoryAccessError::OutOfBounds),
-                }
-            }
-            Mem::File(f) => f
-                .read_exact_at(buf, addr.0 + MEM_OFFSET)
-                .map_err(|e| MemoryAccessError::Io(e.into())),
-        }
+    fn memory(&self) -> &Self::Memory {
+        &self.mem
     }
 }
