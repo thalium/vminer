@@ -1,5 +1,6 @@
 use super::mask;
 use core::ops::Sub;
+use core::ops::SubAssign;
 use core::{fmt, ops::Add};
 
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -26,7 +27,7 @@ impl Add<u64> for GuestPhysAddr {
     }
 }
 
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
 pub struct GuestVirtAddr(pub u64);
 
@@ -78,11 +79,31 @@ impl Add<u64> for GuestVirtAddr {
     }
 }
 
+impl Add<i64> for GuestVirtAddr {
+    type Output = GuestVirtAddr;
+
+    fn add(self, rhs: i64) -> Self::Output {
+        let (res, o) = self.0.overflowing_add(rhs as u64);
+
+        if cfg!(debug_assertions) && (o ^ (rhs < 0)) {
+            panic!("attempt to add with overflow");
+        }
+
+        Self(res)
+    }
+}
+
 impl Sub<GuestVirtAddr> for GuestVirtAddr {
     type Output = u64;
 
     fn sub(self, rhs: GuestVirtAddr) -> u64 {
         self.0 - rhs.0
+    }
+}
+
+impl SubAssign<u64> for GuestVirtAddr {
+    fn sub_assign(&mut self, rhs: u64) {
+        self.0 -= rhs;
     }
 }
 

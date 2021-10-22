@@ -2,7 +2,7 @@ use super::{Architecture, RuntimeArchitecture};
 
 use bytemuck::{Pod, Zeroable};
 
-pub enum Aarch64 {}
+pub struct Aarch64;
 
 impl Architecture for Aarch64 {
     type Registers = Registers;

@@ -25,5 +25,7 @@ fn main() {
     profile.read_object_file("../elf");
 
     let linux = os::linux::Linux::create(profile);
-    linux.read_current_task(&vm).unwrap();
+    let kaslr = dbg!(linux.get_aslr(&vm).unwrap());
+    linux.read_all_tasks(&vm, kaslr).unwrap();
+    //linux.read_current_task(&vm).unwrap();
 }

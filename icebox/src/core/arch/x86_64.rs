@@ -2,7 +2,7 @@ use super::{Architecture, RuntimeArchitecture};
 
 use bytemuck::{Pod, Zeroable};
 
-pub enum X86_64 {}
+pub struct X86_64;
 
 impl Architecture for X86_64 {
     type Registers = Registers;

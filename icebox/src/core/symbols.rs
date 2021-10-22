@@ -25,10 +25,17 @@ impl OwnedStruct {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Struct<'a> {
     pub name: &'a str,
     pub fields: &'a [StructField],
+}
+
+impl<'a> Struct<'a> {
+    pub fn find_offset(&self, field_name: &str) -> Option<u64> {
+        let field = self.fields.iter().find(|field| field.name == field_name)?;
+        Some(field.offset)
+    }
 }
 
 #[derive(Debug, Default)]

@@ -21,7 +21,7 @@ impl Profile {
         let current_task = syms.get_addr("current_task").unwrap();
 
         Profile {
-            syms: ice::SymbolsIndexer::new(),
+            syms,
             fast_syms: FastSymbols {
                 per_cpu_start,
                 current_task,
@@ -66,7 +66,7 @@ pub fn parse_kallsyms<R: std::io::BufRead>(
             let addr = u64::from_str_radix(&start[0..16], 16).ok()?;
 
             match start.as_bytes()[17] {
-                b'T' | b't' | b'A' => (),
+                b'T' | b't' | b'A' | b'D' => (),
                 _ => return None,
             }
 
