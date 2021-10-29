@@ -62,7 +62,7 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
 }
 
 impl DumbDump<Vec<u8>> {
-    pub fn dump_vm<B: Backend<arch::X86_64>>(backend: &B) -> io::Result<Self> {
+    pub fn dump_vm<B: Backend<Arch = arch::X86_64>>(backend: &B) -> io::Result<Self> {
         let memory = backend.memory();
         let mut mem = vec![0; memory.size() as usize];
         memory.read(GuestPhysAddr(0), &mut mem).unwrap();
@@ -75,7 +75,8 @@ impl DumbDump<Vec<u8>> {
     }
 }
 
-impl<Mem: ice::Memory> Backend<ice::arch::X86_64> for DumbDump<Mem> {
+impl<Mem: ice::Memory> Backend for DumbDump<Mem> {
+    type Arch = ice::arch::X86_64;
     type Memory = Mem;
 
     fn vcpus(&self) -> &[x86_64::Vcpu] {

@@ -9,7 +9,7 @@ pub struct Linux {
     profile: Profile,
 }
 
-fn per_cpu<B: ice::Backend<ice::arch::X86_64>>(backend: &B, cpuid: usize) -> GuestVirtAddr {
+fn per_cpu<B: ice::Backend<Arch = ice::arch::X86_64>>(backend: &B, cpuid: usize) -> GuestVirtAddr {
     let sregs = &backend.vcpus()[cpuid].special_registers;
 
     let per_cpu = GuestVirtAddr(sregs.gs.base);
@@ -27,7 +27,7 @@ impl Linux {
         Linux { profile }
     }
 
-    pub fn get_aslr<B: ice::Backend<ice::arch::X86_64>>(
+    pub fn get_aslr<B: ice::Backend<Arch = ice::arch::X86_64>>(
         &self,
         backend: &B,
     ) -> ice::MemoryAccessResult<i64> {
@@ -39,7 +39,7 @@ impl Linux {
     }
 
     #[cfg(feature = "std")]
-    pub fn read_all_tasks<B: ice::Backend<ice::arch::X86_64>>(
+    pub fn read_all_tasks<B: ice::Backend<Arch = ice::arch::X86_64>>(
         &self,
         backend: &B,
         kaslr: i64,
@@ -97,7 +97,7 @@ impl Linux {
     }
 
     #[cfg(feature = "std")]
-    pub fn read_current_task<B: ice::Backend<ice::arch::X86_64>>(
+    pub fn read_current_task<B: ice::Backend<Arch = ice::arch::X86_64>>(
         &self,
         backend: &B,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -144,7 +144,7 @@ impl Linux {
     }
 }
 
-fn get_banner_addr<Arch: ice::Architecture, B: ice::Backend<Arch>>(
+fn get_banner_addr<B: ice::Backend>(
     backend: &B,
     mmu_addr: GuestPhysAddr,
 ) -> ice::MemoryAccessResult<Option<(GuestVirtAddr, GuestPhysAddr)>> {
@@ -173,9 +173,7 @@ fn get_banner_addr<Arch: ice::Architecture, B: ice::Backend<Arch>>(
 }
 
 impl ice::Os for Linux {
-    fn quick_check<Arch: ice::Architecture, B: ice::Backend<Arch>>(
-        backend: &B,
-    ) -> ice::MemoryAccessResult<bool> {
+    fn quick_check<B: ice::Backend>(backend: &B) -> ice::MemoryAccessResult<bool> {
         let sregs = (&backend.vcpus()[0] as &dyn core::any::Any)
             .downcast_ref::<ice::arch::x86_64::Vcpu>()
             .expect("TODO")

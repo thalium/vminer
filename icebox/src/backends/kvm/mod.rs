@@ -410,7 +410,8 @@ impl Kvm {
     }
 }
 
-impl Backend<ice::arch::X86_64> for Kvm {
+impl Backend for Kvm {
+    type Arch = ice::arch::X86_64;
     type Memory = ice::File;
 
     fn vcpus(&self) -> &[x86_64::Vcpu] {

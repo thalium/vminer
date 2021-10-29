@@ -1,9 +1,10 @@
 use super::{mask, Architecture, GuestPhysAddr, GuestVirtAddr, Memory, MemoryAccessResult, MmPte};
 
-pub trait Backend<Arch: Architecture> {
+pub trait Backend {
+    type Arch: Architecture;
     type Memory: Memory;
 
-    fn vcpus(&self) -> &[Arch::Vcpu];
+    fn vcpus(&self) -> &[<Self::Arch as Architecture>::Vcpu];
 
     fn memory(&self) -> &Self::Memory;
 
