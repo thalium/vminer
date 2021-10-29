@@ -1,9 +1,12 @@
-extern crate alloc;
-
 pub mod profile;
 pub use profile::Profile;
 
 use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr};
+use core::str;
+use alloc::string::String;
+
+#[derive(Debug, Clone, Copy)]
+pub struct Process(GuestPhysAddr);
 
 pub struct Linux {
     profile: Profile,
@@ -13,7 +16,7 @@ fn per_cpu<B: ice::Backend<Arch = ice::arch::X86_64>>(backend: &B, cpuid: usize)
     let sregs = &backend.vcpus()[cpuid].special_registers;
 
     let per_cpu = GuestVirtAddr(sregs.gs.base);
-    assert!(per_cpu.0 > 0x7fffffffffffffff);
+    assert!(Linux::is_kernel_addr(per_cpu));
 
     per_cpu
 }
@@ -50,7 +53,7 @@ impl Linux {
         let list_head = self.profile.syms.get_struct("list_head").unwrap();
         let init_task = self.profile.syms.get_addr("init_task").unwrap() + kaslr;
 
-        let next_offset = list_head.find_offset("prev").unwrap();
+        let next_offset = list_head.find_offset("next").unwrap();
         let tasks_offset = task_struct.find_offset("tasks").unwrap();
         let comm_offset = task_struct.find_offset("comm").unwrap();
         let pid_offset = task_struct.find_offset("pid").unwrap();
@@ -100,11 +103,12 @@ impl Linux {
     pub fn read_current_task<B: ice::Backend<Arch = ice::arch::X86_64>>(
         &self,
         backend: &B,
+        cpuid: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let sregs = &backend.vcpus()[0].special_registers;
+        let sregs = &backend.vcpus()[cpuid].special_registers;
         let mmu_addr = GuestPhysAddr(sregs.cr3);
 
-        let current_task = per_cpu(backend, 0)
+        let current_task = per_cpu(backend, cpuid)
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
         let current_task = backend
             .virtual_to_physical(mmu_addr, current_task)?
@@ -140,6 +144,87 @@ impl Linux {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn current_process<B: ice::Backend<Arch = ice::arch::X86_64>>(
+        &self,
+        backend: &B,
+        cpuid: usize,
+    ) -> ice::MemoryAccessResult<Process> {
+        let sregs = &backend.vcpus()[cpuid].special_registers;
+        let mmu_addr = GuestPhysAddr(sregs.cr3);
+
+        let current_task = per_cpu(backend, cpuid)
+            + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
+        let current_task = backend
+            .virtual_to_physical(mmu_addr, current_task)?
+            .unwrap();
+
+        let mut addr = GuestVirtAddr(0);
+        backend.read_memory(current_task, bytemuck::bytes_of_mut(&mut addr))?;
+
+        Ok(Process(
+            backend.virtual_to_physical(mmu_addr, addr)?.unwrap(),
+        ))
+    }
+
+    pub fn read_process_id<B: ice::Backend>(
+        &self,
+        backend: &B,
+        proc: Process,
+    ) -> ice::MemoryAccessResult<u32> {
+        let mut pid = 0u32;
+        backend.read_memory(
+            proc.0 + self.profile.fast_offsets.task_struct_pid,
+            bytemuck::bytes_of_mut(&mut pid),
+        )?;
+        Ok(pid)
+    }
+
+    pub fn read_process_comm<B: ice::Backend>(
+        &self,
+        backend: &B,
+        proc: Process,
+        buf: &mut [u8],
+    ) -> ice::MemoryAccessResult<()> {
+        let buf = if buf.len() >= 16 { &mut buf[..16] } else { buf };
+        backend.read_memory(proc.0 + self.profile.fast_offsets.task_struct_comm, buf)?;
+        Ok(())
+    }
+
+    pub fn read_process_comm_to_string<B: ice::Backend>(
+        &self,
+        backend: &B,
+        proc: Process,
+    ) -> ice::MemoryAccessResult<String> {
+        let mut buf = [0; 16];
+        self.read_process_comm(backend, proc, &mut buf)?;
+
+        let buf = match buf.into_iter().enumerate().find(|(_, b)| *b == 0) {
+            Some((i, _)) => &buf[..i],
+            None => &buf,
+        };
+
+        Ok(String::from_utf8_lossy(buf).into_owned())
+    }
+
+    pub fn read_process_field<B: ice::Backend>(
+        &self,
+        backend: &B,
+        proc: Process,
+        field_name: &str,
+        buf: &mut [u8],
+    ) -> ice::MemoryAccessResult<()> {
+        let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
+        let (offset, size) = task_struct.find_offset_and_size(field_name).unwrap();
+        let size = size as usize;
+        let buf = if buf.len() >= size {
+            &mut buf[..size]
+        } else {
+            buf
+        };
+        backend.read_memory(proc.0 + offset, buf)?;
         Ok(())
     }
 }

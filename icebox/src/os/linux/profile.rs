@@ -3,16 +3,21 @@ extern crate alloc;
 use alloc::string::String;
 
 use crate::core as ice;
-use crate::symbols::dwarf;
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_start: ice::GuestVirtAddr,
     pub(crate) current_task: ice::GuestVirtAddr,
 }
 
+pub(super) struct FastOffsets {
+    pub(super) task_struct_pid: u64,
+    pub(super) task_struct_comm: u64,
+}
+
 pub struct Profile {
     pub(crate) syms: ice::SymbolsIndexer,
     pub(crate) fast_syms: FastSymbols,
+    pub(super) fast_offsets: FastOffsets,
 }
 
 impl Profile {
@@ -20,25 +25,21 @@ impl Profile {
         let per_cpu_start = syms.get_addr("__per_cpu_start").unwrap();
         let current_task = syms.get_addr("current_task").unwrap();
 
+        let task_struct = syms.get_struct("task_struct").unwrap();
+        let task_struct_pid = task_struct.find_offset("pid").unwrap();
+        let task_struct_comm = task_struct.find_offset("comm").unwrap();
+
         Profile {
             syms,
             fast_syms: FastSymbols {
                 per_cpu_start,
                 current_task,
             },
+            fast_offsets: FastOffsets {
+                task_struct_pid,
+                task_struct_comm,
+            },
         }
-    }
-
-    #[cfg(all(feature = "object", feature = "std"))]
-    pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) {
-        let content = std::fs::read(path).unwrap();
-        let obj = object::File::parse(&*content).unwrap();
-        self.read_object(&obj);
-    }
-
-    #[cfg(feature = "object")]
-    pub fn read_object(&mut self, obj: &object::File) {
-        dwarf::load_types(obj, &mut self.syms).unwrap()
     }
 }
 

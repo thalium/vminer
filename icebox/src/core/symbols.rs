@@ -19,6 +19,7 @@ pub struct OwnedStruct {
 impl OwnedStruct {
     fn borrow(&self) -> Struct {
         Struct {
+            size: self.size,
             name: &self.name,
             fields: &self.fields,
         }
@@ -27,6 +28,7 @@ impl OwnedStruct {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Struct<'a> {
+    pub size: u64,
     pub name: &'a str,
     pub fields: &'a [StructField],
 }
@@ -35,6 +37,19 @@ impl<'a> Struct<'a> {
     pub fn find_offset(&self, field_name: &str) -> Option<u64> {
         let field = self.fields.iter().find(|field| field.name == field_name)?;
         Some(field.offset)
+    }
+
+    pub fn find_offset_and_size(&self, field_name: &str) -> Option<(u64, u64)> {
+        let (i, field) = self
+            .fields
+            .iter()
+            .enumerate()
+            .find(|&(_, field)| field.name == field_name)?;
+        let size = self
+            .fields
+            .get(i + 1)
+            .map_or(self.size, |f| f.offset - field.offset);
+        Some((field.offset, size))
     }
 }
 
@@ -66,6 +81,18 @@ impl SymbolsIndexer {
 
     pub fn insert_addr(&mut self, name: String, addr: GuestVirtAddr) {
         self.addresses.insert(name, addr);
+    }
+
+    #[cfg(all(feature = "object", feature = "std"))]
+    pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) {
+        let content = std::fs::read(path).unwrap();
+        let obj = object::File::parse(&*content).unwrap();
+        self.read_object(&obj);
+    }
+
+    #[cfg(feature = "object")]
+    pub fn read_object(&mut self, obj: &object::File) {
+        crate::symbols::dwarf::load_types(obj, self).unwrap()
     }
 }
 
