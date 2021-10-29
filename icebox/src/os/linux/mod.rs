@@ -1,9 +1,9 @@
 pub mod profile;
 pub use profile::Profile;
 
-use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr};
-use core::str;
+use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr, MemoryAccessResult};
 use alloc::string::String;
+use core::str;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Process(GuestPhysAddr);
@@ -13,12 +13,33 @@ pub struct Linux {
 }
 
 fn per_cpu<B: ice::Backend<Arch = ice::arch::X86_64>>(backend: &B, cpuid: usize) -> GuestVirtAddr {
-    let sregs = &backend.vcpus()[cpuid].special_registers;
+    let cpu = &backend.vcpus()[cpuid];
 
-    let per_cpu = GuestVirtAddr(sregs.gs.base);
-    assert!(Linux::is_kernel_addr(per_cpu));
+    let mut per_cpu = GuestVirtAddr(cpu.special_registers.gs.base);
+    if !Linux::is_kernel_addr(per_cpu) {
+        per_cpu = GuestVirtAddr(cpu.gs_kernel_base);
+        assert!(Linux::is_kernel_addr(per_cpu));
+    }
 
     per_cpu
+}
+
+pub fn kernel_page_dir<B: ice::Backend<Arch = ice::arch::X86_64>>(
+    backend: &B,
+    profile: &Profile,
+) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+    let addr =
+        per_cpu(backend, 0) + (profile.fast_syms.current_task - profile.fast_syms.per_cpu_start);
+
+    for vcpu in backend.vcpus() {
+        let cr3 = GuestPhysAddr(vcpu.special_registers.cr3);
+
+        if backend.virtual_to_physical(cr3, addr)?.is_some() {
+            return Ok(Some(cr3));
+        }
+    }
+
+    Ok(None)
 }
 
 impl Linux {
@@ -152,8 +173,7 @@ impl Linux {
         backend: &B,
         cpuid: usize,
     ) -> ice::MemoryAccessResult<Process> {
-        let sregs = &backend.vcpus()[cpuid].special_registers;
-        let mmu_addr = GuestPhysAddr(sregs.cr3);
+        let mmu_addr = kernel_page_dir(backend, &self.profile)?.unwrap();
 
         let current_task = per_cpu(backend, cpuid)
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);

@@ -18,6 +18,7 @@ impl Architecture for X86_64 {
 pub struct Vcpu {
     pub registers: Registers,
     pub special_registers: SpecialRegisters,
+    pub gs_kernel_base: u64,
 }
 
 impl super::Vcpu for Vcpu {

@@ -12,6 +12,7 @@ macro_rules! check {
 
 pub const KVM_GET_REGS: u64 = 2156965505;
 pub const KVM_GET_SREGS: u64 = 2167975555;
+pub const KVM_GET_MSRS: u64 = 3221794440;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -101,4 +102,33 @@ pub fn get_sregs(vcpu_fd: i32) -> io::Result<kvm_sregs> {
         check!(libc::ioctl(vcpu_fd, KVM_GET_SREGS, sregs.as_mut_ptr()))?;
         Ok(sregs.assume_init())
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+struct kvm_msrs {
+    nmsrs: u32,
+    pad: u32,
+
+    entries: [kvm_msr_entry; 1],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+struct kvm_msr_entry {
+    index: u32,
+    reserved: u32,
+    data: u64,
+}
+
+pub fn get_kernel_gs_base(vcpu_fd: i32) -> io::Result<u64> {
+    let mut msrs = kvm_msrs::zeroed();
+    msrs.nmsrs = 1;
+    msrs.entries[0].index = 0xC0000102;
+
+    unsafe {
+        check!(libc::ioctl(vcpu_fd, KVM_GET_MSRS, &mut msrs))?;
+    }
+
+    Ok(msrs.entries[0].data)
 }

@@ -36,6 +36,7 @@ impl DumbDump<ice::File> {
             vcpus: vec![x86_64::Vcpu {
                 registers,
                 special_registers,
+                gs_kernel_base: 0,
             }],
             mem: ice::File::new(f, MEM_OFFSET, end),
         })

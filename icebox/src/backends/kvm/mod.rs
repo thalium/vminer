@@ -332,6 +332,7 @@ fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
     let handle = std::thread::spawn(move || -> anyhow::Result<_> {
         let mut registers = bytemuck::Zeroable::zeroed();
         let mut special_registers = bytemuck::Zeroable::zeroed();
+        let mut gs_kernel_base = 0;
 
         let (mut socket, _) = listener.accept().context("accept")?;
 
@@ -339,9 +340,11 @@ fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
             .map(|_| {
                 socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
                 socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
+                socket.read_exact(bytemuck::bytes_of_mut(&mut gs_kernel_base))?;
                 Ok(x86_64::Vcpu {
                     registers,
                     special_registers,
+                    gs_kernel_base,
                 })
             })
             .collect()
