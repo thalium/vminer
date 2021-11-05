@@ -251,6 +251,25 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
         })
     }
 
+    fn read_union(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<LazyStruct> {
+        let entry = self.entry();
+        let size = entry.try_read::<DwAtByteSize>()?.unwrap_or(0);
+
+        let mut fields = Vec::new();
+
+        let mut children = self.0.children();
+        while let Some(node) = children.next()? {
+            let node = DwarfNode(node);
+            let (name, ty) = node.entry().read_union_member(debug_str)?;
+            fields.push((0, name, ty));
+        }
+
+        Ok(LazyStruct {
+            size,
+            fields: fields.into(),
+        })
+    }
+
     fn read_type(
         self,
         debug_str: &DebugStr<R>,
@@ -270,6 +289,7 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
                 DwarfType::Ptr(typ)
             }
             gimli::DW_TAG_structure_type => DwarfType::Struct(self.read_struct(debug_str)?),
+            gimli::DW_TAG_union_type => DwarfType::Union(self.read_union(debug_str)?),
             _ => return Ok(None),
         };
 
@@ -348,6 +368,16 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
 
         Ok((offset, name, typ))
     }
+
+    fn read_union_member(
+        self,
+        debug_str: &gimli::DebugStr<R>,
+    ) -> ResolveTypeResult<(Option<String>, LazyType)> {
+        let name = self.try_read_name(debug_str)?;
+        let typ = LazyType::unresolved(self.read::<DwAtType>()?);
+
+        Ok((name, typ))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -367,6 +397,7 @@ enum DwarfType {
     Base(BaseType),
     Ptr(Option<Rc<LazyType>>),
     Struct(LazyStruct),
+    Union(LazyStruct),
 }
 
 impl DwarfType {
@@ -374,7 +405,9 @@ impl DwarfType {
         match self {
             DwarfType::Base(_) => true,
             DwarfType::Ptr(ty) => ty.as_ref().map_or(true, |ty| ty.is_resolved()),
-            DwarfType::Struct(ty) => ty.fields.iter().all(|(_, _, ty)| ty.is_resolved()),
+            DwarfType::Struct(ty) | DwarfType::Union(ty) => {
+                ty.fields.iter().all(|(_, _, ty)| ty.is_resolved())
+            }
         }
     }
 }
@@ -585,7 +618,7 @@ fn fill<R: GimliReader>(
                                 );
                                 ty.with_inner(|inner| match inner {
                                     LazyTypeInner::Unresolved(_) => {
-                                        log::debug!(
+                                        log::warn!(
                                             "Could not resolve anymous field of struct {}",
                                             entry.name.as_deref().unwrap_or("<anonymous>")
                                         );
@@ -595,7 +628,10 @@ fn fill<R: GimliReader>(
                                             .extend(fields.iter().map(|(o, name, ty)| {
                                                 (offset + o, name.clone(), ty.clone())
                                             })),
-                                        _ => log::debug!("Anymous field is not a struct"),
+                                        DwarfType::Union(_) => (), // TODO
+                                        _ => {
+                                            log::warn!("Anymous field is not a struct nor an union")
+                                        }
                                     },
                                 });
                             }
