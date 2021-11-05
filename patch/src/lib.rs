@@ -9,8 +9,9 @@ use std::{
 mod kvm;
 
 #[no_mangle]
-pub extern "C" fn payload(vcpus: *const i32, n: usize) -> libc::c_int {
-    let vcpus = unsafe { slice::from_raw_parts(vcpus, n) };
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn payload(vcpus: *const i32, n: usize) -> libc::c_int {
+    let vcpus = slice::from_raw_parts(vcpus, n);
     match send_fds(vcpus) {
         Ok(()) => 0,
         Err(e) => e.raw_os_error().unwrap_or(777),
@@ -18,11 +19,7 @@ pub extern "C" fn payload(vcpus: *const i32, n: usize) -> libc::c_int {
 }
 
 fn send_fds(vcpus: &[i32]) -> io::Result<()> {
-    let mut socket = match UnixStream::connect("/tmp/get_fds") {
-        Ok(s) => s,
-        Err(ref e) if e.raw_os_error() == Some(2) => return Err(io::Error::from_raw_os_error(753)),
-        Err(e) => return Err(e),
-    };
+    let mut socket = UnixStream::connect("/tmp/get_fds")?;
 
     for &vcpu in vcpus {
         let regs = kvm::get_regs(vcpu)?;
