@@ -6,7 +6,7 @@ use core::{cell::Cell, fmt};
 use gimli::{DebugStr, UnitOffset};
 use hashbrown::HashMap;
 
-use crate::core as ice;
+use crate as ice;
 
 mod read;
 

@@ -1,4 +1,4 @@
-use crate::core::arch;
+use crate::arch;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Architecture {

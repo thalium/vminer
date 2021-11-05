@@ -4,5 +4,6 @@ members = [
     "bin/check",
     "bin/kvm_dump_live",
     "icebox",
+    "icebox-core",
     "patch",
 ]

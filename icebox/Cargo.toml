@@ -5,21 +5,22 @@ edition = "2021"
 
 [features]
 default = ["all_os", "object"]
-std = ["gimli/std", "object/std"]
+std = ["ibc/std"]
+
+object = ["ibc/object"]
 
 all_os = ["linux"]
 linux = []
 
 kvm = ["std", "libc", "anyhow"]
-dump = ["std", "sync_file"]
+dump = ["std"]
 
 [dependencies]
+ibc = {package = "icebox-core", version = "0.1", path = "../icebox-core"}
+
 anyhow = {version = "1.0", optional = true}
 bytemuck = {version = "1.7", features = ["derive"]}
-gimli = {version = "0.26", default-features = false, features = ["read"]}
 hashbrown = "0.11"
 libc = {version = "0.2.94", optional = true}
 log = "0.4"
 memchr = {version = "2.4", default-features = false}
-object = {version = "0.27", default-features = false, features = ["read_core", "elf"], optional = true}
-sync_file = {version = "0.2", optional = true}

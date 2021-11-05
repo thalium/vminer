@@ -195,11 +195,21 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
- "gimli",
  "hashbrown",
+ "icebox-core",
  "libc",
  "log",
  "memchr",
+]
+
+[[package]]
+name = "icebox-core"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "gimli",
+ "hashbrown",
+ "log",
  "object",
  "sync_file",
 ]
