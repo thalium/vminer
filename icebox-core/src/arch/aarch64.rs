@@ -2,6 +2,7 @@ use super::{Architecture, RuntimeArchitecture};
 
 use bytemuck::{Pod, Zeroable};
 
+#[derive(Debug, Clone, Copy)]
 pub struct Aarch64;
 
 impl Architecture for Aarch64 {
@@ -10,7 +11,16 @@ impl Architecture for Aarch64 {
 
     #[inline]
     fn runtime_arch(&self) -> RuntimeArchitecture {
-        RuntimeArchitecture::Aarch64
+        RuntimeArchitecture::Aarch64(*self)
+    }
+
+    fn virtual_to_physical<M: crate::Memory + ?Sized>(
+        &self,
+        _memory: &M,
+        _mmu_addr: crate::GuestPhysAddr,
+        _addr: crate::GuestVirtAddr,
+    ) -> crate::MemoryAccessResult<Option<crate::GuestPhysAddr>> {
+        todo!()
     }
 }
 

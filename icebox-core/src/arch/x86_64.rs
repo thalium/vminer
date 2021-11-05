@@ -1,7 +1,10 @@
+use crate::GuestPhysAddr;
+
 use super::{Architecture, RuntimeArchitecture};
 
 use bytemuck::{Pod, Zeroable};
 
+#[derive(Debug, Clone, Copy)]
 pub struct X86_64;
 
 impl Architecture for X86_64 {
@@ -10,7 +13,54 @@ impl Architecture for X86_64 {
 
     #[inline]
     fn runtime_arch(&self) -> RuntimeArchitecture {
-        RuntimeArchitecture::X86_64
+        RuntimeArchitecture::X86_64(*self)
+    }
+
+    #[inline]
+    fn virtual_to_physical<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: GuestPhysAddr,
+        addr: crate::GuestVirtAddr,
+    ) -> crate::MemoryAccessResult<Option<crate::GuestPhysAddr>> {
+        let mut mmu_entry = crate::MmPte(0);
+
+        let pml4e_addr = GuestPhysAddr(mmu_addr.0 & (crate::mask(40) << 12)) + 8 * addr.pml4e();
+        memory.read(pml4e_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
+        if !mmu_entry.is_valid() {
+            return Ok(None);
+        }
+
+        let pdpe_addr = mmu_entry.page_frame() + 8 * addr.pdpe();
+        memory.read(pdpe_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
+        if !mmu_entry.is_valid() {
+            return Ok(None);
+        }
+
+        if mmu_entry.is_large() {
+            let phys_addr = mmu_entry.huge_page_frame() + addr.huge_page_offset();
+            return Ok(Some(phys_addr));
+        }
+
+        let pde_addr = mmu_entry.page_frame() + 8 * addr.pde();
+        memory.read(pde_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
+        if !mmu_entry.is_valid() {
+            return Ok(None);
+        }
+
+        if mmu_entry.is_large() {
+            let phys_addr = mmu_entry.large_page_frame() + addr.large_page_offset();
+            return Ok(Some(phys_addr));
+        }
+
+        let pte_addr = mmu_entry.page_frame() + 8 * addr.pte();
+        memory.read(pte_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
+        if !mmu_entry.is_valid() {
+            return Ok(None);
+        }
+
+        let phys_addr = mmu_entry.page_frame() + addr.page_offset();
+        Ok(Some(phys_addr))
     }
 }
 
