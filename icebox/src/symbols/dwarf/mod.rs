@@ -385,6 +385,12 @@ enum LazyTypeInner {
     Resolved(DwarfType),
 }
 
+impl Default for LazyTypeInner {
+    fn default() -> Self {
+        Self::Unresolved(UnitOffset(0))
+    }
+}
+
 struct LazyType(Cell<LazyTypeInner>);
 
 impl LazyType {
@@ -397,8 +403,22 @@ impl LazyType {
     }
 
     fn with_inner<T>(&self, f: impl FnOnce(&LazyTypeInner) -> T) -> T {
-        let old = self.0.replace(LazyTypeInner::Unresolved(UnitOffset(0)));
+        let old = self.0.take();
         let res = f(&old);
+        self.0.set(old);
+        res
+    }
+
+    fn with_inner_resolved<T>(&self, f: impl FnOnce(&DwarfType) -> T) -> Option<T> {
+        self.with_inner(|inner| match inner {
+            LazyTypeInner::Resolved(ty) => Some(f(ty)),
+            LazyTypeInner::Unresolved(_) => None,
+        })
+    }
+
+    fn with_inner_mut<T>(&self, f: impl FnOnce(&mut LazyTypeInner) -> T) -> T {
+        let mut old = self.0.take();
+        let res = f(&mut old);
         self.0.set(old);
         res
     }
@@ -421,8 +441,12 @@ impl LazyType {
         }
     }
 
-    fn resolve(&self, f: impl FnOnce(UnitOffset) -> Option<DwarfType>, g: impl FnOnce(&DwarfType)) {
-        let res = self.with_inner(|ty| match ty {
+    fn resolve(
+        &self,
+        f: impl FnOnce(UnitOffset) -> Option<DwarfType>,
+        g: impl FnOnce(&mut DwarfType),
+    ) {
+        let res = self.with_inner_mut(|ty| match ty {
             LazyTypeInner::Unresolved(offset) => Some(f(*offset)),
             LazyTypeInner::Resolved(ty) => {
                 g(ty);
@@ -435,6 +459,13 @@ impl LazyType {
             Some(None) => (),
             None => (),
         }
+    }
+}
+
+impl Clone for LazyType {
+    fn clone(&self) -> Self {
+        let inner = self.with_inner(|inner| inner.clone());
+        Self(Cell::new(inner))
     }
 }
 
@@ -525,6 +556,57 @@ fn fill<R: GimliReader>(
 
     }
     */
+
+    for entry in &types {
+        entry.typ.resolve(
+            |_| None,
+            |typ| {
+                if let DwarfType::Struct(LazyStruct { fields, .. }) = typ {
+                    if fields.iter().all(|(_, name, _)| name.is_some()) {
+                        return;
+                    }
+
+                    let mut new_fields = Vec::with_capacity(fields.len());
+                    for (offset, name, ty) in fields.iter() {
+                        match name {
+                            Some(_) => new_fields.push((*offset, name.clone(), ty.clone())),
+                            None => {
+                                ty.resolve(
+                                    |unit_offset| {
+                                        let index = types
+                                            .binary_search_by_key(&unit_offset, |entry| {
+                                                entry.offset
+                                            })
+                                            .ok()?;
+                                        let inner_typ = types.get(index)?;
+                                        inner_typ.typ.clone().into_resolved()
+                                    },
+                                    |_| (),
+                                );
+                                ty.with_inner(|inner| match inner {
+                                    LazyTypeInner::Unresolved(_) => {
+                                        log::debug!(
+                                            "Could not resolve anymous field of struct {}",
+                                            entry.name.as_deref().unwrap_or("<anonymous>")
+                                        );
+                                    }
+                                    LazyTypeInner::Resolved(ty) => match ty {
+                                        DwarfType::Struct(LazyStruct { fields, .. }) => new_fields
+                                            .extend(fields.iter().map(|(o, name, ty)| {
+                                                (offset + o, name.clone(), ty.clone())
+                                            })),
+                                        _ => log::debug!("Anymous field is not a struct"),
+                                    },
+                                });
+                            }
+                        }
+                    }
+
+                    *fields = new_fields.into();
+                }
+            },
+        );
+    }
 
     symbols.extend(
         types

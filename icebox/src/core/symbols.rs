@@ -3,7 +3,7 @@ use hashbrown::HashMap;
 
 use super::GuestVirtAddr;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructField {
     pub name: String,
     pub offset: u64,
@@ -44,12 +44,17 @@ impl<'a> Struct<'a> {
             .fields
             .iter()
             .enumerate()
-            .find(|&(_, field)| field.name == field_name)?;
-        let size = self
-            .fields
-            .get(i + 1)
-            .map_or(self.size, |f| f.offset - field.offset);
+            .find(|(_, field)| field.name == field_name)?;
+        let size = self.fields.get(i + 1).map_or(self.size, |f| f.offset) - field.offset;
         Some((field.offset, size))
+    }
+
+    pub fn into_owned(&self) -> OwnedStruct {
+        OwnedStruct {
+            size: self.size,
+            name: self.name.to_owned(),
+            fields: self.fields.to_owned(),
+        }
     }
 }
 

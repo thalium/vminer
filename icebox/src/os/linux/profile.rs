@@ -10,8 +10,11 @@ pub(crate) struct FastSymbols {
 }
 
 pub(super) struct FastOffsets {
-    pub(super) task_struct_pid: u64,
+    pub(super) mm_struct_pgd: u64,
+    pub(super) task_struct_active_mm: u64,
     pub(super) task_struct_comm: u64,
+    pub(super) task_struct_mm: u64,
+    pub(super) task_struct_pid: u64,
 }
 
 pub struct Profile {
@@ -28,6 +31,12 @@ impl Profile {
         let task_struct = syms.get_struct("task_struct").unwrap();
         let task_struct_pid = task_struct.find_offset("pid").unwrap();
         let task_struct_comm = task_struct.find_offset("comm").unwrap();
+        let task_struct_mm = task_struct.find_offset("mm").unwrap();
+        let task_struct_active_mm = task_struct.find_offset("active_mm").unwrap();
+
+        let mm_struct = syms.get_struct("mm_struct").unwrap();
+        //dbg!(mm_struct);
+        let mm_struct_pgd = mm_struct.find_offset("pgd").unwrap();
 
         Profile {
             syms,
@@ -36,8 +45,11 @@ impl Profile {
                 current_task,
             },
             fast_offsets: FastOffsets {
-                task_struct_pid,
+                mm_struct_pgd,
+                task_struct_active_mm,
                 task_struct_comm,
+                task_struct_mm,
+                task_struct_pid,
             },
         }
     }

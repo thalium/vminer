@@ -33,6 +33,11 @@ pub struct GuestVirtAddr(pub u64);
 
 impl GuestVirtAddr {
     #[inline]
+    pub const fn is_null(self) -> bool {
+        self.0 == 0
+    }
+
+    #[inline]
     pub const fn pml4e(self) -> u64 {
         (self.0 >> 39) & mask(9)
     }

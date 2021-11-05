@@ -36,7 +36,9 @@ fn main() {
         let proc = linux.current_process(&vm, cpuid).unwrap();
         let pid = linux.read_process_id(&vm, proc).unwrap();
         let name = linux.read_process_comm_to_string(&vm, proc).unwrap();
-        println!("{}: {}", pid, name);
+        let cr3 = vm.vcpus()[cpuid].special_registers.cr3;
+        let pgd = linux.read_process_pgd(&vm, proc).unwrap();
+        println!("{}: {} ({:016x} -> {:016x})", pid, name, cr3, pgd);
     }
 
     // linux.read_current_task(&vm, 0).unwrap();
