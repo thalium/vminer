@@ -1,22 +1,21 @@
 use icebox::backends::kvm_dump;
-use icebox::core::Os;
 use icebox::core::{self as ice, Backend};
 use icebox::os;
 
 fn main() {
     env_logger::init();
 
-    let mut args = std::env::args();
-    let pid = args.nth(1).expect("missing pid");
-    let pid: i32 = pid.parse().unwrap();
-    let vm = icebox::backends::kvm::Kvm::connect(pid, 2 << 30).unwrap();
+    // let mut args = std::env::args();
+    // let pid = args.nth(1).expect("missing pid");
+    // let pid: i32 = pid.parse().unwrap();
+    // let vm = icebox::backends::kvm::Kvm::connect(pid, 2 << 30).unwrap();
+
+    let vm = kvm_dump::DumbDump::read("kvm.dump").unwrap();
 
     for vcpu in vm.vcpus() {
         println!("{:016x}", vcpu.special_registers.gs.base);
         println!("{:016x}", vcpu.gs_kernel_base);
     }
-
-    // let vm = kvm_dump::DumbDump::read("linux.dump").unwrap();
 
     //let addr = virtual_to_physical(&vm, GuestVirtAddr(vm.get_regs().rip)).unwrap();
     //let _ = dbg!(os::Linux::quick_check(&vm));
