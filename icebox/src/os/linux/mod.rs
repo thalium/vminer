@@ -41,7 +41,7 @@ pub fn kernel_page_dir<B: ice::Backend<Arch = ice::arch::X86_64>>(
         }
     }
 
-    Err("failed to find a valid cr3")?
+    Err("failed to find a valid cr3".into())
 }
 
 impl Linux {
