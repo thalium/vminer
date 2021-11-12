@@ -18,6 +18,19 @@ pub trait Memory {
         self.read(addr, bytemuck::bytes_of_mut(&mut val))?;
         Ok(val)
     }
+
+    #[cfg(feature = "std")]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        let mut buffer = [0; 1 << 16];
+        let size = self.size();
+
+        for addr in (0..size).step_by(buffer.len() as _) {
+            self.read(GuestPhysAddr(addr), &mut buffer)?;
+            writer.write_all(&buffer)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Memory for [u8] {
@@ -36,6 +49,12 @@ impl Memory for [u8] {
         })()
         .ok_or(MemoryAccessError::OutOfBounds)
     }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        writer.write_all(self)
+    }
 }
 
 impl Memory for alloc::vec::Vec<u8> {
@@ -47,6 +66,12 @@ impl Memory for alloc::vec::Vec<u8> {
     #[inline]
     fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        (**self).dump(writer)
     }
 }
 
@@ -60,6 +85,12 @@ impl<M: Memory + ?Sized> Memory for &'_ M {
     fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
     }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        (**self).dump(writer)
+    }
 }
 
 impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
@@ -71,6 +102,12 @@ impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
     #[inline]
     fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        (**self).dump(writer)
     }
 }
 

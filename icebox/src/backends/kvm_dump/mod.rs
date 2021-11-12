@@ -63,13 +63,7 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
             out.write_all(bytemuck::bytes_of(&vcpu.gs_kernel_base))?;
         }
 
-        let size = self.mem.size();
-        let mut buf = [0; 4096];
-
-        for addr in (0..size).step_by(buf.len() as _) {
-            self.mem.read(GuestPhysAddr(addr), &mut buf)?;
-            out.write_all(&buf)?;
-        }
+        self.mem.dump(&mut out)?;
 
         Ok(())
     }
