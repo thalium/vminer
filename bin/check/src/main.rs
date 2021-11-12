@@ -24,8 +24,8 @@ fn main() {
     let mut syms = ice::SymbolsIndexer::new();
     let kallsyms = std::io::BufReader::new(std::fs::File::open("../kallsyms").unwrap());
     os::linux::profile::parse_kallsyms(kallsyms, &mut syms).unwrap();
-    syms.read_object_file("../elf");
-    let profile = os::linux::Profile::new(syms);
+    syms.read_object_file("../elf").unwrap();
+    let profile = os::linux::Profile::new(syms).unwrap();
 
     let linux = os::Linux::create(profile);
     // let kaslr = dbg!(linux.get_aslr(&vm).unwrap());

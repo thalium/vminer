@@ -1,7 +1,9 @@
 pub mod profile;
 pub use profile::Profile;
 
-use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr, MemoryAccessResult};
+use ice::{IceResult, MemoryAccessResultExt};
+
+use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr};
 use alloc::string::String;
 use core::str;
 
@@ -27,7 +29,7 @@ fn per_cpu<B: ice::Backend<Arch = ice::arch::X86_64>>(backend: &B, cpuid: usize)
 pub fn kernel_page_dir<B: ice::Backend<Arch = ice::arch::X86_64>>(
     backend: &B,
     profile: &Profile,
-) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+) -> IceResult<GuestPhysAddr> {
     let addr =
         per_cpu(backend, 0) + (profile.fast_syms.current_task - profile.fast_syms.per_cpu_start);
 
@@ -35,11 +37,11 @@ pub fn kernel_page_dir<B: ice::Backend<Arch = ice::arch::X86_64>>(
         let cr3 = GuestPhysAddr(vcpu.special_registers.cr3);
 
         if backend.virtual_to_physical(cr3, addr)?.is_some() {
-            return Ok(Some(cr3));
+            return Ok(cr3);
         }
     }
 
-    Ok(None)
+    Err("failed to find a valid cr3")?
 }
 
 impl Linux {
@@ -54,10 +56,11 @@ impl Linux {
     pub fn get_aslr<B: ice::Backend<Arch = ice::arch::X86_64>>(
         &self,
         backend: &B,
-    ) -> ice::MemoryAccessResult<i64> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?.unwrap();
-        let base_banner_addr = self.profile.syms.get_addr("linux_banner").unwrap();
-        let (banner_addr, _) = get_banner_addr(backend, mmu_addr)?.unwrap();
+    ) -> IceResult<i64> {
+        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
+        let base_banner_addr = self.profile.syms.get_addr("linux_banner")?;
+        let (banner_addr, _) =
+            get_banner_addr(backend, mmu_addr)?.ok_or("could not find banner address")?;
 
         Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
     }
@@ -67,20 +70,20 @@ impl Linux {
         &self,
         backend: &B,
         kaslr: i64,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?.unwrap();
+    ) -> IceResult<()> {
+        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
 
-        let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
-        let list_head = self.profile.syms.get_struct("list_head").unwrap();
-        let init_task = self.profile.syms.get_addr("init_task").unwrap() + kaslr;
+        let task_struct = self.profile.syms.get_struct("task_struct")?;
+        let list_head = self.profile.syms.get_struct("list_head")?;
+        let init_task = self.profile.syms.get_addr("init_task")? + kaslr;
 
-        let next_offset = list_head.find_offset("next").unwrap();
-        let tasks_offset = task_struct.find_offset("tasks").unwrap();
+        let next_offset = list_head.find_offset("next")?;
+        let tasks_offset = task_struct.find_offset("tasks")?;
 
         // let mut init_task = per_cpu(backend, 0)
         //    + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
 
-        // let addr = backend.virtual_to_physical(mmu_addr, init_task)?.unwrap();
+        // let addr = backend.virtual_to_physical(mmu_addr, init_task).valid()?;
         // backend.read_memory(addr, bytemuck::bytes_of_mut(&mut init_task))?;
 
         let mut current_task = init_task;
@@ -88,8 +91,8 @@ impl Linux {
         let mut name = [0u8; 16];
         loop {
             let current_task_addr = backend
-                .virtual_to_physical(mmu_addr, current_task)?
-                .unwrap();
+                .virtual_to_physical(mmu_addr, current_task)
+                .valid()?;
 
             let proc = Process(current_task_addr);
             self.read_process_comm(backend, proc, &mut name)?;
@@ -117,19 +120,19 @@ impl Linux {
         &self,
         backend: &B,
         cpuid: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?.unwrap();
+    ) -> IceResult<()> {
+        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
 
         let current_task = per_cpu(backend, cpuid)
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
         let current_task = backend
-            .virtual_to_physical(mmu_addr, current_task)?
-            .unwrap();
+            .virtual_to_physical(mmu_addr, current_task)
+            .valid()?;
 
         let addr = backend.read_value(current_task)?;
 
-        let addr = backend.virtual_to_physical(mmu_addr, addr)?.unwrap();
-        let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
+        let addr = backend.virtual_to_physical(mmu_addr, addr).valid()?;
+        let task_struct = self.profile.syms.get_struct("task_struct")?;
 
         for win in task_struct.fields[..100].windows(2) {
             match win {
@@ -162,19 +165,19 @@ impl Linux {
         &self,
         backend: &B,
         cpuid: usize,
-    ) -> ice::MemoryAccessResult<Process> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?.unwrap();
+    ) -> IceResult<Process> {
+        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
 
         let current_task = per_cpu(backend, cpuid)
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
         let current_task = backend
-            .virtual_to_physical(mmu_addr, current_task)?
-            .unwrap();
+            .virtual_to_physical(mmu_addr, current_task)
+            .valid()?;
 
         let addr = backend.read_value(current_task)?;
 
         Ok(Process(
-            backend.virtual_to_physical(mmu_addr, addr)?.unwrap(),
+            backend.virtual_to_physical(mmu_addr, addr).valid()?,
         ))
     }
 
@@ -190,17 +193,17 @@ impl Linux {
         &self,
         backend: &B,
         proc: Process,
-    ) -> ice::MemoryAccessResult<GuestPhysAddr> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?.unwrap();
+    ) -> IceResult<GuestPhysAddr> {
+        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
         let fast_offsets = &self.profile.fast_offsets;
         let mut mm: GuestVirtAddr = backend.read_value(proc.0 + fast_offsets.task_struct_mm)?;
         if mm.is_null() {
             mm = backend.read_value(proc.0 + fast_offsets.task_struct_active_mm)?;
         }
 
-        let mm = backend.virtual_to_physical(mmu_addr, mm)?.unwrap();
+        let mm = backend.virtual_to_physical(mmu_addr, mm).valid()?;
         let pgd_ptr = backend.read_value(mm + fast_offsets.mm_struct_pgd)?;
-        let pgd = backend.virtual_to_physical(mmu_addr, pgd_ptr)?.unwrap();
+        let pgd = backend.virtual_to_physical(mmu_addr, pgd_ptr).valid()?;
         Ok(pgd)
     }
 
@@ -219,7 +222,7 @@ impl Linux {
         &self,
         backend: &B,
         proc: Process,
-    ) -> ice::MemoryAccessResult<String> {
+    ) -> IceResult<String> {
         let mut buf = [0; 16];
         self.read_process_comm(backend, proc, &mut buf)?;
 
@@ -237,9 +240,9 @@ impl Linux {
         proc: Process,
         field_name: &str,
         buf: &mut [u8],
-    ) -> ice::MemoryAccessResult<()> {
-        let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
-        let (offset, size) = task_struct.find_offset_and_size(field_name).unwrap();
+    ) -> IceResult<()> {
+        let task_struct = self.profile.syms.get_struct("task_struct")?;
+        let (offset, size) = task_struct.find_offset_and_size(field_name)?;
         let size = size as usize;
         let buf = if buf.len() >= size {
             &mut buf[..size]
@@ -266,7 +269,7 @@ fn get_banner_addr<B: ice::Backend>(
 
     for addr in (KERNEL_START..KERNEL_END).step_by(OFFSET) {
         let addr = GuestVirtAddr(addr);
-        if let Ok(Some(paddr)) = backend.virtual_to_physical(mmu_addr, addr) {
+        if let Some(paddr) = backend.virtual_to_physical(mmu_addr, addr)? {
             backend.read_memory(paddr, &mut buf)?;
 
             if let Some(offset) = finder.find(&buf) {

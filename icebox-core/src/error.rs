@@ -1,11 +1,23 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, string::ToString};
 use core::fmt;
 
 #[cfg(feature = "std")]
 pub use std::error::Error;
 
+use crate::seal;
+
 #[cfg(not(feature = "std"))]
 pub trait Error: fmt::Display + fmt::Debug {}
+
+#[cfg(not(feature = "std"))]
+impl<E> From<E> for Box<dyn Error + Send + Sync>
+where
+    E: Error + Send + Sync + 'static,
+{
+    fn from(err: E) -> Self {
+        Box::new(err)
+    }
+}
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -39,6 +51,8 @@ impl Error for MemoryAccessError {
 
 #[cfg(feature = "std")]
 impl From<std::io::Error> for MemoryAccessError {
+    #[cold]
+    #[inline]
     fn from(error: std::io::Error) -> Self {
         Self::Io(error)
     }
@@ -61,3 +75,147 @@ impl From<MemoryAccessError> for std::io::Error {
 }
 
 pub type MemoryAccessResult<T> = Result<T, MemoryAccessError>;
+
+#[derive(Debug)]
+enum Repr {
+    Memory(MemoryAccessError),
+    InvalidPage,
+
+    MissingSymbol(Box<str>),
+    MissingField(Box<str>, Box<str>),
+
+    #[cfg(feature = "std")]
+    Io(std::io::Error),
+    Other(Box<dyn Error + Send + Sync>),
+    Message(Box<str>, Option<Box<dyn Error + Send + Sync>>),
+    Context(Box<str>, IceError),
+}
+
+impl Drop for Repr {
+    fn drop(&mut self) {
+        // Avoid recursions here
+        *self = Repr::InvalidPage;
+    }
+}
+
+#[derive(Debug)]
+pub struct IceError {
+    repr: Box<Repr>,
+}
+
+pub type IceResult<T> = Result<T, IceError>;
+
+impl IceError {
+    #[inline]
+    fn from_repr(repr: Repr) -> Self {
+        Self {
+            repr: Box::new(repr),
+        }
+    }
+
+    #[cold]
+    pub(crate) fn missing_symbol(sym: &str) -> Self {
+        Self::from_repr(Repr::MissingSymbol(sym.into()))
+    }
+
+    #[cold]
+    pub(crate) fn missing_field(field: &str, typ: &str) -> Self {
+        Self::from_repr(Repr::MissingField(field.into(), typ.into()))
+    }
+
+    #[cold]
+    pub fn new(err: impl Into<Box<dyn Error + Send + Sync>>) -> Self {
+        Self::from_repr(Repr::Other(err.into()))
+    }
+
+    #[cold]
+    pub fn with_message(
+        context: impl fmt::Display,
+        err: impl Into<Box<dyn Error + Send + Sync>>,
+    ) -> Self {
+        Self::from_repr(Repr::Message(context.to_string().into(), Some(err.into())))
+    }
+}
+
+impl fmt::Display for IceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &*self.repr {
+            Repr::Memory(_) => f.write_str("failed to access physical memory"),
+            Repr::InvalidPage => f.write_str("failed to translate virtual address"),
+            Repr::MissingSymbol(sym) => {
+                f.write_fmt(format_args!("missing required symbol \"{}\"", sym))
+            }
+            Repr::MissingField(field, typ) => f.write_fmt(format_args!(
+                "missing required field \"{}\" in type \"{}\"",
+                field, typ
+            )),
+
+            #[cfg(feature = "std")]
+            Repr::Io(_) => f.write_str("I/O error"),
+            Repr::Message(msg, _) | Repr::Context(msg, _) => f.write_str(msg),
+            Repr::Other(err) => err.fmt(f),
+        }
+    }
+}
+
+impl Error for IceError {
+    #[cfg(feature = "std")]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match &*self.repr {
+            Repr::Memory(err) => Some(err),
+            Repr::Io(err) => Some(err),
+            Repr::Message(_, err) => Some(&**err.as_ref()?),
+            Repr::Other(err) => err.source(),
+            Repr::Context(_, err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<&str> for IceError {
+    #[cold]
+    fn from(msg: &str) -> Self {
+        Self::from_repr(Repr::Message(msg.into(), None))
+    }
+}
+
+impl From<MemoryAccessError> for IceError {
+    #[cold]
+    fn from(err: MemoryAccessError) -> Self {
+        Self::from_repr(Repr::Memory(err))
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<std::io::Error> for IceError {
+    #[cold]
+    fn from(error: std::io::Error) -> Self {
+        Self::from_repr(Repr::Io(error))
+    }
+}
+
+pub trait MemoryAccessResultExt<T>: seal::Sealed {
+    fn valid(self) -> IceResult<T>;
+}
+
+impl<T> MemoryAccessResultExt<T> for MemoryAccessResult<Option<T>> {
+    fn valid(self) -> IceResult<T> {
+        self?.ok_or_else(|| IceError::from_repr(Repr::InvalidPage))
+    }
+}
+
+pub trait ResultExt<T>: seal::Sealed {
+    fn context(self, msg: impl ToString) -> IceResult<T>;
+}
+
+impl<T> ResultExt<T> for IceResult<T> {
+    fn context(self, msg: impl ToString) -> IceResult<T> {
+        match self {
+            Ok(res) => Ok(res),
+            Err(err) => Err(IceError::from_repr(Repr::Context(
+                msg.to_string().into(),
+                err,
+            ))),
+        }
+    }
+}

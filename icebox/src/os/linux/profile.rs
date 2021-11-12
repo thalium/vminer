@@ -1,8 +1,6 @@
-extern crate alloc;
-
 use alloc::string::String;
 
-use crate::core as ice;
+use crate::core::{self as ice, IceResult};
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_start: ice::GuestVirtAddr,
@@ -24,21 +22,21 @@ pub struct Profile {
 }
 
 impl Profile {
-    pub fn new(syms: ice::SymbolsIndexer) -> Profile {
-        let per_cpu_start = syms.get_addr("__per_cpu_start").unwrap();
-        let current_task = syms.get_addr("current_task").unwrap();
+    pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
+        let per_cpu_start = syms.get_addr("__per_cpu_start")?;
+        let current_task = syms.get_addr("current_task")?;
 
-        let task_struct = syms.get_struct("task_struct").unwrap();
-        let task_struct_pid = task_struct.find_offset("pid").unwrap();
-        let task_struct_comm = task_struct.find_offset("comm").unwrap();
-        let task_struct_mm = task_struct.find_offset("mm").unwrap();
-        let task_struct_active_mm = task_struct.find_offset("active_mm").unwrap();
+        let task_struct = syms.get_struct("task_struct")?;
+        let task_struct_pid = task_struct.find_offset("pid")?;
+        let task_struct_comm = task_struct.find_offset("comm")?;
+        let task_struct_mm = task_struct.find_offset("mm")?;
+        let task_struct_active_mm = task_struct.find_offset("active_mm")?;
 
-        let mm_struct = syms.get_struct("mm_struct").unwrap();
+        let mm_struct = syms.get_struct("mm_struct")?;
         //dbg!(mm_struct);
-        let mm_struct_pgd = mm_struct.find_offset("pgd").unwrap();
+        let mm_struct_pgd = mm_struct.find_offset("pgd")?;
 
-        Profile {
+        Ok(Self {
             syms,
             fast_syms: FastSymbols {
                 per_cpu_start,
@@ -51,7 +49,7 @@ impl Profile {
                 task_struct_mm,
                 task_struct_pid,
             },
-        }
+        })
     }
 }
 

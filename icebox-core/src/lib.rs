@@ -12,7 +12,9 @@ mod backend;
 pub use backend::Backend;
 
 mod error;
-pub use error::{Error, MemoryAccessError, MemoryAccessResult};
+pub use error::{
+    Error, IceError, IceResult, MemoryAccessError, MemoryAccessResult, MemoryAccessResultExt,
+};
 
 mod mem;
 #[cfg(feature = "std")]
@@ -27,4 +29,10 @@ pub use symbols::SymbolsIndexer;
 
 pub const fn mask(size: u32) -> u64 {
     !(!0 << size)
+}
+
+mod seal {
+    pub trait Sealed {}
+
+    impl<T, E> Sealed for Result<T, E> {}
 }

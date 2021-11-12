@@ -3,6 +3,8 @@ pub mod dwarf;
 use alloc::{borrow::ToOwned, string::String, vec::Vec};
 use hashbrown::HashMap;
 
+use crate::{IceError, IceResult};
+
 use super::GuestVirtAddr;
 
 #[derive(Debug, Clone)]
@@ -36,19 +38,22 @@ pub struct Struct<'a> {
 }
 
 impl<'a> Struct<'a> {
-    pub fn find_offset(&self, field_name: &str) -> Option<u64> {
-        let field = self.fields.iter().find(|field| field.name == field_name)?;
-        Some(field.offset)
+    pub fn find_offset(&self, field_name: &str) -> IceResult<u64> {
+        match self.fields.iter().find(|field| field.name == field_name) {
+            Some(field) => Ok(field.offset),
+            None => Err(IceError::missing_field(field_name, self.name)),
+        }
     }
 
-    pub fn find_offset_and_size(&self, field_name: &str) -> Option<(u64, u64)> {
+    pub fn find_offset_and_size(&self, field_name: &str) -> IceResult<(u64, u64)> {
         let (i, field) = self
             .fields
             .iter()
             .enumerate()
-            .find(|(_, field)| field.name == field_name)?;
+            .find(|(_, field)| field.name == field_name)
+            .ok_or_else(|| IceError::missing_field(field_name, self.name))?;
         let size = self.fields.get(i + 1).map_or(self.size, |f| f.offset) - field.offset;
-        Some((field.offset, size))
+        Ok((field.offset, size))
     }
 
     pub fn into_owned(&self) -> OwnedStruct {
@@ -74,16 +79,22 @@ impl SymbolsIndexer {
         }
     }
 
-    pub fn get_struct(&self, name: &str) -> Option<Struct> {
-        self.structs.get(name).map(OwnedStruct::borrow)
+    pub fn get_struct(&self, name: &str) -> IceResult<Struct> {
+        match self.structs.get(name) {
+            Some(s) => Ok(s.borrow()),
+            None => Err(IceError::missing_symbol(name)),
+        }
     }
 
     pub fn insert_struct(&mut self, structure: OwnedStruct) {
         self.structs.insert(structure.name.clone(), structure);
     }
 
-    pub fn get_addr(&self, name: &str) -> Option<GuestVirtAddr> {
-        self.addresses.get(name).copied()
+    pub fn get_addr(&self, name: &str) -> IceResult<GuestVirtAddr> {
+        match self.addresses.get(name) {
+            Some(addr) => Ok(*addr),
+            None => Err(IceError::missing_symbol(name)),
+        }
     }
 
     pub fn insert_addr(&mut self, name: String, addr: GuestVirtAddr) {
@@ -91,15 +102,24 @@ impl SymbolsIndexer {
     }
 
     #[cfg(all(feature = "object", feature = "std"))]
-    pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) {
-        let content = std::fs::read(path).unwrap();
-        let obj = object::File::parse(&*content).unwrap();
-        self.read_object(&obj);
+    fn _read_object_file(&mut self, path: &std::path::Path) -> IceResult<()> {
+        let content = std::fs::read(path)?;
+        (|| {
+            let obj = object::File::parse(&*content)?;
+            crate::symbols::dwarf::load_types(&obj, self)
+        })()
+        .map_err(IceError::new)
+    }
+
+    #[cfg(all(feature = "object", feature = "std"))]
+    #[inline]
+    pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
+        self._read_object_file(path.as_ref())
     }
 
     #[cfg(feature = "object")]
-    pub fn read_object(&mut self, obj: &object::File) {
-        crate::symbols::dwarf::load_types(obj, self).unwrap()
+    pub fn read_object(&mut self, obj: &object::File) -> IceResult<()> {
+        crate::symbols::dwarf::load_types(obj, self).map_err(IceError::new)
     }
 }
 
