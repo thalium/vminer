@@ -9,11 +9,32 @@ pub use x86_64::X86_64;
 
 use crate::{GuestPhysAddr, GuestVirtAddr, MemoryAccessResult};
 
-pub trait Architecture {
-    type Vcpu: Vcpu<Arch = Self> + 'static;
+pub trait VcpusList<'a> {
+    type Arch: Architecture<'a>;
+
+    fn arch(&self) -> Self::Arch;
+
+    fn count(&self) -> usize;
+
+    fn get(&self, id: usize) -> <Self::Arch as Architecture<'a>>::Vcpu;
+
+    fn into_runtime(self) -> runtime::Vcpus<'a>;
+}
+
+pub trait Vcpu<'a> {
+    type Arch: Architecture<'a>;
+
+    fn get_regs(&self) -> <Self::Arch as Architecture<'a>>::Registers;
+
+    fn into_runtime(self) -> runtime::Vcpu<'a>;
+}
+
+pub trait Architecture<'a> {
+    type Vcpu: Vcpu<'a, Arch = Self>;
+    type Vcpus: VcpusList<'a, Arch = Self>;
     type Registers;
 
-    fn runtime_arch(&self) -> RuntimeArchitecture;
+    fn into_runtime(self) -> runtime::Architecture;
 
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
@@ -21,9 +42,4 @@ pub trait Architecture {
         mmu_addr: GuestPhysAddr,
         addr: GuestVirtAddr,
     ) -> MemoryAccessResult<Option<GuestPhysAddr>>;
-}
-pub trait Vcpu {
-    type Arch: Architecture;
-
-    fn get_regs(&self) -> <Self::Arch as Architecture>::Registers;
 }

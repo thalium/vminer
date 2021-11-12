@@ -417,14 +417,12 @@ impl Backend for Kvm {
     type Arch = ice::arch::X86_64;
     type Memory = ice::File;
 
-    fn arch(&self) -> &Self::Arch {
-        &ice::arch::X86_64
-    }
-
+    #[inline]
     fn vcpus(&self) -> &[x86_64::Vcpu] {
         &self.vcpus
     }
 
+    #[inline]
     fn memory(&self) -> &Self::Memory {
         &self.mem
     }

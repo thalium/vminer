@@ -1,7 +1,7 @@
 pub mod profile;
 pub use profile::Profile;
 
-use ice::{IceResult, MemoryAccessResultExt};
+use ice::{arch, IceResult, MemoryAccessResultExt};
 
 use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr};
 use alloc::string::String;
@@ -284,10 +284,12 @@ fn get_banner_addr<B: ice::Backend>(
 
 impl ice::Os for Linux {
     fn quick_check<B: ice::Backend>(backend: &B) -> ice::MemoryAccessResult<bool> {
-        let sregs = (&backend.vcpus()[0] as &dyn core::any::Any)
-            .downcast_ref::<ice::arch::x86_64::Vcpu>()
-            .expect("TODO")
-            .special_registers;
+        use arch::VcpusList;
+        let sregs = match backend.vcpus().into_runtime() {
+            arch::runtime::Vcpus::X86_64(vcpus) => vcpus[0].special_registers,
+            arch::runtime::Vcpus::Aarch64(_) => return Ok(false),
+        };
+
         let mmu_addr = GuestPhysAddr(sregs.cr3);
 
         Ok(get_banner_addr(backend, mmu_addr)?.is_some())

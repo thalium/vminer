@@ -87,14 +87,12 @@ impl<Mem: ice::Memory> Backend for DumbDump<Mem> {
     type Arch = ice::arch::X86_64;
     type Memory = Mem;
 
-    fn arch(&self) -> &Self::Arch {
-        &ice::arch::X86_64
-    }
-
+    #[inline]
     fn vcpus(&self) -> &[x86_64::Vcpu] {
         &self.vcpus
     }
 
+    #[inline]
     fn memory(&self) -> &Self::Memory {
         &self.mem
     }

@@ -1,22 +1,67 @@
 use crate::GuestPhysAddr;
 
-use super::{Architecture, RuntimeArchitecture};
+use super::runtime;
 
 use bytemuck::{Pod, Zeroable};
 
 #[derive(Debug, Clone, Copy)]
 pub struct X86_64;
 
-impl Architecture for X86_64 {
-    type Registers = Registers;
-    type Vcpu = Vcpu;
+#[derive(Clone)]
+pub struct Vcpu {
+    pub registers: Registers,
+    pub special_registers: SpecialRegisters,
+    pub gs_kernel_base: u64,
+}
+
+impl<'a> super::Vcpu<'a> for &'a Vcpu {
+    type Arch = X86_64;
 
     #[inline]
-    fn runtime_arch(&self) -> RuntimeArchitecture {
-        RuntimeArchitecture::X86_64(*self)
+    fn get_regs(&self) -> Registers {
+        self.registers
     }
 
     #[inline]
+    fn into_runtime(self) -> runtime::Vcpu<'a> {
+        runtime::Vcpu::X86_64(self)
+    }
+}
+
+impl<'a> super::VcpusList<'a> for &'a [Vcpu] {
+    type Arch = X86_64;
+
+    #[inline]
+    fn arch(&self) -> X86_64 {
+        X86_64
+    }
+
+    #[inline]
+    fn count(&self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn get(&self, id: usize) -> &'a Vcpu {
+        &self[id]
+    }
+
+    #[inline]
+    fn into_runtime(self) -> runtime::Vcpus<'a> {
+        runtime::Vcpus::X86_64(self)
+    }
+}
+
+impl<'a> super::Architecture<'a> for X86_64 {
+    type Registers = Registers;
+    type Vcpu = &'a Vcpu;
+    type Vcpus = &'a [Vcpu];
+
+    #[inline]
+    fn into_runtime(self) -> runtime::Architecture {
+        runtime::Architecture::X86_64(self)
+    }
+
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
         memory: &M,
@@ -61,22 +106,6 @@ impl Architecture for X86_64 {
 
         let phys_addr = mmu_entry.page_frame() + addr.page_offset();
         Ok(Some(phys_addr))
-    }
-}
-
-#[derive(Clone)]
-pub struct Vcpu {
-    pub registers: Registers,
-    pub special_registers: SpecialRegisters,
-    pub gs_kernel_base: u64,
-}
-
-impl super::Vcpu for Vcpu {
-    type Arch = X86_64;
-
-    #[inline]
-    fn get_regs(&self) -> Registers {
-        self.registers
     }
 }
 
