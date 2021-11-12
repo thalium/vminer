@@ -76,8 +76,6 @@ impl Linux {
 
         let next_offset = list_head.find_offset("next").unwrap();
         let tasks_offset = task_struct.find_offset("tasks").unwrap();
-        let comm_offset = task_struct.find_offset("comm").unwrap();
-        let pid_offset = task_struct.find_offset("pid").unwrap();
 
         // let mut init_task = per_cpu(backend, 0)
         //    + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
@@ -88,20 +86,14 @@ impl Linux {
         let mut current_task = init_task;
 
         let mut name = [0u8; 16];
-        let mut pid = 0u32;
         loop {
             let current_task_addr = backend
                 .virtual_to_physical(mmu_addr, current_task)?
                 .unwrap();
 
-            backend.read_memory(
-                current_task_addr + comm_offset,
-                bytemuck::bytes_of_mut(&mut name),
-            )?;
-            backend.read_memory(
-                current_task_addr + pid_offset,
-                bytemuck::bytes_of_mut(&mut pid),
-            )?;
+            let proc = Process(current_task_addr);
+            self.read_process_comm(backend, proc, &mut name)?;
+            let pid = self.read_process_id(backend, proc)?;
 
             let name = String::from_utf8_lossy(&name);
             println!("{}: {}", pid, name);
@@ -134,8 +126,7 @@ impl Linux {
             .virtual_to_physical(mmu_addr, current_task)?
             .unwrap();
 
-        let mut addr = GuestVirtAddr(0);
-        backend.read_memory(current_task, bytemuck::bytes_of_mut(&mut addr))?;
+        let addr = backend.read_value(current_task)?;
 
         let addr = backend.virtual_to_physical(mmu_addr, addr)?.unwrap();
         let task_struct = self.profile.syms.get_struct("task_struct").unwrap();
@@ -180,8 +171,7 @@ impl Linux {
             .virtual_to_physical(mmu_addr, current_task)?
             .unwrap();
 
-        let mut addr = GuestVirtAddr(0);
-        backend.read_memory(current_task, bytemuck::bytes_of_mut(&mut addr))?;
+        let addr = backend.read_value(current_task)?;
 
         Ok(Process(
             backend.virtual_to_physical(mmu_addr, addr)?.unwrap(),
@@ -193,12 +183,7 @@ impl Linux {
         backend: &B,
         proc: Process,
     ) -> ice::MemoryAccessResult<u32> {
-        let mut pid = 0u32;
-        backend.read_memory(
-            proc.0 + self.profile.fast_offsets.task_struct_pid,
-            bytemuck::bytes_of_mut(&mut pid),
-        )?;
-        Ok(pid)
+        backend.read_value(proc.0 + self.profile.fast_offsets.task_struct_pid)
     }
 
     pub fn read_process_pgd<B: ice::Backend<Arch = ice::arch::X86_64>>(
@@ -208,24 +193,13 @@ impl Linux {
     ) -> ice::MemoryAccessResult<GuestPhysAddr> {
         let mmu_addr = kernel_page_dir(backend, &self.profile)?.unwrap();
         let fast_offsets = &self.profile.fast_offsets;
-        let mut mm = GuestVirtAddr(0);
-        backend.read_memory(
-            proc.0 + fast_offsets.task_struct_mm,
-            bytemuck::bytes_of_mut(&mut mm),
-        )?;
+        let mut mm: GuestVirtAddr = backend.read_value(proc.0 + fast_offsets.task_struct_mm)?;
         if mm.is_null() {
-            backend.read_memory(
-                proc.0 + fast_offsets.task_struct_active_mm,
-                bytemuck::bytes_of_mut(&mut mm),
-            )?;
+            mm = backend.read_value(proc.0 + fast_offsets.task_struct_active_mm)?;
         }
 
         let mm = backend.virtual_to_physical(mmu_addr, mm)?.unwrap();
-        let mut pgd_ptr = GuestVirtAddr(0);
-        backend.read_memory(
-            mm + fast_offsets.mm_struct_pgd,
-            bytemuck::bytes_of_mut(&mut pgd_ptr),
-        )?;
+        let pgd_ptr = backend.read_value(mm + fast_offsets.mm_struct_pgd)?;
         let pgd = backend.virtual_to_physical(mmu_addr, pgd_ptr)?.unwrap();
         Ok(pgd)
     }

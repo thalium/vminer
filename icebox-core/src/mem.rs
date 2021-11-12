@@ -7,6 +7,17 @@ pub trait Memory {
     fn size(&self) -> u64;
 
     fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
+
+    #[inline]
+    fn read_value<T>(&self, addr: GuestPhysAddr) -> MemoryAccessResult<T>
+    where
+        Self: Sized,
+        T: bytemuck::Pod,
+    {
+        let mut val = bytemuck::Zeroable::zeroed();
+        self.read(addr, bytemuck::bytes_of_mut(&mut val))?;
+        Ok(val)
+    }
 }
 
 impl Memory for [u8] {

@@ -14,6 +14,10 @@ pub trait Backend {
         self.memory().read(addr, buf)
     }
 
+    fn read_value<T: bytemuck::Pod>(&self, addr: GuestPhysAddr) -> MemoryAccessResult<T> {
+        self.memory().read_value(addr)
+    }
+
     fn virtual_to_physical(
         &self,
         mmu_addr: GuestPhysAddr,
