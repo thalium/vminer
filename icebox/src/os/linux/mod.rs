@@ -285,9 +285,9 @@ fn get_banner_addr<B: ice::Backend>(
 impl ice::Os for Linux {
     fn quick_check<B: ice::Backend>(backend: &B) -> ice::MemoryAccessResult<bool> {
         use arch::VcpusList;
-        let sregs = match backend.vcpus().into_runtime() {
-            arch::runtime::Vcpus::X86_64(vcpus) => vcpus[0].special_registers,
-            arch::runtime::Vcpus::Aarch64(_) => return Ok(false),
+        let sregs = match backend.vcpus().into_runtime().as_x86_64() {
+            Some(vcpus) => vcpus[0].special_registers,
+            None => return Ok(false),
         };
 
         let mmu_addr = GuestPhysAddr(sregs.cr3);

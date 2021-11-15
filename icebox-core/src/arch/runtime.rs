@@ -37,6 +37,24 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     }
 }
 
+impl<'a> Vcpu<'a> {
+    #[inline]
+    pub const fn as_x86_64(&self) -> Option<&'a arch::x86_64::Vcpu> {
+        match self {
+            Self::X86_64(vcpu) => Some(vcpu),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_aarch64(&self) -> Option<&'a arch::aarch64::Vcpu> {
+        match self {
+            Self::Aarch64(vcpu) => Some(vcpu),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Vcpus<'a> {
     X86_64(&'a [arch::x86_64::Vcpu]),
@@ -73,6 +91,24 @@ impl<'a> arch::VcpusList<'a> for Vcpus<'a> {
     #[inline]
     fn into_runtime(self) -> Vcpus<'a> {
         self
+    }
+}
+
+impl<'a> Vcpus<'a> {
+    #[inline]
+    pub const fn as_x86_64(&self) -> Option<&'a [arch::x86_64::Vcpu]> {
+        match self {
+            Self::X86_64(vcpus) => Some(vcpus),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_aarch64(&self) -> Option<&'a [arch::aarch64::Vcpu]> {
+        match self {
+            Self::Aarch64(vcpus) => Some(vcpus),
+            _ => None,
+        }
     }
 }
 
