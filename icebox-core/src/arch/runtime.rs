@@ -6,6 +6,7 @@ pub enum Architecture {
     Aarch64(arch::Aarch64),
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Vcpu<'a> {
     X86_64(&'a arch::x86_64::Vcpu),
     Aarch64(&'a arch::aarch64::Vcpu),
@@ -36,6 +37,7 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Vcpus<'a> {
     X86_64(&'a [arch::x86_64::Vcpu]),
     Aarch64(&'a [arch::aarch64::Vcpu]),
@@ -74,7 +76,7 @@ impl<'a> arch::VcpusList<'a> for Vcpus<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Registers {
     X86_64(arch::x86_64::Registers),
     Aarch64(arch::aarch64::Registers),

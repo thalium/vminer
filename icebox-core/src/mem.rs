@@ -101,6 +101,7 @@ impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
 }
 
 #[cfg(feature = "std")]
+#[derive(Debug)]
 pub struct File {
     file: sync_file::RandomAccessFile,
     start: u64,

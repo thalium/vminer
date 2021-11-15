@@ -5,6 +5,7 @@ use bytemuck::{Pod, Zeroable};
 #[derive(Debug, Clone, Copy)]
 pub struct Aarch64;
 
+#[derive(Debug, Clone)]
 pub struct Vcpu {
     pub registers: Registers,
 }

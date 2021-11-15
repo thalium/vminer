@@ -7,7 +7,7 @@ use bytemuck::{Pod, Zeroable};
 #[derive(Debug, Clone, Copy)]
 pub struct X86_64;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Vcpu {
     pub registers: Registers,
     pub special_registers: SpecialRegisters,
