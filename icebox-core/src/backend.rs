@@ -6,7 +6,7 @@ pub trait Backend {
 
     #[inline]
     fn arch(&self) -> Self::Arch {
-        use arch::VcpusList;
+        use arch::Vcpus;
 
         self.vcpus().arch()
     }
@@ -66,7 +66,7 @@ where
 
     #[inline]
     fn rt_vcpus(&self) -> arch::runtime::Vcpus {
-        use arch::VcpusList;
+        use arch::Vcpus;
 
         self.vcpus().into_runtime()
     }

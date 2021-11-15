@@ -9,7 +9,7 @@ pub use x86_64::X86_64;
 
 use crate::{GuestPhysAddr, GuestVirtAddr, MemoryAccessResult};
 
-pub trait VcpusList<'a> {
+pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu> {
     type Arch: Architecture<'a>;
 
     fn arch(&self) -> Self::Arch;
@@ -33,7 +33,7 @@ pub trait Vcpu<'a> {
 
 pub trait Architecture<'a> {
     type Vcpu: Vcpu<'a, Arch = Self>;
-    type Vcpus: VcpusList<'a, Arch = Self>;
+    type Vcpus: Vcpus<'a, Arch = Self>;
     type Registers;
 
     fn into_runtime(self) -> runtime::Architecture;

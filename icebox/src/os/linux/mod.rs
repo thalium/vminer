@@ -1,10 +1,11 @@
 pub mod process;
 pub mod profile;
 
-use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt};
+use crate::core::{
+    self as ice, arch::Vcpus, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt,
+};
 use core::fmt;
 
-use ice::arch::VcpusList;
 pub use process::Process;
 pub use profile::Profile;
 

@@ -61,7 +61,7 @@ pub enum Vcpus<'a> {
     Aarch64(&'a [arch::aarch64::Vcpu]),
 }
 
-impl<'a> arch::VcpusList<'a> for Vcpus<'a> {
+impl<'a> arch::Vcpus<'a> for Vcpus<'a> {
     type Arch = Architecture;
 
     #[inline]
@@ -109,6 +109,62 @@ impl<'a> Vcpus<'a> {
             Self::Aarch64(vcpus) => Some(vcpus),
             _ => None,
         }
+    }
+}
+
+#[derive(Debug)]
+enum VcpuIterInner<'a> {
+    X86_64(core::slice::Iter<'a, arch::x86_64::Vcpu>),
+    Aarch64(core::slice::Iter<'a, arch::aarch64::Vcpu>),
+}
+
+#[derive(Debug)]
+pub struct VcpuIter<'a>(VcpuIterInner<'a>);
+
+impl<'a> Iterator for VcpuIter<'a> {
+    type Item = Vcpu<'a>;
+
+    fn next(&mut self) -> Option<Vcpu<'a>> {
+        match &mut self.0 {
+            VcpuIterInner::X86_64(iter) => iter.next().map(Vcpu::X86_64),
+            VcpuIterInner::Aarch64(iter) => iter.next().map(Vcpu::Aarch64),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.0 {
+            VcpuIterInner::X86_64(iter) => iter.size_hint(),
+            VcpuIterInner::Aarch64(iter) => iter.size_hint(),
+        }
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        match self.0 {
+            VcpuIterInner::X86_64(iter) => iter.fold(init, |acc, vcpu| f(acc, Vcpu::X86_64(vcpu))),
+            VcpuIterInner::Aarch64(iter) => {
+                iter.fold(init, |acc, vcpu| f(acc, Vcpu::Aarch64(vcpu)))
+            }
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for VcpuIter<'a> {}
+
+impl<'a> IntoIterator for Vcpus<'a> {
+    type Item = Vcpu<'a>;
+    type IntoIter = VcpuIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let inner = match self {
+            Self::X86_64(vcpus) => VcpuIterInner::X86_64(vcpus.iter()),
+            Self::Aarch64(vcpus) => VcpuIterInner::Aarch64(vcpus.iter()),
+        };
+
+        VcpuIter(inner)
     }
 }
 

@@ -29,7 +29,7 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 }
 
-impl<'a> super::VcpusList<'a> for &'a [Vcpu] {
+impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     type Arch = Aarch64;
 
     #[inline]
