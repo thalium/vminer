@@ -74,13 +74,6 @@ impl Linux {
         kaslr: i64,
     ) -> IceResult<process::Iter<'_, 'b, B>> {
         let init_task = self.profile.fast_syms.init_task + kaslr;
-
-        // let mut init_task = per_cpu(backend, 0)
-        //    + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
-
-        // let addr = backend.virtual_to_physical(self.kpgd, init_task).valid()?;
-        // backend.read_memory(addr, bytemuck::bytes_of_mut(&mut init_task))?;
-
         let current_task = backend.virtual_to_physical(self.kpgd, init_task).valid()?;
 
         Ok(process::Iter::new(self, backend, current_task))
@@ -126,11 +119,7 @@ impl Linux {
         Ok(())
     }
 
-    pub fn current_process<B: ice::Backend>(
-        &self,
-        backend: &B,
-        cpuid: usize,
-    ) -> IceResult<Process> {
+    pub fn current_thread<B: ice::Backend>(&self, backend: &B, cpuid: usize) -> IceResult<Process> {
         let mmu_addr = kernel_page_dir(backend, &self.profile)?;
 
         let current_task = per_cpu(backend, cpuid)?
@@ -143,6 +132,14 @@ impl Linux {
         let addr = backend.virtual_to_physical(mmu_addr, addr).valid()?;
 
         Ok(Process::new(addr, self))
+    }
+
+    pub fn current_process<B: ice::Backend>(
+        &self,
+        backend: &B,
+        cpuid: usize,
+    ) -> IceResult<Process> {
+        self.current_thread(backend, cpuid)?.group_leader(backend)
     }
 }
 

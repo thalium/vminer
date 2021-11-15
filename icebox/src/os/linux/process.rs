@@ -17,6 +17,10 @@ impl<'a> Process<'a> {
         Ok(backend.read_value(self.addr + self.linux.profile.fast_offsets.task_struct_pid)?)
     }
 
+    pub fn tgid<B: ibc::Backend>(&self, backend: &B) -> IceResult<u32> {
+        Ok(backend.read_value(self.addr + self.linux.profile.fast_offsets.task_struct_tgid)?)
+    }
+
     pub fn pgd<B: ibc::Backend>(&self, backend: &B) -> IceResult<GuestPhysAddr> {
         let fast_offsets = &self.linux.profile.fast_offsets;
         let mut mm: GuestVirtAddr = backend.read_value(self.addr + fast_offsets.task_struct_mm)?;
@@ -30,6 +34,13 @@ impl<'a> Process<'a> {
             .virtual_to_physical(self.linux.kpgd, pgd_ptr)
             .valid()?;
         Ok(pgd)
+    }
+
+    pub fn group_leader<B: ibc::Backend>(&self, backend: &B) -> IceResult<Process<'a>> {
+        let addr = backend
+            .read_value(self.addr + self.linux.profile.fast_offsets.task_struct_group_leader)?;
+        let addr = backend.virtual_to_physical(self.linux.kpgd, addr).valid()?;
+        Ok(Process::new(addr, self.linux))
     }
 
     pub fn read_comm<B: ibc::Backend>(&self, backend: &B, buf: &mut [u8]) -> IceResult<()> {

@@ -17,9 +17,11 @@ pub(super) struct FastOffsets {
 
     pub(super) task_struct_active_mm: u64,
     pub(super) task_struct_comm: u64,
+    pub(super) task_struct_group_leader: u64,
     pub(super) task_struct_mm: u64,
     pub(super) task_struct_pid: u64,
     pub(super) task_struct_tasks: u64,
+    pub(super) task_struct_tgid: u64,
 }
 
 pub struct Profile {
@@ -41,9 +43,11 @@ impl Profile {
         let task_struct = syms.get_struct("task_struct")?;
         let task_struct_active_mm = task_struct.find_offset("active_mm")?;
         let task_struct_comm = task_struct.find_offset("comm")?;
+        let task_struct_group_leader = task_struct.find_offset("group_leader")?;
         let task_struct_mm = task_struct.find_offset("mm")?;
         let task_struct_pid = task_struct.find_offset("pid")?;
         let task_struct_tasks = task_struct.find_offset("tasks")?;
+        let task_struct_tgid = task_struct.find_offset("tgid")?;
 
         let mm_struct = syms.get_struct("mm_struct")?;
         //dbg!(mm_struct);
@@ -65,9 +69,11 @@ impl Profile {
 
                 task_struct_active_mm,
                 task_struct_comm,
+                task_struct_group_leader,
                 task_struct_mm,
                 task_struct_pid,
                 task_struct_tasks,
+                task_struct_tgid,
             },
         })
     }
