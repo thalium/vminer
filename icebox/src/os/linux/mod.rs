@@ -1,14 +1,13 @@
+pub mod process;
 pub mod profile;
+
+use crate::core::{
+    self as ice, arch, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt,
+};
+use core::fmt;
+
+pub use process::Process;
 pub use profile::Profile;
-
-use ice::{arch, IceResult, MemoryAccessResultExt};
-
-use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr};
-use alloc::string::String;
-use core::str;
-
-#[derive(Debug, Clone, Copy)]
-pub struct Process(GuestPhysAddr);
 
 pub struct Linux {
     profile: Profile,
@@ -94,9 +93,10 @@ impl Linux {
                 .virtual_to_physical(mmu_addr, current_task)
                 .valid()?;
 
-            let proc = Process(current_task_addr);
-            self.read_process_comm(backend, proc, &mut name)?;
-            let pid = self.read_process_id(backend, proc)?;
+            let proc = Process::new(current_task_addr, self);
+
+            proc.read_comm(backend, &mut name)?;
+            let pid = proc.pid(backend)?;
 
             let name = String::from_utf8_lossy(&name);
             println!("{}: {}", pid, name);
@@ -175,82 +175,9 @@ impl Linux {
             .valid()?;
 
         let addr = backend.read_value(current_task)?;
+        let addr = backend.virtual_to_physical(mmu_addr, addr).valid()?;
 
-        Ok(Process(
-            backend.virtual_to_physical(mmu_addr, addr).valid()?,
-        ))
-    }
-
-    pub fn read_process_id<B: ice::Backend>(
-        &self,
-        backend: &B,
-        proc: Process,
-    ) -> ice::MemoryAccessResult<u32> {
-        backend.read_value(proc.0 + self.profile.fast_offsets.task_struct_pid)
-    }
-
-    pub fn read_process_pgd<B: ice::Backend<Arch = ice::arch::X86_64>>(
-        &self,
-        backend: &B,
-        proc: Process,
-    ) -> IceResult<GuestPhysAddr> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
-        let fast_offsets = &self.profile.fast_offsets;
-        let mut mm: GuestVirtAddr = backend.read_value(proc.0 + fast_offsets.task_struct_mm)?;
-        if mm.is_null() {
-            mm = backend.read_value(proc.0 + fast_offsets.task_struct_active_mm)?;
-        }
-
-        let mm = backend.virtual_to_physical(mmu_addr, mm).valid()?;
-        let pgd_ptr = backend.read_value(mm + fast_offsets.mm_struct_pgd)?;
-        let pgd = backend.virtual_to_physical(mmu_addr, pgd_ptr).valid()?;
-        Ok(pgd)
-    }
-
-    pub fn read_process_comm<B: ice::Backend>(
-        &self,
-        backend: &B,
-        proc: Process,
-        buf: &mut [u8],
-    ) -> ice::MemoryAccessResult<()> {
-        let buf = if buf.len() >= 16 { &mut buf[..16] } else { buf };
-        backend.read_memory(proc.0 + self.profile.fast_offsets.task_struct_comm, buf)?;
-        Ok(())
-    }
-
-    pub fn read_process_comm_to_string<B: ice::Backend>(
-        &self,
-        backend: &B,
-        proc: Process,
-    ) -> IceResult<String> {
-        let mut buf = [0; 16];
-        self.read_process_comm(backend, proc, &mut buf)?;
-
-        let buf = match buf.into_iter().enumerate().find(|(_, b)| *b == 0) {
-            Some((i, _)) => &buf[..i],
-            None => &buf,
-        };
-
-        Ok(String::from_utf8_lossy(buf).into_owned())
-    }
-
-    pub fn read_process_field<B: ice::Backend>(
-        &self,
-        backend: &B,
-        proc: Process,
-        field_name: &str,
-        buf: &mut [u8],
-    ) -> IceResult<()> {
-        let task_struct = self.profile.syms.get_struct("task_struct")?;
-        let (offset, size) = task_struct.find_offset_and_size(field_name)?;
-        let size = size as usize;
-        let buf = if buf.len() >= size {
-            &mut buf[..size]
-        } else {
-            buf
-        };
-        backend.read_memory(proc.0 + offset, buf)?;
-        Ok(())
+        Ok(Process::new(addr, self))
     }
 }
 
@@ -293,6 +220,12 @@ impl ice::Os for Linux {
         let mmu_addr = GuestPhysAddr(sregs.cr3);
 
         Ok(get_banner_addr(backend, mmu_addr)?.is_some())
+    }
+}
+
+impl fmt::Debug for Linux {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Linux").finish_non_exhaustive()
     }
 }
 

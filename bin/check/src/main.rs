@@ -33,10 +33,10 @@ fn main() {
 
     for cpuid in 0..2 {
         let proc = linux.current_process(&vm, cpuid).unwrap();
-        let pid = linux.read_process_id(&vm, proc).unwrap();
-        let name = linux.read_process_comm_to_string(&vm, proc).unwrap();
+        let pid = proc.pid(&vm).unwrap();
+        let name = proc.comm(&vm).unwrap();
         let cr3 = vm.vcpus()[cpuid].special_registers.cr3;
-        let pgd = linux.read_process_pgd(&vm, proc).unwrap();
+        let pgd = proc.pgd(&vm).unwrap();
         println!("{}: {} ({:016x} -> {:016x})", pid, name, cr3, pgd);
     }
 
