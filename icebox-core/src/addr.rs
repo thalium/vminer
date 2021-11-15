@@ -3,7 +3,7 @@ use core::ops::Sub;
 use core::ops::SubAssign;
 use core::{fmt, ops::Add};
 
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
 pub struct GuestPhysAddr(pub u64);
 

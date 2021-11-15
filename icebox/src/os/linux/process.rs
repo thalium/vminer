@@ -70,4 +70,80 @@ impl<'a> Process<'a> {
         backend.read_memory(self.addr + offset, buf)?;
         Ok(())
     }
+
+    pub fn next<B: ibc::Backend>(&self, backend: &B) -> IceResult<Process<'a>> {
+        let offsets = &self.linux.profile.fast_offsets;
+
+        let next_offset = offsets.task_struct_tasks + offsets.list_head_next;
+        let mut addr = backend.read_value(self.addr + next_offset)?;
+        addr -= offsets.task_struct_tasks;
+        let addr = backend.virtual_to_physical(self.linux.kpgd, addr).valid()?;
+
+        Ok(Self::new(addr, self.linux))
+    }
+
+    pub fn prev<B: ibc::Backend>(&self, backend: &B) -> IceResult<Process<'a>> {
+        let offsets = &self.linux.profile.fast_offsets;
+
+        let next_offset = offsets.task_struct_tasks + offsets.list_head_prev;
+        let mut addr = backend.read_value(self.addr + next_offset)?;
+        addr -= offsets.task_struct_tasks;
+        let addr = backend.virtual_to_physical(self.linux.kpgd, addr).valid()?;
+
+        Ok(Self::new(addr, self.linux))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum State {
+    First,
+    Running,
+    Error,
+}
+
+pub struct Iter<'a, 'b, B: ibc::Backend> {
+    first_addr: GuestPhysAddr,
+    next: Process<'a>,
+    state: State,
+    backend: &'b B,
+}
+
+impl<'a, 'b, B: ibc::Backend> Iterator for Iter<'a, 'b, B> {
+    type Item = IceResult<Process<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = match self.state {
+            State::First => {
+                self.state = State::Running;
+                self.next
+            }
+            State::Running => {
+                if self.next.addr == self.first_addr {
+                    return None;
+                }
+                self.next
+            }
+            State::Error => return None,
+        };
+
+        self.next = match current.next(self.backend) {
+            Ok(next) => next,
+            Err(e) => {
+                self.state = State::Error;
+                return Some(Err(e));
+            }
+        };
+        Some(Ok(current))
+    }
+}
+
+impl<'a, 'b, B: ibc::Backend> Iter<'a, 'b, B> {
+    pub(super) fn new(linux: &'a super::Linux, backend: &'b B, first_addr: GuestPhysAddr) -> Self {
+        Self {
+            first_addr,
+            next: Process::new(first_addr, linux),
+            state: State::First,
+            backend,
+        }
+    }
 }

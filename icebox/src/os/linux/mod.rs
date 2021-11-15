@@ -68,14 +68,12 @@ impl Linux {
         Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
     }
 
-    #[cfg(feature = "std")]
-    pub fn read_all_tasks<B: ice::Backend>(&self, backend: &B, kaslr: i64) -> IceResult<()> {
-        let task_struct = self.profile.syms.get_struct("task_struct")?;
-        let list_head = self.profile.syms.get_struct("list_head")?;
-        let init_task = self.profile.syms.get_addr("init_task")? + kaslr;
-
-        let next_offset = list_head.find_offset("next")?;
-        let tasks_offset = task_struct.find_offset("tasks")?;
+    pub fn read_tasks<'b, B: ice::Backend>(
+        &self,
+        backend: &'b B,
+        kaslr: i64,
+    ) -> IceResult<process::Iter<'_, 'b, B>> {
+        let init_task = self.profile.fast_syms.init_task + kaslr;
 
         // let mut init_task = per_cpu(backend, 0)
         //    + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
@@ -83,34 +81,9 @@ impl Linux {
         // let addr = backend.virtual_to_physical(self.kpgd, init_task).valid()?;
         // backend.read_memory(addr, bytemuck::bytes_of_mut(&mut init_task))?;
 
-        let mut current_task = init_task;
+        let current_task = backend.virtual_to_physical(self.kpgd, init_task).valid()?;
 
-        let mut name = [0u8; 16];
-        loop {
-            let current_task_addr = backend
-                .virtual_to_physical(self.kpgd, current_task)
-                .valid()?;
-
-            let proc = Process::new(current_task_addr, self);
-
-            proc.read_comm(backend, &mut name)?;
-            let pid = proc.pid(backend)?;
-
-            let name = String::from_utf8_lossy(&name);
-            println!("{}: {}", pid, name);
-
-            backend.read_memory(
-                current_task_addr + tasks_offset + next_offset,
-                bytemuck::bytes_of_mut(&mut current_task),
-            )?;
-            current_task -= tasks_offset;
-
-            if current_task == init_task || current_task == GuestVirtAddr(0) {
-                break;
-            }
-        }
-
-        Ok(())
+        Ok(process::Iter::new(self, backend, current_task))
     }
 
     #[cfg(feature = "std")]

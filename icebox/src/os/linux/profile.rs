@@ -5,14 +5,21 @@ use crate::core::{self as ice, IceResult};
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_start: ice::GuestVirtAddr,
     pub(crate) current_task: ice::GuestVirtAddr,
+
+    pub(super) init_task: ice::GuestVirtAddr,
 }
 
 pub(super) struct FastOffsets {
+    pub(super) list_head_next: u64,
+    pub(super) list_head_prev: u64,
+
     pub(super) mm_struct_pgd: u64,
+
     pub(super) task_struct_active_mm: u64,
     pub(super) task_struct_comm: u64,
     pub(super) task_struct_mm: u64,
     pub(super) task_struct_pid: u64,
+    pub(super) task_struct_tasks: u64,
 }
 
 pub struct Profile {
@@ -25,12 +32,18 @@ impl Profile {
     pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
         let per_cpu_start = syms.get_addr("__per_cpu_start")?;
         let current_task = syms.get_addr("current_task")?;
+        let init_task = syms.get_addr("init_task")?;
+
+        let list_head = syms.get_struct("list_head")?;
+        let list_head_next = list_head.find_offset("next")?;
+        let list_head_prev = list_head.find_offset("prev")?;
 
         let task_struct = syms.get_struct("task_struct")?;
-        let task_struct_pid = task_struct.find_offset("pid")?;
+        let task_struct_active_mm = task_struct.find_offset("active_mm")?;
         let task_struct_comm = task_struct.find_offset("comm")?;
         let task_struct_mm = task_struct.find_offset("mm")?;
-        let task_struct_active_mm = task_struct.find_offset("active_mm")?;
+        let task_struct_pid = task_struct.find_offset("pid")?;
+        let task_struct_tasks = task_struct.find_offset("tasks")?;
 
         let mm_struct = syms.get_struct("mm_struct")?;
         //dbg!(mm_struct);
@@ -41,13 +54,20 @@ impl Profile {
             fast_syms: FastSymbols {
                 per_cpu_start,
                 current_task,
+
+                init_task,
             },
             fast_offsets: FastOffsets {
                 mm_struct_pgd,
+
+                list_head_next,
+                list_head_prev,
+
                 task_struct_active_mm,
                 task_struct_comm,
                 task_struct_mm,
                 task_struct_pid,
+                task_struct_tasks,
             },
         })
     }

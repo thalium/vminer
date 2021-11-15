@@ -28,9 +28,14 @@ fn main() {
     let profile = os::linux::Profile::new(syms).unwrap();
 
     let linux = os::Linux::create(&vm, profile).unwrap();
-    // let kaslr = dbg!(linux.get_aslr(&vm).unwrap());
-    // linux.read_all_tasks(&vm, kaslr).unwrap();
+    let kaslr = linux.get_aslr(&vm).unwrap();
 
+    for proc in linux.read_tasks(&vm, kaslr).unwrap() {
+        let proc = proc.unwrap();
+        println!("{}: {}", proc.pid(&vm).unwrap(), proc.comm(&vm).unwrap());
+    }
+
+    /*
     for cpuid in 0..2 {
         let proc = linux.current_process(&vm, cpuid).unwrap();
         let pid = proc.pid(&vm).unwrap();
@@ -39,6 +44,7 @@ fn main() {
         let pgd = proc.pgd(&vm).unwrap();
         println!("{}: {} ({:016x} -> {:016x})", pid, name, cr3, pgd);
     }
+    */
 
     // linux.read_current_task(&vm, 0).unwrap();
     // linux.read_current_task(&vm, 1).unwrap();
