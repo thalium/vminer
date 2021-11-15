@@ -15,6 +15,14 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     type Arch = Architecture;
 
     #[inline]
+    fn arch(&self) -> Architecture {
+        match self {
+            Self::X86_64(vcpu) => Architecture::X86_64(vcpu.arch()),
+            Self::Aarch64(vcpu) => Architecture::Aarch64(vcpu.arch()),
+        }
+    }
+
+    #[inline]
     fn get_regs(&self) -> Registers {
         match self {
             Vcpu::X86_64(vcpu) => Registers::X86_64(vcpu.get_regs()),

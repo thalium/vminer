@@ -13,6 +13,11 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     type Arch = Aarch64;
 
     #[inline]
+    fn arch(&self) -> Aarch64 {
+        Aarch64
+    }
+
+    #[inline]
     fn get_regs(&self) -> Registers {
         self.registers
     }

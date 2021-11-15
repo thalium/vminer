@@ -24,6 +24,8 @@ pub trait VcpusList<'a> {
 pub trait Vcpu<'a> {
     type Arch: Architecture<'a>;
 
+    fn arch(&self) -> Self::Arch;
+
     fn get_regs(&self) -> <Self::Arch as Architecture<'a>>::Registers;
 
     fn into_runtime(self) -> runtime::Vcpu<'a>;
