@@ -17,20 +17,18 @@ impl<'a> Process<'a> {
         Ok(backend.read_value(self.addr + self.linux.profile.fast_offsets.task_struct_pid)?)
     }
 
-    pub fn pgd<B: ibc::Backend<Arch = ibc::arch::X86_64>>(
-        &self,
-        backend: &B,
-    ) -> IceResult<GuestPhysAddr> {
-        let mmu_addr = super::kernel_page_dir(backend, &self.linux.profile)?;
+    pub fn pgd<B: ibc::Backend>(&self, backend: &B) -> IceResult<GuestPhysAddr> {
         let fast_offsets = &self.linux.profile.fast_offsets;
         let mut mm: GuestVirtAddr = backend.read_value(self.addr + fast_offsets.task_struct_mm)?;
         if mm.is_null() {
             mm = backend.read_value(self.addr + fast_offsets.task_struct_active_mm)?;
         }
 
-        let mm = backend.virtual_to_physical(mmu_addr, mm).valid()?;
+        let mm = backend.virtual_to_physical(self.linux.kpgd, mm).valid()?;
         let pgd_ptr = backend.read_value(mm + fast_offsets.mm_struct_pgd)?;
-        let pgd = backend.virtual_to_physical(mmu_addr, pgd_ptr).valid()?;
+        let pgd = backend
+            .virtual_to_physical(self.linux.kpgd, pgd_ptr)
+            .valid()?;
         Ok(pgd)
     }
 

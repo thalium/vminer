@@ -81,6 +81,8 @@ enum Repr {
     Memory(MemoryAccessError),
     InvalidPage,
 
+    UnsupportedArchitecture,
+
     MissingSymbol(Box<str>),
     MissingField(Box<str>, Box<str>),
 
@@ -135,6 +137,11 @@ impl IceError {
     ) -> Self {
         Self::from_repr(Repr::Message(context.to_string().into(), Some(err.into())))
     }
+
+    #[cold]
+    pub fn unsupported_architecture() -> Self {
+        Self::from_repr(Repr::UnsupportedArchitecture)
+    }
 }
 
 impl fmt::Display for IceError {
@@ -142,6 +149,7 @@ impl fmt::Display for IceError {
         match &*self.repr {
             Repr::Memory(_) => f.write_str("failed to access physical memory"),
             Repr::InvalidPage => f.write_str("failed to translate virtual address"),
+            Repr::UnsupportedArchitecture => f.write_str("unsupported architecture"),
             Repr::MissingSymbol(sym) => {
                 f.write_fmt(format_args!("missing required symbol \"{}\"", sym))
             }

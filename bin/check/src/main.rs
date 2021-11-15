@@ -27,7 +27,7 @@ fn main() {
     syms.read_object_file("../elf").unwrap();
     let profile = os::linux::Profile::new(syms).unwrap();
 
-    let linux = os::Linux::create(profile);
+    let linux = os::Linux::create(&vm, profile).unwrap();
     // let kaslr = dbg!(linux.get_aslr(&vm).unwrap());
     // linux.read_all_tasks(&vm, kaslr).unwrap();
 

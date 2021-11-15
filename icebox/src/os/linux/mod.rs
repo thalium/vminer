@@ -1,20 +1,23 @@
 pub mod process;
 pub mod profile;
 
-use crate::core::{
-    self as ice, arch, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt,
-};
+use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt};
 use core::fmt;
 
+use ice::arch::VcpusList;
 pub use process::Process;
 pub use profile::Profile;
 
 pub struct Linux {
     profile: Profile,
+    kpgd: GuestPhysAddr,
 }
 
-fn per_cpu<B: ice::Backend<Arch = ice::arch::X86_64>>(backend: &B, cpuid: usize) -> GuestVirtAddr {
-    let cpu = &backend.vcpus()[cpuid];
+fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<GuestVirtAddr> {
+    let cpu = match backend.vcpus().into_runtime().as_x86_64() {
+        Some(vcpus) => &vcpus[cpuid],
+        None => return Err(ice::IceError::unsupported_architecture()),
+    };
 
     let mut per_cpu = GuestVirtAddr(cpu.special_registers.gs.base);
     if !Linux::is_kernel_addr(per_cpu) {
@@ -22,17 +25,20 @@ fn per_cpu<B: ice::Backend<Arch = ice::arch::X86_64>>(backend: &B, cpuid: usize)
         assert!(Linux::is_kernel_addr(per_cpu));
     }
 
-    per_cpu
+    Ok(per_cpu)
 }
 
-pub fn kernel_page_dir<B: ice::Backend<Arch = ice::arch::X86_64>>(
-    backend: &B,
-    profile: &Profile,
-) -> IceResult<GuestPhysAddr> {
-    let addr =
-        per_cpu(backend, 0) + (profile.fast_syms.current_task - profile.fast_syms.per_cpu_start);
+fn kernel_page_dir<B: ice::Backend>(backend: &B, profile: &Profile) -> IceResult<GuestPhysAddr> {
+    let vcpus = backend
+        .vcpus()
+        .into_runtime()
+        .as_x86_64()
+        .ok_or_else(ice::IceError::unsupported_architecture)?;
 
-    for vcpu in backend.vcpus() {
+    let addr =
+        per_cpu(backend, 0)? + (profile.fast_syms.current_task - profile.fast_syms.per_cpu_start);
+
+    for vcpu in vcpus {
         let cr3 = GuestPhysAddr(vcpu.special_registers.cr3);
 
         if backend.virtual_to_physical(cr3, addr)?.is_some() {
@@ -48,30 +54,21 @@ impl Linux {
         (addr.0 as i64) < 0
     }
 
-    pub fn create(profile: Profile) -> Self {
-        Linux { profile }
+    pub fn create<B: ice::Backend>(backend: &B, profile: Profile) -> IceResult<Self> {
+        let kpgd = kernel_page_dir(backend, &profile)?;
+        Ok(Linux { profile, kpgd })
     }
 
-    pub fn get_aslr<B: ice::Backend<Arch = ice::arch::X86_64>>(
-        &self,
-        backend: &B,
-    ) -> IceResult<i64> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
+    pub fn get_aslr<B: ice::Backend>(&self, backend: &B) -> IceResult<i64> {
         let base_banner_addr = self.profile.syms.get_addr("linux_banner")?;
         let (banner_addr, _) =
-            get_banner_addr(backend, mmu_addr)?.ok_or("could not find banner address")?;
+            get_banner_addr(backend, self.kpgd)?.ok_or("could not find banner address")?;
 
         Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
     }
 
     #[cfg(feature = "std")]
-    pub fn read_all_tasks<B: ice::Backend<Arch = ice::arch::X86_64>>(
-        &self,
-        backend: &B,
-        kaslr: i64,
-    ) -> IceResult<()> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
-
+    pub fn read_all_tasks<B: ice::Backend>(&self, backend: &B, kaslr: i64) -> IceResult<()> {
         let task_struct = self.profile.syms.get_struct("task_struct")?;
         let list_head = self.profile.syms.get_struct("list_head")?;
         let init_task = self.profile.syms.get_addr("init_task")? + kaslr;
@@ -82,7 +79,7 @@ impl Linux {
         // let mut init_task = per_cpu(backend, 0)
         //    + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
 
-        // let addr = backend.virtual_to_physical(mmu_addr, init_task).valid()?;
+        // let addr = backend.virtual_to_physical(self.kpgd, init_task).valid()?;
         // backend.read_memory(addr, bytemuck::bytes_of_mut(&mut init_task))?;
 
         let mut current_task = init_task;
@@ -90,7 +87,7 @@ impl Linux {
         let mut name = [0u8; 16];
         loop {
             let current_task_addr = backend
-                .virtual_to_physical(mmu_addr, current_task)
+                .virtual_to_physical(self.kpgd, current_task)
                 .valid()?;
 
             let proc = Process::new(current_task_addr, self);
@@ -116,22 +113,16 @@ impl Linux {
     }
 
     #[cfg(feature = "std")]
-    pub fn read_current_task<B: ice::Backend<Arch = ice::arch::X86_64>>(
-        &self,
-        backend: &B,
-        cpuid: usize,
-    ) -> IceResult<()> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
-
-        let current_task = per_cpu(backend, cpuid)
+    pub fn read_current_task<B: ice::Backend>(&self, backend: &B, cpuid: usize) -> IceResult<()> {
+        let current_task = per_cpu(backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
         let current_task = backend
-            .virtual_to_physical(mmu_addr, current_task)
+            .virtual_to_physical(self.kpgd, current_task)
             .valid()?;
 
         let addr = backend.read_value(current_task)?;
 
-        let addr = backend.virtual_to_physical(mmu_addr, addr).valid()?;
+        let addr = backend.virtual_to_physical(self.kpgd, addr).valid()?;
         let task_struct = self.profile.syms.get_struct("task_struct")?;
 
         for win in task_struct.fields[..100].windows(2) {
@@ -161,14 +152,14 @@ impl Linux {
         Ok(())
     }
 
-    pub fn current_process<B: ice::Backend<Arch = ice::arch::X86_64>>(
+    pub fn current_process<B: ice::Backend>(
         &self,
         backend: &B,
         cpuid: usize,
     ) -> IceResult<Process> {
         let mmu_addr = kernel_page_dir(backend, &self.profile)?;
 
-        let current_task = per_cpu(backend, cpuid)
+        let current_task = per_cpu(backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
         let current_task = backend
             .virtual_to_physical(mmu_addr, current_task)
@@ -211,7 +202,6 @@ fn get_banner_addr<B: ice::Backend>(
 
 impl ice::Os for Linux {
     fn quick_check<B: ice::Backend>(backend: &B) -> ice::MemoryAccessResult<bool> {
-        use arch::VcpusList;
         let sregs = match backend.vcpus().into_runtime().as_x86_64() {
             Some(vcpus) => vcpus[0].special_registers,
             None => return Ok(false),
