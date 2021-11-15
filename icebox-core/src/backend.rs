@@ -22,8 +22,9 @@ pub trait Backend {
 
     #[inline]
     fn read_value<T: bytemuck::Pod>(&self, addr: GuestPhysAddr) -> MemoryAccessResult<T> {
-        let mem = &self.memory();
-        mem.read_value(addr)
+        let mut value = bytemuck::Zeroable::zeroed();
+        self.read_memory(addr, bytemuck::bytes_of_mut(&mut value))?;
+        Ok(value)
     }
 
     #[inline]
@@ -38,11 +39,19 @@ pub trait Backend {
 }
 
 trait RuntimeBackend {
-    fn runtime_arch(&self) -> arch::RuntimeArchitecture;
+    fn rt_arch(&self) -> arch::RuntimeArchitecture;
 
-    fn get_vcpus(&self) -> arch::runtime::Vcpus;
+    fn rt_vcpus(&self) -> arch::runtime::Vcpus;
 
-    fn runtime_memory(&self) -> &(dyn Memory + 'static);
+    fn rt_memory(&self) -> &(dyn Memory + 'static);
+
+    fn rt_read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
+
+    fn rt_virtual_to_physical(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+    ) -> MemoryAccessResult<Option<GuestPhysAddr>>;
 }
 
 impl<B> RuntimeBackend for B
@@ -51,20 +60,34 @@ where
     B::Memory: AsDynMemory,
 {
     #[inline]
-    fn runtime_arch(&self) -> arch::RuntimeArchitecture {
+    fn rt_arch(&self) -> arch::RuntimeArchitecture {
         self.arch().into_runtime()
     }
 
     #[inline]
-    fn get_vcpus(&self) -> arch::runtime::Vcpus {
+    fn rt_vcpus(&self) -> arch::runtime::Vcpus {
         use arch::VcpusList;
 
         self.vcpus().into_runtime()
     }
 
     #[inline]
-    fn runtime_memory(&self) -> &(dyn Memory + 'static) {
+    fn rt_memory(&self) -> &(dyn Memory + 'static) {
         self.memory().as_dyn()
+    }
+
+    #[inline]
+    fn rt_read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        self.read_memory(addr, buf)
+    }
+
+    #[inline]
+    fn rt_virtual_to_physical(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        self.virtual_to_physical(mmu_addr, addr)
     }
 }
 
@@ -73,13 +96,32 @@ impl Backend for dyn RuntimeBackend + '_ {
     type Memory = dyn Memory;
 
     #[inline]
+    fn arch(&self) -> Self::Arch {
+        self.rt_arch()
+    }
+
+    #[inline]
     fn vcpus(&self) -> arch::runtime::Vcpus {
-        self.get_vcpus()
+        self.rt_vcpus()
     }
 
     #[inline]
     fn memory(&self) -> &(dyn Memory + 'static) {
-        self.runtime_memory()
+        self.rt_memory()
+    }
+
+    #[inline]
+    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        self.rt_read_memory(addr, buf)
+    }
+
+    #[inline]
+    fn virtual_to_physical(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        self.rt_virtual_to_physical(mmu_addr, addr)
     }
 }
 

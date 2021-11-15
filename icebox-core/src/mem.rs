@@ -8,17 +8,6 @@ pub trait Memory {
 
     fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
-    #[inline]
-    fn read_value<T>(&self, addr: GuestPhysAddr) -> MemoryAccessResult<T>
-    where
-        Self: Sized,
-        T: bytemuck::Pod,
-    {
-        let mut val = bytemuck::Zeroable::zeroed();
-        self.read(addr, bytemuck::bytes_of_mut(&mut val))?;
-        Ok(val)
-    }
-
     #[cfg(feature = "std")]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
         let mut buffer = [0; 1 << 16];
