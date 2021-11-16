@@ -253,3 +253,20 @@ impl<T> ResultExt<T> for IceResult<T> {
         self.map_err(|err| IceError::from_repr(Repr::Context(msg.to_string().into(), err)))
     }
 }
+
+#[cfg(feature = "python")]
+pyo3::create_exception!(icebox, IceboxError, pyo3::exceptions::PyException);
+
+#[cfg(feature = "python")]
+impl From<IceError> for pyo3::PyErr {
+    fn from(err: IceError) -> Self {
+        IceboxError::new_err(err.print_backtrace())
+    }
+}
+
+#[cfg(feature = "python")]
+impl From<MemoryAccessError> for pyo3::PyErr {
+    fn from(err: MemoryAccessError) -> Self {
+        IceError::from(err).into()
+    }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "icebox-python"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "iceboxa"
+crate-type = ["cdylib"]
+
+[dependencies]
+icebox = {path = "../icebox"}
+icebox-core = {path = "../icebox-core", features = ["python"]}
+
+pyo3 = {version = "0.15", features = ["anyhow"]}

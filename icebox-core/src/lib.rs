@@ -10,7 +10,7 @@ pub mod arch;
 pub use arch::Architecture;
 
 mod backend;
-pub use backend::Backend;
+pub use backend::{Backend, RuntimeBackend};
 
 mod error;
 pub use error::{

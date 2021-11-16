@@ -6,4 +6,5 @@ members = [
     "icebox",
     "icebox-core",
     "patch",
+    "python",
 ]

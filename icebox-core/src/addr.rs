@@ -4,6 +4,7 @@ use core::ops::SubAssign;
 use core::{fmt, ops::Add};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
 pub struct GuestPhysAddr(pub u64);
 
@@ -28,6 +29,7 @@ impl Add<u64> for GuestPhysAddr {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
 pub struct GuestVirtAddr(pub u64);
 
