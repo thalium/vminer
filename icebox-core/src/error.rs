@@ -93,13 +93,6 @@ enum Repr {
     Context(Box<str>, IceError),
 }
 
-impl Drop for Repr {
-    fn drop(&mut self) {
-        // Avoid recursions here
-        *self = Repr::InvalidPage;
-    }
-}
-
 #[derive(Debug)]
 pub struct IceError {
     repr: Box<Repr>,
