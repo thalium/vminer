@@ -67,6 +67,20 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 
     #[inline]
+    fn find_kernel_pgd(&self, test: impl Fn(GuestPhysAddr) -> bool) -> Option<GuestPhysAddr> {
+        // First, try to find one in a cr3 register
+        for vcpu in *self {
+            let addr = GuestPhysAddr(vcpu.special_registers.cr3);
+            if test(addr) {
+                return Some(addr);
+            }
+        }
+
+        // If it didn't work, try them all !
+        super::try_all_addresses(test)
+    }
+
+    #[inline]
     fn into_runtime(self) -> runtime::Vcpus<'a> {
         runtime::Vcpus::X86_64(self)
     }

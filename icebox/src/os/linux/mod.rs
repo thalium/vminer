@@ -18,34 +18,14 @@ fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<GuestVirtAdd
     backend.kernel_per_cpu(cpuid, Linux::is_kernel_addr)
 }
 
-fn kernel_page_dir<B: ice::Backend>(backend: &B, profile: &Profile) -> IceResult<GuestPhysAddr> {
-    let vcpus = backend
-        .vcpus()
-        .into_runtime()
-        .as_x86_64()
-        .ok_or_else(ice::IceError::unsupported_architecture)?;
-
-    let addr =
-        per_cpu(backend, 0)? + (profile.fast_syms.current_task - profile.fast_syms.per_cpu_start);
-
-    for vcpu in vcpus {
-        let cr3 = GuestPhysAddr(vcpu.special_registers.cr3);
-
-        if backend.virtual_to_physical(cr3, addr)?.is_some() {
-            return Ok(cr3);
-        }
-    }
-
-    Err("failed to find a valid cr3".into())
-}
-
 impl Linux {
     pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
         (addr.0 as i64) < 0
     }
 
     pub fn create<B: ice::Backend>(backend: &B, profile: Profile) -> IceResult<Self> {
-        let kpgd = kernel_page_dir(backend, &profile)?;
+        let valid_addr = per_cpu(backend, 0)?;
+        let kpgd = backend.find_kernel_pgd(valid_addr)?;
         Ok(Linux { profile, kpgd })
     }
 
@@ -109,16 +89,14 @@ impl Linux {
     }
 
     pub fn current_thread<B: ice::Backend>(&self, backend: &B, cpuid: usize) -> IceResult<Process> {
-        let mmu_addr = kernel_page_dir(backend, &self.profile)?;
-
         let current_task = per_cpu(backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
         let current_task = backend
-            .virtual_to_physical(mmu_addr, current_task)
+            .virtual_to_physical(self.kpgd, current_task)
             .valid()?;
 
         let addr = backend.read_value(current_task)?;
-        let addr = backend.virtual_to_physical(mmu_addr, addr).valid()?;
+        let addr = backend.virtual_to_physical(self.kpgd, addr).valid()?;
 
         Ok(Process::new(addr, self))
     }

@@ -55,6 +55,11 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 
     #[inline]
+    fn find_kernel_pgd(&self, test: impl Fn(GuestPhysAddr) -> bool) -> Option<GuestPhysAddr> {
+        super::try_all_addresses(test)
+    }
+
+    #[inline]
     fn into_runtime(self) -> runtime::Vcpus<'a> {
         runtime::Vcpus::Aarch64(self)
     }

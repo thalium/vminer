@@ -51,6 +51,17 @@ pub trait Backend {
             .kernel_per_cpu(cpuid, check)
             .ok_or_else(|| "could not find per_cpu address".into())
     }
+
+    #[inline]
+    fn find_kernel_pgd(&self, test_addr: GuestVirtAddr) -> IceResult<GuestPhysAddr> {
+        use arch::Vcpus;
+
+        let test = |addr| matches!(self.virtual_to_physical(addr, test_addr), Ok(Some(_)));
+
+        self.vcpus()
+            .find_kernel_pgd(test)
+            .ok_or_else(|| "could not find kernel page directory".into())
+    }
 }
 
 trait RuntimeBackend {

@@ -97,6 +97,14 @@ impl<'a> arch::Vcpus<'a> for Vcpus<'a> {
     }
 
     #[inline]
+    fn find_kernel_pgd(&self, test: impl Fn(GuestPhysAddr) -> bool) -> Option<GuestPhysAddr> {
+        match self {
+            Self::X86_64(vcpus) => vcpus.find_kernel_pgd(test),
+            Self::Aarch64(vcpus) => vcpus.find_kernel_pgd(test),
+        }
+    }
+
+    #[inline]
     fn into_runtime(self) -> Vcpus<'a> {
         self
     }
