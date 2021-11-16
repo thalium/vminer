@@ -135,14 +135,22 @@ impl IceError {
     pub fn unsupported_architecture() -> Self {
         Self::from_repr(Repr::UnsupportedArchitecture)
     }
+
+    pub fn print_backtrace(&self) -> String {
+        let mut trace = String::new();
+        fmt::write(&mut trace, format_args!("{:#}", self)).unwrap();
+        trace
+    }
 }
 
-impl fmt::Display for IceError {
+impl fmt::Display for Repr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &*self.repr {
+        match self {
             Repr::Memory(_) => f.write_str("failed to access physical memory"),
             Repr::InvalidPage => f.write_str("failed to translate virtual address"),
-            Repr::UnsupportedArchitecture => f.write_str("unsupported architecture"),
+            Repr::UnsupportedArchitecture => {
+                f.write_str("operation unsupported by the architecture")
+            }
             Repr::MissingSymbol(sym) => {
                 f.write_fmt(format_args!("missing required symbol \"{}\"", sym))
             }
@@ -155,6 +163,29 @@ impl fmt::Display for IceError {
             Repr::Io(_) => f.write_str("I/O error"),
             Repr::Message(msg, _) | Repr::Context(msg, _) => f.write_str(msg),
             Repr::Other(err) => err.fmt(f),
+        }
+    }
+}
+
+impl fmt::Display for IceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            f.write_fmt(format_args!("{}", self.repr))?;
+
+            let mut current = self.source();
+
+            if current.is_some() {
+                f.write_str("\n\nCaused by:")?;
+            }
+
+            while let Some(cause) = current {
+                f.write_fmt(format_args!("\n    {}", cause))?;
+                current = cause.source();
+            }
+
+            Ok(())
+        } else {
+            self.repr.fmt(f)
         }
     }
 }
