@@ -1,4 +1,6 @@
-use crate::{arch, Architecture, GuestPhysAddr, GuestVirtAddr, Memory, MemoryAccessResult};
+use crate::{
+    arch, Architecture, GuestPhysAddr, GuestVirtAddr, IceResult, Memory, MemoryAccessResult,
+};
 
 pub trait Backend {
     type Arch: for<'a> Architecture<'a>;
@@ -35,6 +37,19 @@ pub trait Backend {
     ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
         self.arch()
             .virtual_to_physical(self.memory(), mmu_addr, addr)
+    }
+
+    #[inline]
+    fn kernel_per_cpu(
+        &self,
+        cpuid: usize,
+        check: impl Fn(GuestVirtAddr) -> bool,
+    ) -> IceResult<GuestVirtAddr> {
+        use arch::Vcpus;
+
+        self.vcpus()
+            .kernel_per_cpu(cpuid, check)
+            .ok_or_else(|| "could not find per_cpu address".into())
     }
 }
 

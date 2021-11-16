@@ -18,6 +18,14 @@ pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu>
 
     fn get(&self, id: usize) -> <Self::Arch as Architecture<'a>>::Vcpu;
 
+    fn kernel_per_cpu(
+        &self,
+        cpuid: usize,
+        check: impl Fn(GuestVirtAddr) -> bool,
+    ) -> Option<GuestVirtAddr> {
+        self.get(cpuid).kernel_per_cpu(check)
+    }
+
     fn into_runtime(self) -> runtime::Vcpus<'a>;
 }
 
@@ -27,6 +35,8 @@ pub trait Vcpu<'a> {
     fn arch(&self) -> Self::Arch;
 
     fn get_regs(&self) -> <Self::Arch as Architecture<'a>>::Registers;
+
+    fn kernel_per_cpu(&self, check: impl Fn(GuestVirtAddr) -> bool) -> Option<GuestVirtAddr>;
 
     fn into_runtime(self) -> runtime::Vcpu<'a>;
 }

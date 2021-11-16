@@ -1,4 +1,4 @@
-use crate::GuestPhysAddr;
+use crate::{GuestPhysAddr, GuestVirtAddr};
 
 use super::runtime;
 
@@ -30,6 +30,21 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     #[inline]
     fn into_runtime(self) -> runtime::Vcpu<'a> {
         runtime::Vcpu::X86_64(self)
+    }
+
+    #[inline]
+    fn kernel_per_cpu(&self, check: impl Fn(GuestVirtAddr) -> bool) -> Option<GuestVirtAddr> {
+        let per_cpu = GuestVirtAddr(self.special_registers.gs.base);
+        if check(per_cpu) {
+            return Some(per_cpu);
+        }
+
+        let per_cpu = GuestVirtAddr(self.gs_kernel_base);
+        if check(per_cpu) {
+            return Some(per_cpu);
+        }
+
+        None
     }
 }
 
@@ -71,8 +86,8 @@ impl<'a> super::Architecture<'a> for X86_64 {
         &self,
         memory: &M,
         mmu_addr: GuestPhysAddr,
-        addr: crate::GuestVirtAddr,
-    ) -> crate::MemoryAccessResult<Option<crate::GuestPhysAddr>> {
+        addr: GuestVirtAddr,
+    ) -> crate::MemoryAccessResult<Option<GuestPhysAddr>> {
         let mut mmu_entry = crate::MmPte(0);
 
         let pml4e_addr = GuestPhysAddr(mmu_addr.0 & (crate::mask(40) << 12)) + 8 * addr.pml4e();

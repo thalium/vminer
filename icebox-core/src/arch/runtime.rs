@@ -1,4 +1,4 @@
-use crate::arch;
+use crate::{arch, GuestPhysAddr, GuestVirtAddr};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Architecture {
@@ -34,6 +34,14 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     #[inline]
     fn into_runtime(self) -> Vcpu<'a> {
         self
+    }
+
+    #[inline]
+    fn kernel_per_cpu(&self, check: impl Fn(GuestVirtAddr) -> bool) -> Option<GuestVirtAddr> {
+        match self {
+            Self::X86_64(vcpu) => vcpu.kernel_per_cpu(check),
+            Self::Aarch64(vcpu) => vcpu.kernel_per_cpu(check),
+        }
     }
 }
 
@@ -188,9 +196,9 @@ impl<'a> arch::Architecture<'a> for Architecture {
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
         memory: &M,
-        mmu_addr: crate::GuestPhysAddr,
-        addr: crate::GuestVirtAddr,
-    ) -> crate::MemoryAccessResult<Option<crate::GuestPhysAddr>> {
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+    ) -> crate::MemoryAccessResult<Option<GuestPhysAddr>> {
         match self {
             Self::X86_64(arch) => arch.virtual_to_physical(memory, mmu_addr, addr),
             Self::Aarch64(arch) => arch.virtual_to_physical(memory, mmu_addr, addr),

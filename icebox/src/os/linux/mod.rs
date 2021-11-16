@@ -15,18 +15,7 @@ pub struct Linux {
 }
 
 fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<GuestVirtAddr> {
-    let cpu = match backend.vcpus().into_runtime().as_x86_64() {
-        Some(vcpus) => &vcpus[cpuid],
-        None => return Err(ice::IceError::unsupported_architecture()),
-    };
-
-    let mut per_cpu = GuestVirtAddr(cpu.special_registers.gs.base);
-    if !Linux::is_kernel_addr(per_cpu) {
-        per_cpu = GuestVirtAddr(cpu.gs_kernel_base);
-        assert!(Linux::is_kernel_addr(per_cpu));
-    }
-
-    Ok(per_cpu)
+    backend.kernel_per_cpu(cpuid, Linux::is_kernel_addr)
 }
 
 fn kernel_page_dir<B: ice::Backend>(backend: &B, profile: &Profile) -> IceResult<GuestPhysAddr> {

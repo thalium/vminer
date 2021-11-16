@@ -1,3 +1,5 @@
+use crate::{GuestPhysAddr, GuestVirtAddr};
+
 use super::runtime;
 
 use bytemuck::{Pod, Zeroable};
@@ -26,6 +28,11 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     #[inline]
     fn into_runtime(self) -> runtime::Vcpu<'a> {
         runtime::Vcpu::Aarch64(self)
+    }
+
+    #[inline]
+    fn kernel_per_cpu(&self, _check: impl Fn(GuestVirtAddr) -> bool) -> Option<GuestVirtAddr> {
+        None
     }
 }
 
@@ -66,9 +73,9 @@ impl<'a> super::Architecture<'a> for Aarch64 {
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
         _memory: &M,
-        _mmu_addr: crate::GuestPhysAddr,
-        _addr: crate::GuestVirtAddr,
-    ) -> crate::MemoryAccessResult<Option<crate::GuestPhysAddr>> {
+        _mmu_addr: GuestPhysAddr,
+        _addr: GuestVirtAddr,
+    ) -> crate::MemoryAccessResult<Option<GuestPhysAddr>> {
         todo!()
     }
 }
