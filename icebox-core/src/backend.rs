@@ -1,5 +1,6 @@
 use crate::{
     arch, Architecture, GuestPhysAddr, GuestVirtAddr, IceResult, Memory, MemoryAccessResult,
+    MemoryAccessResultExt,
 };
 
 pub trait Backend {
@@ -26,6 +27,29 @@ pub trait Backend {
     fn read_value<T: bytemuck::Pod>(&self, addr: GuestPhysAddr) -> MemoryAccessResult<T> {
         let mut value = bytemuck::Zeroable::zeroed();
         self.read_memory(addr, bytemuck::bytes_of_mut(&mut value))?;
+        Ok(value)
+    }
+
+    #[inline]
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        let addr = self.virtual_to_physical(mmu_addr, addr).valid()?;
+        self.read_memory(addr, buf)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn read_value_virtual<T: bytemuck::Pod>(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+    ) -> IceResult<T> {
+        let mut value = bytemuck::Zeroable::zeroed();
+        self.read_virtual_memory(mmu_addr, addr, bytemuck::bytes_of_mut(&mut value))?;
         Ok(value)
     }
 
@@ -73,6 +97,13 @@ trait RuntimeBackend {
 
     fn rt_read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
+    fn rt_read_virtual_memory(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+        buf: &mut [u8],
+    ) -> IceResult<()>;
+
     fn rt_virtual_to_physical(
         &self,
         mmu_addr: GuestPhysAddr,
@@ -108,6 +139,16 @@ where
     }
 
     #[inline]
+    fn rt_read_virtual_memory(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        self.read_virtual_memory(mmu_addr, addr, buf)
+    }
+
+    #[inline]
     fn rt_virtual_to_physical(
         &self,
         mmu_addr: GuestPhysAddr,
@@ -139,6 +180,16 @@ impl Backend for dyn RuntimeBackend + '_ {
     #[inline]
     fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
         self.rt_read_memory(addr, buf)
+    }
+
+    #[inline]
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        self.rt_read_virtual_memory(mmu_addr, addr, buf)
     }
 
     #[inline]

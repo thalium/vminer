@@ -28,8 +28,8 @@ impl<'a> Process<'a> {
             mm = backend.read_value(self.addr + fast_offsets.task_struct_active_mm)?;
         }
 
-        let mm = backend.virtual_to_physical(self.linux.kpgd, mm).valid()?;
-        let pgd_ptr = backend.read_value(mm + fast_offsets.mm_struct_pgd)?;
+        let pgd_ptr =
+            backend.read_value_virtual(self.linux.kpgd, mm + fast_offsets.mm_struct_pgd)?;
         let pgd = backend
             .virtual_to_physical(self.linux.kpgd, pgd_ptr)
             .valid()?;

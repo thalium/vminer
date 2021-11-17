@@ -52,11 +52,8 @@ impl Linux {
     pub fn read_current_task<B: ice::Backend>(&self, backend: &B, cpuid: usize) -> IceResult<()> {
         let current_task = per_cpu(backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
-        let current_task = backend
-            .virtual_to_physical(self.kpgd, current_task)
-            .valid()?;
 
-        let addr = backend.read_value(current_task)?;
+        let addr = backend.read_value_virtual(self.kpgd, current_task)?;
 
         let addr = backend.virtual_to_physical(self.kpgd, addr).valid()?;
         let task_struct = self.profile.syms.get_struct("task_struct")?;
@@ -91,11 +88,9 @@ impl Linux {
     pub fn current_thread<B: ice::Backend>(&self, backend: &B, cpuid: usize) -> IceResult<Process> {
         let current_task = per_cpu(backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
-        let current_task = backend
-            .virtual_to_physical(self.kpgd, current_task)
-            .valid()?;
 
-        let addr = backend.read_value(current_task)?;
+        let addr = backend.read_value_virtual(self.kpgd, current_task)?;
+
         let addr = backend.virtual_to_physical(self.kpgd, addr).valid()?;
 
         Ok(Process::new(addr, self))
