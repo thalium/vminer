@@ -1,4 +1,7 @@
-use alloc::{boxed::Box, string::ToString};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 use core::fmt;
 
 #[cfg(feature = "std")]
@@ -7,7 +10,12 @@ pub use std::error::Error;
 use crate::seal;
 
 #[cfg(not(feature = "std"))]
-pub trait Error: fmt::Display + fmt::Debug {}
+pub trait Error: fmt::Display + fmt::Debug {
+    #[inline]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
+}
 
 #[cfg(not(feature = "std"))]
 impl<E> From<E> for Box<dyn Error + Send + Sync>
@@ -40,9 +48,9 @@ impl fmt::Display for MemoryAccessError {
 }
 
 impl Error for MemoryAccessError {
-    #[cfg(feature = "std")]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            #[cfg(feature = "std")]
             Self::Io(e) => Some(e),
             _ => None,
         }
@@ -191,10 +199,10 @@ impl fmt::Display for IceError {
 }
 
 impl Error for IceError {
-    #[cfg(feature = "std")]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match &*self.repr {
             Repr::Memory(err) => Some(err),
+            #[cfg(feature = "std")]
             Repr::Io(err) => Some(err),
             Repr::Message(_, err) => Some(&**err.as_ref()?),
             Repr::Other(err) => err.source(),
@@ -242,12 +250,6 @@ pub trait ResultExt<T>: seal::Sealed {
 
 impl<T> ResultExt<T> for IceResult<T> {
     fn context(self, msg: impl ToString) -> IceResult<T> {
-        match self {
-            Ok(res) => Ok(res),
-            Err(err) => Err(IceError::from_repr(Repr::Context(
-                msg.to_string().into(),
-                err,
-            ))),
-        }
+        self.map_err(|err| IceError::from_repr(Repr::Context(msg.to_string().into(), err)))
     }
 }
