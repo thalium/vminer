@@ -88,6 +88,56 @@ pub trait Backend {
     }
 }
 
+impl<B: Backend> Backend for alloc::sync::Arc<B> {
+    type Arch = B::Arch;
+    type Memory = B::Memory;
+
+    fn arch(&self) -> Self::Arch {
+        (**self).arch()
+    }
+
+    fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus {
+        (**self).vcpus()
+    }
+
+    fn memory(&self) -> &Self::Memory {
+        (**self).memory()
+    }
+
+    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        (**self).read_memory(addr, buf)
+    }
+
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        (**self).read_virtual_memory(mmu_addr, addr, buf)
+    }
+
+    fn virtual_to_physical(
+        &self,
+        mmu_addr: GuestPhysAddr,
+        addr: GuestVirtAddr,
+    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        (**self).virtual_to_physical(mmu_addr, addr)
+    }
+
+    fn kernel_per_cpu(
+        &self,
+        cpuid: usize,
+        check: impl Fn(GuestVirtAddr) -> bool,
+    ) -> IceResult<GuestVirtAddr> {
+        (**self).kernel_per_cpu(cpuid, check)
+    }
+
+    fn find_kernel_pgd(&self, test_addr: GuestVirtAddr) -> IceResult<GuestPhysAddr> {
+        (**self).find_kernel_pgd(test_addr)
+    }
+}
+
 trait RuntimeBackend {
     fn rt_arch(&self) -> arch::RuntimeArchitecture;
 
