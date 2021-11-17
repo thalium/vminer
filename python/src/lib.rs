@@ -101,7 +101,7 @@ impl RawOs {
     }
 }
 
-#[pyclass]
+#[pyclass(gc)]
 struct Os(PyOwned<RawOs>);
 
 #[pymethods]
@@ -121,6 +121,7 @@ impl Os {
     }
 }
 
+#[pyproto]
 impl<'p> PyGCProtocol<'p> for Os {
     fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
         self.0.traverse(visit)
@@ -131,7 +132,7 @@ impl<'p> PyGCProtocol<'p> for Os {
     }
 }
 
-#[pyclass]
+#[pyclass(gc)]
 struct Process {
     proc: ibc::Process,
     os: PyOwned<RawOs>,
@@ -154,6 +155,7 @@ impl Process {
     }
 }
 
+#[pyproto]
 impl<'p> PyGCProtocol<'p> for Process {
     fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
         self.os.traverse(visit)
