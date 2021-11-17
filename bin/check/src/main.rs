@@ -17,8 +17,8 @@ fn main() {
         println!("{:016x}", vcpu.gs_kernel_base);
     }
 
-    //let addr = virtual_to_physical(&vm, GuestVirtAddr(vm.get_regs().rip)).unwrap();
-    //let _ = dbg!(os::Linux::quick_check(&vm));
+    //let addr = virtual_to_physical(GuestVirtAddr(vm.get_regs().rip)).unwrap();
+    //let _ = dbg!(os::Linux::quick_check());
     //println!("0x{:x}", addr);
 
     let mut syms = ice::SymbolsIndexer::new();
@@ -27,25 +27,25 @@ fn main() {
     syms.read_object_file("../elf").unwrap();
     let profile = os::linux::Profile::new(syms).unwrap();
 
-    let linux = os::Linux::create(&vm, profile).unwrap();
-    let kaslr = linux.get_aslr(&vm).unwrap();
+    let linux = os::Linux::create(vm, profile).unwrap();
+    let kaslr = linux.get_aslr().unwrap();
 
-    for proc in linux.read_tasks(&vm, kaslr).unwrap() {
+    for proc in linux.read_tasks(kaslr).unwrap() {
         let proc = proc.unwrap();
-        println!("{}: {}", proc.pid(&vm).unwrap(), proc.comm(&vm).unwrap());
+        println!("{}: {}", proc.pid().unwrap(), proc.comm().unwrap());
     }
 
     /*
     for cpuid in 0..2 {
-        let proc = linux.current_process(&vm, cpuid).unwrap();
-        let pid = proc.pid(&vm).unwrap();
-        let name = proc.comm(&vm).unwrap();
+        let proc = linux.current_process(cpuid).unwrap();
+        let pid = proc.pid().unwrap();
+        let name = proc.comm().unwrap();
         let cr3 = vm.vcpus()[cpuid].special_registers.cr3;
-        let pgd = proc.pgd(&vm).unwrap();
+        let pgd = proc.pgd().unwrap();
         println!("{}: {} ({:016x} -> {:016x})", pid, name, cr3, pgd);
     }
     */
 
-    // linux.read_current_task(&vm, 0).unwrap();
-    // linux.read_current_task(&vm, 1).unwrap();
+    // linux.read_current_task(0).unwrap();
+    // linux.read_current_task(1).unwrap();
 }

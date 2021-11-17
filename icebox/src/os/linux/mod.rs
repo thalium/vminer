@@ -6,56 +6,66 @@ use crate::core::{
 };
 use core::fmt;
 
+use ice::Backend;
 pub use process::Process;
 pub use profile::Profile;
 
-pub struct Linux {
+pub struct Linux<B> {
+    backend: B,
     profile: Profile,
     kpgd: GuestPhysAddr,
 }
 
 fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<GuestVirtAddr> {
-    backend.kernel_per_cpu(cpuid, Linux::is_kernel_addr)
+    backend.kernel_per_cpu(cpuid, is_kernel_addr)
 }
 
-impl Linux {
-    pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
-        (addr.0 as i64) < 0
-    }
+pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
+    (addr.0 as i64) < 0
+}
 
-    pub fn create<B: ice::Backend>(backend: &B, profile: Profile) -> IceResult<Self> {
-        let valid_addr = per_cpu(backend, 0)?;
+impl<B: Backend> Linux<B> {
+    pub fn create(backend: B, profile: Profile) -> IceResult<Self> {
+        let valid_addr = per_cpu(&backend, 0)?;
         let kpgd = backend.find_kernel_pgd(valid_addr)?;
-        Ok(Linux { profile, kpgd })
+        Ok(Linux {
+            backend,
+            profile,
+            kpgd,
+        })
     }
 
-    pub fn get_aslr<B: ice::Backend>(&self, backend: &B) -> IceResult<i64> {
+    fn kernel_to_physical(&self, addr: GuestVirtAddr) -> IceResult<GuestPhysAddr> {
+        self.backend.virtual_to_physical(self.kpgd, addr).valid()
+    }
+
+    fn read_kernel_value<T: bytemuck::Pod>(&self, addr: GuestVirtAddr) -> IceResult<T> {
+        self.backend.read_value_virtual(self.kpgd, addr)
+    }
+
+    pub fn get_aslr(&self) -> IceResult<i64> {
         let base_banner_addr = self.profile.syms.get_addr("linux_banner")?;
         let (banner_addr, _) =
-            get_banner_addr(backend, self.kpgd)?.ok_or("could not find banner address")?;
+            get_banner_addr(&self.backend, self.kpgd)?.ok_or("could not find banner address")?;
 
         Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
     }
 
-    pub fn read_tasks<'b, B: ice::Backend>(
-        &self,
-        backend: &'b B,
-        kaslr: i64,
-    ) -> IceResult<process::Iter<'_, 'b, B>> {
+    pub fn read_tasks(&self, kaslr: i64) -> IceResult<process::Iter<'_, B>> {
         let init_task = self.profile.fast_syms.init_task + kaslr;
-        let current_task = backend.virtual_to_physical(self.kpgd, init_task).valid()?;
+        let current_task = self.kernel_to_physical(init_task)?;
 
-        Ok(process::Iter::new(self, backend, current_task))
+        Ok(process::Iter::new(self, current_task))
     }
 
     #[cfg(feature = "std")]
-    pub fn read_current_task<B: ice::Backend>(&self, backend: &B, cpuid: usize) -> IceResult<()> {
-        let current_task = per_cpu(backend, cpuid)?
+    pub fn read_current_task(&self, cpuid: usize) -> IceResult<()> {
+        let current_task = per_cpu(&self.backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
 
-        let addr = backend.read_value_virtual(self.kpgd, current_task)?;
+        let addr = self.read_kernel_value(current_task)?;
 
-        let addr = backend.virtual_to_physical(self.kpgd, addr).valid()?;
+        let addr = self.kernel_to_physical(addr)?;
         let task_struct = self.profile.syms.get_struct("task_struct")?;
 
         for win in task_struct.fields[..100].windows(2) {
@@ -64,7 +74,7 @@ impl Linux {
                     let size = (next.offset - current.offset) as usize;
                     let mut buf = [0; 1024];
                     let buf = &mut buf[..size];
-                    backend.read_memory(addr + current.offset, buf)?;
+                    self.backend.read_memory(addr + current.offset, buf)?;
 
                     match size {
                         4 => {
@@ -85,23 +95,18 @@ impl Linux {
         Ok(())
     }
 
-    pub fn current_thread<B: ice::Backend>(&self, backend: &B, cpuid: usize) -> IceResult<Process> {
-        let current_task = per_cpu(backend, cpuid)?
+    pub fn current_thread(&self, cpuid: usize) -> IceResult<Process<B>> {
+        let current_task = per_cpu(&self.backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
 
-        let addr = backend.read_value_virtual(self.kpgd, current_task)?;
-
-        let addr = backend.virtual_to_physical(self.kpgd, addr).valid()?;
+        let addr = self.read_kernel_value(current_task)?;
+        let addr = self.kernel_to_physical(addr)?;
 
         Ok(Process::new(addr, self))
     }
 
-    pub fn current_process<B: ice::Backend>(
-        &self,
-        backend: &B,
-        cpuid: usize,
-    ) -> IceResult<Process> {
-        self.current_thread(backend, cpuid)?.group_leader(backend)
+    pub fn current_process(&self, cpuid: usize) -> IceResult<Process<B>> {
+        self.current_thread(cpuid)?.group_leader()
     }
 }
 
@@ -133,8 +138,8 @@ fn get_banner_addr<B: ice::Backend>(
     Ok(None)
 }
 
-impl ice::Os for Linux {
-    fn quick_check<B: ice::Backend>(backend: &B) -> ice::MemoryAccessResult<bool> {
+impl<B: Backend> ice::Os for Linux<B> {
+    fn quick_check<Back: ice::Backend>(backend: &Back) -> ice::MemoryAccessResult<bool> {
         let sregs = match backend.vcpus().into_runtime().as_x86_64() {
             Some(vcpus) => vcpus[0].special_registers,
             None => return Ok(false),
@@ -146,7 +151,7 @@ impl ice::Os for Linux {
     }
 }
 
-impl fmt::Debug for Linux {
+impl<B> fmt::Debug for Linux<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Linux").finish_non_exhaustive()
     }
@@ -161,9 +166,9 @@ mod tests {
     #[test]
     fn quick_check() {
         let vm = backends::kvm_dump::DumbDump::read("../linux.dump").unwrap();
-        assert!(Linux::quick_check(&vm).unwrap());
+        assert!(Linux::<backends::kvm_dump::DumbDump<ibc::File>>::quick_check(&vm).unwrap());
 
         let vm = backends::kvm_dump::DumbDump::read("../grub.dump").unwrap();
-        assert!(!Linux::quick_check(&vm).unwrap());
+        assert!(!Linux::<backends::kvm_dump::DumbDump<ibc::File>>::quick_check(&vm).unwrap());
     }
 }
