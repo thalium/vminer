@@ -88,7 +88,7 @@ pub trait Backend {
     }
 }
 
-impl<B: Backend> Backend for alloc::sync::Arc<B> {
+impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
     type Arch = B::Arch;
     type Memory = B::Memory;
 

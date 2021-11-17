@@ -12,3 +12,4 @@ icebox = {path = "../icebox"}
 icebox-core = {path = "../icebox-core", features = ["python"]}
 
 pyo3 = {version = "0.15", features = ["anyhow"]}
+log = "0.4"
