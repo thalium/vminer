@@ -1,5 +1,5 @@
 use icebox::backends::kvm_dump;
-use icebox::core::{self as ice, Backend};
+use icebox::core::{self as ice, Backend, Os};
 use icebox::os;
 
 fn main() {
@@ -32,7 +32,11 @@ fn main() {
 
     for proc in linux.read_tasks(kaslr).unwrap() {
         let proc = proc.unwrap();
-        println!("{}: {}", proc.pid().unwrap(), proc.comm().unwrap());
+        println!(
+            "{}: {}",
+            linux.process_pid(proc).unwrap(),
+            linux.process_name(proc).unwrap()
+        );
     }
 
     /*

@@ -1,13 +1,23 @@
-use crate::{Backend, GuestPhysAddr, MemoryAccessResult};
+use crate::{GuestPhysAddr, IceResult};
+use alloc::string::String;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Thread(pub GuestPhysAddr);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Process(pub GuestPhysAddr);
 
 pub trait Os {
-    fn quick_check<B: Backend>(_backend: &B) -> MemoryAccessResult<bool> {
-        Ok(false)
+    fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
+
+    fn current_process(&self, cpuid: usize) -> IceResult<Process> {
+        let thread = self.current_thread(cpuid)?;
+        self.thread_process(thread)
     }
+
+    fn process_pid(&self, proc: Process) -> IceResult<u32>;
+
+    fn process_name(&self, proc: Process) -> IceResult<String>;
+
+    fn thread_process(&self, thread: Thread) -> IceResult<Process>;
 }

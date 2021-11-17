@@ -3,8 +3,8 @@ use alloc::string::String;
 use ibc::{GuestPhysAddr, GuestVirtAddr, IceResult};
 
 #[derive(Debug)]
-pub struct Process<'a, B> {
-    pub addr: GuestPhysAddr,
+pub(super) struct Process<'a, B> {
+    raw: ibc::Process,
     linux: &'a super::Linux<B>,
 }
 
@@ -16,13 +16,14 @@ impl<B> Clone for Process<'_, B> {
 
 impl<B> Copy for Process<'_, B> {}
 
+#[allow(dead_code)]
 impl<'a, B: ibc::Backend> Process<'a, B> {
-    pub fn new(addr: GuestPhysAddr, linux: &'a super::Linux<B>) -> Self {
-        Self { addr, linux }
+    pub fn new(raw: ibc::Process, linux: &'a super::Linux<B>) -> Self {
+        Self { raw, linux }
     }
 
     fn read_value<T: bytemuck::Pod>(&self, offset: u64) -> IceResult<T> {
-        Ok(self.linux.backend.read_value(self.addr + offset)?)
+        Ok(self.linux.backend.read_value(self.raw.0 + offset)?)
     }
 
     pub fn pid(&self) -> IceResult<u32> {
@@ -48,16 +49,16 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         Ok(pgd)
     }
 
-    pub fn group_leader(&self) -> IceResult<Process<'a, B>> {
+    pub fn group_leader(&self) -> IceResult<ibc::Process> {
         let addr = self.read_value(self.linux.profile.fast_offsets.task_struct_group_leader)?;
         let addr = self.linux.kernel_to_physical(addr)?;
-        Ok(Process::new(addr, self.linux))
+        Ok(ibc::Process(addr))
     }
 
     pub fn read_comm(&self, buf: &mut [u8]) -> IceResult<()> {
         let buf = if buf.len() >= 16 { &mut buf[..16] } else { buf };
         self.linux.backend.read_memory(
-            self.addr + self.linux.profile.fast_offsets.task_struct_comm,
+            self.raw.0 + self.linux.profile.fast_offsets.task_struct_comm,
             buf,
         )?;
         Ok(())
@@ -84,11 +85,11 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         } else {
             buf
         };
-        self.linux.backend.read_memory(self.addr + offset, buf)?;
+        self.linux.backend.read_memory(self.raw.0 + offset, buf)?;
         Ok(())
     }
 
-    pub fn next(&self) -> IceResult<Process<'a, B>> {
+    pub fn next(&self) -> IceResult<ibc::Process> {
         let offsets = &self.linux.profile.fast_offsets;
 
         let next_offset = offsets.task_struct_tasks + offsets.list_head_next;
@@ -96,10 +97,10 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         addr -= offsets.task_struct_tasks;
         let addr = self.linux.kernel_to_physical(addr)?;
 
-        Ok(Self::new(addr, self.linux))
+        Ok(ibc::Process(addr))
     }
 
-    pub fn prev(&self) -> IceResult<Process<'a, B>> {
+    pub fn prev(&self) -> IceResult<ibc::Process> {
         let offsets = &self.linux.profile.fast_offsets;
 
         let prev_offset = offsets.task_struct_tasks + offsets.list_head_prev;
@@ -107,7 +108,7 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         addr -= offsets.task_struct_tasks;
         let addr = self.linux.kernel_to_physical(addr)?;
 
-        Ok(Self::new(addr, self.linux))
+        Ok(ibc::Process(addr))
     }
 }
 
@@ -119,13 +120,14 @@ enum State {
 }
 
 pub struct Iter<'a, B: ibc::Backend> {
-    first_addr: GuestPhysAddr,
-    next: Process<'a, B>,
+    linux: &'a super::Linux<B>,
+    first: ibc::Process,
+    next: ibc::Process,
     state: State,
 }
 
 impl<'a, B: ibc::Backend> Iterator for Iter<'a, B> {
-    type Item = IceResult<Process<'a, B>>;
+    type Item = IceResult<ibc::Process>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = match self.state {
@@ -134,7 +136,7 @@ impl<'a, B: ibc::Backend> Iterator for Iter<'a, B> {
                 self.next
             }
             State::Running => {
-                if self.next.addr == self.first_addr {
+                if self.next == self.first {
                     return None;
                 }
                 self.next
@@ -142,7 +144,7 @@ impl<'a, B: ibc::Backend> Iterator for Iter<'a, B> {
             State::Error => return None,
         };
 
-        self.next = match current.next() {
+        self.next = match Process::new(current, self.linux).next() {
             Ok(next) => next,
             Err(e) => {
                 self.state = State::Error;
@@ -154,10 +156,11 @@ impl<'a, B: ibc::Backend> Iterator for Iter<'a, B> {
 }
 
 impl<'a, B: ibc::Backend> Iter<'a, B> {
-    pub(super) fn new(linux: &'a super::Linux<B>, first_addr: GuestPhysAddr) -> Self {
+    pub(super) fn new(linux: &'a super::Linux<B>, first: ibc::Process) -> Self {
         Self {
-            first_addr,
-            next: Process::new(first_addr, linux),
+            linux,
+            first,
+            next: first,
             state: State::First,
         }
     }

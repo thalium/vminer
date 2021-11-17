@@ -1,13 +1,11 @@
 pub mod process;
 pub mod profile;
 
-use crate::core::{
-    self as ice, arch::Vcpus, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt,
-};
+use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt};
+use alloc::string::String;
 use core::fmt;
 
-use ice::Backend;
-pub use process::Process;
+use process::Process;
 pub use profile::Profile;
 
 pub struct Linux<B> {
@@ -20,14 +18,19 @@ fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<GuestVirtAdd
     backend.kernel_per_cpu(cpuid, is_kernel_addr)
 }
 
+fn find_kpgd<B: ice::Backend>(backend: &B) -> IceResult<GuestPhysAddr> {
+    let valid_addr = per_cpu(backend, 0)?;
+    backend.find_kernel_pgd(valid_addr)
+}
+
 pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
     (addr.0 as i64) < 0
 }
 
-impl<B: Backend> Linux<B> {
+impl<B: ice::Backend> Linux<B> {
     pub fn create(backend: B, profile: Profile) -> IceResult<Self> {
-        let valid_addr = per_cpu(&backend, 0)?;
-        let kpgd = backend.find_kernel_pgd(valid_addr)?;
+        let kpgd = find_kpgd(&backend)?;
+
         Ok(Linux {
             backend,
             profile,
@@ -55,7 +58,7 @@ impl<B: Backend> Linux<B> {
         let init_task = self.profile.fast_syms.init_task + kaslr;
         let current_task = self.kernel_to_physical(init_task)?;
 
-        Ok(process::Iter::new(self, current_task))
+        Ok(process::Iter::new(self, ibc::Process(current_task)))
     }
 
     #[cfg(feature = "std")]
@@ -95,18 +98,14 @@ impl<B: Backend> Linux<B> {
         Ok(())
     }
 
-    pub fn current_thread(&self, cpuid: usize) -> IceResult<Process<B>> {
+    pub fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
         let current_task = per_cpu(&self.backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
 
         let addr = self.read_kernel_value(current_task)?;
         let addr = self.kernel_to_physical(addr)?;
 
-        Ok(Process::new(addr, self))
-    }
-
-    pub fn current_process(&self, cpuid: usize) -> IceResult<Process<B>> {
-        self.current_thread(cpuid)?.group_leader()
+        Ok(ibc::Thread(addr))
     }
 }
 
@@ -138,16 +137,28 @@ fn get_banner_addr<B: ice::Backend>(
     Ok(None)
 }
 
-impl<B: Backend> ice::Os for Linux<B> {
-    fn quick_check<Back: ice::Backend>(backend: &Back) -> ice::MemoryAccessResult<bool> {
-        let sregs = match backend.vcpus().into_runtime().as_x86_64() {
-            Some(vcpus) => vcpus[0].special_registers,
-            None => return Ok(false),
-        };
-
-        let mmu_addr = GuestPhysAddr(sregs.cr3);
-
+impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {
+    fn quick_check(backend: &B) -> IceResult<bool> {
+        let mmu_addr = find_kpgd(backend)?;
         Ok(get_banner_addr(backend, mmu_addr)?.is_some())
+    }
+}
+
+impl<B: ice::Backend> ice::Os for Linux<B> {
+    fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
+        self.current_thread(cpuid)
+    }
+
+    fn thread_process(&self, thread: ibc::Thread) -> IceResult<ibc::Process> {
+        Process::new(ibc::Process(thread.0), self).group_leader()
+    }
+
+    fn process_pid(&self, proc: ibc::Process) -> IceResult<u32> {
+        Process::new(proc, self).pid()
+    }
+
+    fn process_name(&self, proc: ice::Process) -> IceResult<String> {
+        Process::new(proc, self).comm()
     }
 }
 
@@ -160,15 +171,14 @@ impl<B> fmt::Debug for Linux<B> {
 #[cfg(test)]
 mod tests {
     use crate::backends;
-    use crate::core::Os;
-    use crate::os::linux::Linux;
+    use crate::os::{Linux, OsBuilder};
 
     #[test]
     fn quick_check() {
         let vm = backends::kvm_dump::DumbDump::read("../linux.dump").unwrap();
-        assert!(Linux::<backends::kvm_dump::DumbDump<ibc::File>>::quick_check(&vm).unwrap());
+        assert!(Linux::quick_check(&vm).unwrap());
 
         let vm = backends::kvm_dump::DumbDump::read("../grub.dump").unwrap();
-        assert!(!Linux::<backends::kvm_dump::DumbDump<ibc::File>>::quick_check(&vm).unwrap());
+        assert!(!Linux::quick_check(&vm).unwrap());
     }
 }
