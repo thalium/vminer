@@ -76,6 +76,12 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         Ok(String::from_utf8_lossy(buf).into_owned())
     }
 
+    pub fn parent(&self) -> IceResult<ibc::Process> {
+        let addr = self.read_value(self.linux.profile.fast_offsets.task_struct_real_parent)?;
+        let addr = self.linux.kernel_to_physical(addr)?;
+        Ok(ibc::Process(addr))
+    }
+
     pub fn read_field(&self, field_name: &str, buf: &mut [u8]) -> IceResult<()> {
         let task_struct = self.linux.profile.syms.get_struct("task_struct")?;
         let (offset, size) = task_struct.find_offset_and_size(field_name)?;

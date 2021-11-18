@@ -161,6 +161,15 @@ impl Process {
         let name = os.0.process_name(self.proc)?;
         Ok(name)
     }
+
+    fn parent(&self, py: Python) -> PyResult<Process> {
+        let os = self.os.borrow(py)?;
+        let parent = os.0.process_parent(self.proc)?;
+        Ok(Process {
+            proc: parent,
+            os: self.os.clone_ref(py),
+        })
+    }
 }
 
 #[pyproto]

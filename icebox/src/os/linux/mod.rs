@@ -160,6 +160,10 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn process_name(&self, proc: ice::Process) -> IceResult<String> {
         Process::new(proc, self).comm()
     }
+
+    fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
+        Process::new(proc, self).parent()
+    }
 }
 
 impl<B> fmt::Debug for Linux<B> {
