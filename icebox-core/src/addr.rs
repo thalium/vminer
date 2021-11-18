@@ -28,6 +28,20 @@ impl Add<u64> for GuestPhysAddr {
     }
 }
 
+impl Add<i64> for GuestPhysAddr {
+    type Output = Self;
+
+    fn add(self, rhs: i64) -> Self {
+        let (res, o) = self.0.overflowing_add(rhs as u64);
+
+        if cfg!(debug_assertions) && (o ^ (rhs < 0)) {
+            panic!("attempt to add with overflow");
+        }
+
+        Self(res)
+    }
+}
+
 impl Sub<u64> for GuestPhysAddr {
     type Output = GuestPhysAddr;
 
@@ -109,10 +123,18 @@ impl Add<i64> for GuestVirtAddr {
 }
 
 impl Sub<GuestVirtAddr> for GuestVirtAddr {
-    type Output = u64;
+    type Output = i64;
 
-    fn sub(self, rhs: GuestVirtAddr) -> u64 {
-        self.0 - rhs.0
+    fn sub(self, rhs: GuestVirtAddr) -> i64 {
+        self.0.overflowing_sub(rhs.0).0 as i64
+    }
+}
+
+impl Sub<u64> for GuestVirtAddr {
+    type Output = Self;
+
+    fn sub(self, rhs: u64) -> Self {
+        Self(self.0 - rhs)
     }
 }
 
