@@ -114,10 +114,7 @@ struct Os(PyOwned<RawOs>);
 
 impl Os {
     fn make_proc(&self, py: Python, proc: ibc::Process) -> Process {
-        Process {
-            proc,
-            os: self.0.clone_ref(py),
-        }
+        Process::new(py, proc, &self.0)
     }
 }
 
@@ -163,6 +160,15 @@ struct Process {
     os: PyOwned<RawOs>,
 }
 
+impl Process {
+    fn new(py: Python, proc: ibc::Process, os: &PyOwned<RawOs>) -> Self {
+        Self {
+            proc,
+            os: os.clone_ref(py),
+        }
+    }
+}
+
 #[pymethods]
 impl Process {
     #[getter]
@@ -186,6 +192,20 @@ impl Process {
             proc: parent,
             os: self.os.clone_ref(py),
         })
+    }
+
+    fn children(&self, py: Python) -> PyResult<Vec<Process>> {
+        let mut children = Vec::new();
+
+        self.os
+            .borrow(py)?
+            .0
+            .process_for_each_child(self.proc, &mut |proc| {
+                children.push(Process::new(py, proc, &self.os));
+                Ok(())
+            })?;
+
+        Ok(children)
     }
 }
 

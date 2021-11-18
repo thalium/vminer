@@ -114,6 +114,28 @@ impl<B: ice::Backend> Linux<B> {
 
         Ok(ibc::Thread(addr))
     }
+
+    pub fn iterate_list(
+        &self,
+        head: GuestPhysAddr,
+        mut f: impl FnMut(GuestPhysAddr) -> IceResult<()>,
+    ) -> IceResult<()> {
+        let mut pos = head;
+        let next_offset = self.profile.fast_offsets.list_head_next;
+
+        loop {
+            let next = self.backend.read_value(pos + next_offset)?;
+            pos = self.kernel_to_physical(next)?;
+
+            if pos == head {
+                break;
+            }
+
+            f(pos)?;
+        }
+
+        Ok(())
+    }
 }
 
 fn get_banner_addr<B: ice::Backend>(
@@ -170,6 +192,18 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
         Process::new(proc, self).parent()
+    }
+
+    fn process_for_each_child(
+        &self,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
+    ) -> IceResult<()> {
+        let offsets = &self.profile.fast_offsets;
+
+        self.iterate_list(proc.0 + offsets.task_struct_children, |addr| {
+            f(ibc::Process(addr - offsets.task_struct_sibling))
+        })
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {

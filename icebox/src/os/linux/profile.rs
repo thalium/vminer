@@ -16,11 +16,13 @@ pub(super) struct FastOffsets {
     pub(super) mm_struct_pgd: u64,
 
     pub(super) task_struct_active_mm: u64,
+    pub(super) task_struct_children: u64,
     pub(super) task_struct_comm: u64,
     pub(super) task_struct_group_leader: u64,
     pub(super) task_struct_mm: u64,
     pub(super) task_struct_real_parent: u64,
     pub(super) task_struct_pid: u64,
+    pub(super) task_struct_sibling: u64,
     pub(super) task_struct_tasks: u64,
     pub(super) task_struct_tgid: u64,
 }
@@ -43,11 +45,13 @@ impl Profile {
 
         let task_struct = syms.get_struct("task_struct")?;
         let task_struct_active_mm = task_struct.find_offset("active_mm")?;
+        let task_struct_children = task_struct.find_offset("children")?;
         let task_struct_comm = task_struct.find_offset("comm")?;
         let task_struct_group_leader = task_struct.find_offset("group_leader")?;
         let task_struct_mm = task_struct.find_offset("mm")?;
         let task_struct_parent = task_struct.find_offset("real_parent")?;
         let task_struct_pid = task_struct.find_offset("pid")?;
+        let task_struct_sibling = task_struct.find_offset("sibling")?;
         let task_struct_tasks = task_struct.find_offset("tasks")?;
         let task_struct_tgid = task_struct.find_offset("tgid")?;
 
@@ -70,6 +74,7 @@ impl Profile {
                 list_head_prev,
 
                 task_struct_active_mm,
+                task_struct_children,
                 task_struct_comm,
                 task_struct_group_leader,
                 task_struct_mm,
@@ -77,6 +82,7 @@ impl Profile {
                 task_struct_pid,
                 task_struct_tasks,
                 task_struct_tgid,
+                task_struct_sibling,
             },
         })
     }

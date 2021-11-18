@@ -28,6 +28,14 @@ impl Add<u64> for GuestPhysAddr {
     }
 }
 
+impl Sub<u64> for GuestPhysAddr {
+    type Output = GuestPhysAddr;
+
+    fn sub(self, rhs: u64) -> Self::Output {
+        Self(self.0 - rhs)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
