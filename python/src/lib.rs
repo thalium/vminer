@@ -126,6 +126,11 @@ impl Os {
         Ok(Os(PyOwned::new(py, raw)?))
     }
 
+    fn init_process(&self, py: Python) -> PyResult<Process> {
+        let init = self.0.borrow(py)?.0.init_process()?;
+        Ok(self.make_proc(py, init))
+    }
+
     fn current_process(&self, py: Python, cpuid: usize) -> PyResult<Process> {
         let proc = self.0.borrow(py)?.0.current_process(cpuid)?;
         Ok(self.make_proc(py, proc))

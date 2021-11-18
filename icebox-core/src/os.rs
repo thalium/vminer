@@ -8,6 +8,7 @@ pub struct Thread(pub GuestPhysAddr);
 pub struct Process(pub GuestPhysAddr);
 
 pub trait Os {
+    fn init_process(&self) -> IceResult<Process>;
     fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
     fn current_process(&self, cpuid: usize) -> IceResult<Process> {
         let thread = self.current_thread(cpuid)?;

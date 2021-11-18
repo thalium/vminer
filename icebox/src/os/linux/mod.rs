@@ -174,6 +174,11 @@ impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {
 }
 
 impl<B: ice::Backend> ice::Os for Linux<B> {
+    fn init_process(&self) -> IceResult<ibc::Process> {
+        let init_task = self.profile.fast_syms.init_task + self.kaslr;
+        Ok(ibc::Process(self.kernel_to_physical(init_task)?))
+    }
+
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
         self.current_thread(cpuid)
     }
@@ -207,8 +212,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
-        let init_task = self.profile.fast_syms.init_task + self.kaslr;
-        let mut current = ibc::Process(self.kernel_to_physical(init_task)?);
+        let mut current = self.init_process()?;
 
         loop {
             f(current)?;
