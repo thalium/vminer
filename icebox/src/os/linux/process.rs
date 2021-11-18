@@ -95,28 +95,6 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         Ok(())
     }
 
-    pub fn next(&self) -> IceResult<ibc::Process> {
-        let offsets = &self.linux.profile.fast_offsets;
-
-        let next_offset = offsets.task_struct_tasks + offsets.list_head_next;
-        let mut addr = self.read_value(next_offset)?;
-        addr -= offsets.task_struct_tasks;
-        let addr = self.linux.kernel_to_physical(addr)?;
-
-        Ok(ibc::Process(addr))
-    }
-
-    pub fn prev(&self) -> IceResult<ibc::Process> {
-        let offsets = &self.linux.profile.fast_offsets;
-
-        let prev_offset = offsets.task_struct_tasks + offsets.list_head_prev;
-        let mut addr = self.read_value(prev_offset)?;
-        addr -= offsets.task_struct_tasks;
-        let addr = self.linux.kernel_to_physical(addr)?;
-
-        Ok(ibc::Process(addr))
-    }
-
     fn flags(&self) -> IceResult<u32> {
         let mut flags = 0;
         self.read_field("flags", bytemuck::bytes_of_mut(&mut flags))?;
@@ -126,59 +104,5 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
     pub fn is_kernel(&self) -> IceResult<bool> {
         let flags = self.flags()?;
         Ok(flags & 0x200000 != 0)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum State {
-    First,
-    Running,
-    Error,
-}
-
-pub struct Iter<'a, B: ibc::Backend> {
-    linux: &'a super::Linux<B>,
-    first: ibc::Process,
-    next: ibc::Process,
-    state: State,
-}
-
-impl<'a, B: ibc::Backend> Iterator for Iter<'a, B> {
-    type Item = IceResult<ibc::Process>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = match self.state {
-            State::First => {
-                self.state = State::Running;
-                self.next
-            }
-            State::Running => {
-                if self.next == self.first {
-                    return None;
-                }
-                self.next
-            }
-            State::Error => return None,
-        };
-
-        self.next = match Process::new(current, self.linux).next() {
-            Ok(next) => next,
-            Err(e) => {
-                self.state = State::Error;
-                return Some(Err(e));
-            }
-        };
-        Some(Ok(current))
-    }
-}
-
-impl<'a, B: ibc::Backend> Iter<'a, B> {
-    pub(super) fn new(linux: &'a super::Linux<B>, first: ibc::Process) -> Self {
-        Self {
-            linux,
-            first,
-            next: first,
-            state: State::First,
-        }
     }
 }

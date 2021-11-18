@@ -11,6 +11,7 @@ pub(crate) struct FastSymbols {
 
 pub(super) struct FastOffsets {
     pub(super) list_head_next: u64,
+    #[allow(unused)]
     pub(super) list_head_prev: u64,
 
     pub(super) mm_struct_pgd: u64,

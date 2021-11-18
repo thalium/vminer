@@ -61,13 +61,6 @@ impl<B: ice::Backend> Linux<B> {
         self.backend.read_value_virtual(self.kpgd, addr)
     }
 
-    pub fn read_tasks(&self) -> IceResult<process::Iter<'_, B>> {
-        let init_task = self.profile.fast_syms.init_task + self.kaslr;
-        let current_task = self.kernel_to_physical(init_task)?;
-
-        Ok(process::Iter::new(self, ibc::Process(current_task)))
-    }
-
     #[cfg(feature = "std")]
     pub fn read_current_task(&self, cpuid: usize) -> IceResult<()> {
         let current_task = per_cpu(&self.backend, cpuid)?
@@ -228,16 +221,13 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
-        let mut current = self.init_process()?;
+        let offsets = &self.profile.fast_offsets;
+        let init = self.init_process()?;
 
-        loop {
-            f(current)?;
-
-            current = Process::new(current, self).next()?;
-            if self.process_pid(current)? == 0 {
-                break;
-            }
-        }
+        f(init)?;
+        self.iterate_list(init.0 + offsets.task_struct_tasks, |addr| {
+            f(ibc::Process(addr - offsets.task_struct_tasks))
+        })?;
 
         Ok(())
     }
