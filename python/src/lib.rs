@@ -112,6 +112,15 @@ impl RawOs {
 #[pyclass(gc)]
 struct Os(PyOwned<RawOs>);
 
+impl Os {
+    fn make_proc(&self, py: Python, proc: ibc::Process) -> Process {
+        Process {
+            proc,
+            os: self.0.clone_ref(py),
+        }
+    }
+}
+
 #[pymethods]
 impl Os {
     #[new]
@@ -122,10 +131,18 @@ impl Os {
 
     fn current_process(&self, py: Python, cpuid: usize) -> PyResult<Process> {
         let proc = self.0.borrow(py)?.0.current_process(cpuid)?;
-        Ok(Process {
-            proc,
-            os: self.0.clone_ref(py),
-        })
+        Ok(self.make_proc(py, proc))
+    }
+
+    fn procs(&self, py: Python) -> PyResult<Vec<Process>> {
+        let mut procs = Vec::new();
+
+        self.0.borrow(py)?.0.for_each_process(&mut |proc| {
+            procs.push(self.make_proc(py, proc));
+            Ok(())
+        })?;
+
+        Ok(procs)
     }
 }
 

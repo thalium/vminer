@@ -28,9 +28,8 @@ fn main() {
     let profile = os::linux::Profile::new(syms).unwrap();
 
     let linux = os::Linux::create(vm, profile).unwrap();
-    let kaslr = linux.get_aslr().unwrap();
 
-    for proc in linux.read_tasks(kaslr).unwrap() {
+    for proc in linux.read_tasks().unwrap() {
         let proc = proc.unwrap();
         println!(
             "{}: {}",

@@ -18,5 +18,7 @@ pub trait Os {
     fn process_name(&self, proc: Process) -> IceResult<String>;
     fn process_parent(&self, proc: Process) -> IceResult<Process>;
 
+    fn for_each_process(&self, f: &mut dyn FnMut(Process) -> IceResult<()>) -> IceResult<()>;
+
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
 }

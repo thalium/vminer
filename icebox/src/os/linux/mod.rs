@@ -12,6 +12,7 @@ pub struct Linux<B> {
     backend: B,
     profile: Profile,
     kpgd: GuestPhysAddr,
+    kaslr: i64,
 }
 
 fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<GuestVirtAddr> {
@@ -23,6 +24,18 @@ fn find_kpgd<B: ice::Backend>(backend: &B) -> IceResult<GuestPhysAddr> {
     backend.find_kernel_pgd(valid_addr)
 }
 
+pub fn get_aslr<B: ice::Backend>(
+    backend: &B,
+    profile: &Profile,
+    kpgd: GuestPhysAddr,
+) -> IceResult<i64> {
+    let base_banner_addr = profile.syms.get_addr("linux_banner")?;
+    let (banner_addr, _) =
+        get_banner_addr(backend, kpgd)?.ok_or("could not find banner address")?;
+
+    Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
+}
+
 pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
     (addr.0 as i64) < 0
 }
@@ -30,11 +43,13 @@ pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
 impl<B: ice::Backend> Linux<B> {
     pub fn create(backend: B, profile: Profile) -> IceResult<Self> {
         let kpgd = find_kpgd(&backend)?;
+        let kaslr = get_aslr(&backend, &profile, kpgd)?;
 
         Ok(Linux {
             backend,
             profile,
             kpgd,
+            kaslr,
         })
     }
 
@@ -46,16 +61,8 @@ impl<B: ice::Backend> Linux<B> {
         self.backend.read_value_virtual(self.kpgd, addr)
     }
 
-    pub fn get_aslr(&self) -> IceResult<i64> {
-        let base_banner_addr = self.profile.syms.get_addr("linux_banner")?;
-        let (banner_addr, _) =
-            get_banner_addr(&self.backend, self.kpgd)?.ok_or("could not find banner address")?;
-
-        Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
-    }
-
-    pub fn read_tasks(&self, kaslr: i64) -> IceResult<process::Iter<'_, B>> {
-        let init_task = self.profile.fast_syms.init_task + kaslr;
+    pub fn read_tasks(&self) -> IceResult<process::Iter<'_, B>> {
+        let init_task = self.profile.fast_syms.init_task + self.kaslr;
         let current_task = self.kernel_to_physical(init_task)?;
 
         Ok(process::Iter::new(self, ibc::Process(current_task)))
@@ -163,6 +170,22 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
         Process::new(proc, self).parent()
+    }
+
+    fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
+        let init_task = self.profile.fast_syms.init_task + self.kaslr;
+        let mut current = ibc::Process(self.kernel_to_physical(init_task)?);
+
+        loop {
+            f(current)?;
+
+            current = Process::new(current, self).next()?;
+            if self.process_pid(current)? == 0 {
+                break;
+            }
+        }
+
+        Ok(())
     }
 }
 
