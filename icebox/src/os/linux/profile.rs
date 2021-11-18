@@ -25,6 +25,7 @@ pub(super) struct FastOffsets {
     pub(super) task_struct_sibling: u64,
     pub(super) task_struct_tasks: u64,
     pub(super) task_struct_tgid: u64,
+    pub(super) task_struct_thread_group: u64,
 }
 
 pub struct Profile {
@@ -54,9 +55,9 @@ impl Profile {
         let task_struct_sibling = task_struct.find_offset("sibling")?;
         let task_struct_tasks = task_struct.find_offset("tasks")?;
         let task_struct_tgid = task_struct.find_offset("tgid")?;
+        let task_struct_thread_group = task_struct.find_offset("thread_group")?;
 
         let mm_struct = syms.get_struct("mm_struct")?;
-        //dbg!(mm_struct);
         let mm_struct_pgd = mm_struct.find_offset("pgd")?;
 
         Ok(Self {
@@ -83,6 +84,7 @@ impl Profile {
                 task_struct_tasks,
                 task_struct_tgid,
                 task_struct_sibling,
+                task_struct_thread_group,
             },
         })
     }

@@ -26,11 +26,11 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         Ok(self.linux.backend.read_value(self.raw.0 + offset)?)
     }
 
-    pub fn pid(&self) -> IceResult<u32> {
+    pub fn tid(&self) -> IceResult<u32> {
         self.read_value(self.linux.profile.fast_offsets.task_struct_pid)
     }
 
-    pub fn tgid(&self) -> IceResult<u32> {
+    pub fn pid(&self) -> IceResult<u32> {
         self.read_value(self.linux.profile.fast_offsets.task_struct_tgid)
     }
 

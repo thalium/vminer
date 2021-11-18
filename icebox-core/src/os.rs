@@ -24,8 +24,15 @@ pub trait Os {
         proc: Process,
         f: &mut dyn FnMut(Process) -> IceResult<()>,
     ) -> IceResult<()>;
+    fn process_for_each_thread(
+        &self,
+        proc: Process,
+        f: &mut dyn FnMut(Thread) -> IceResult<()>,
+    ) -> IceResult<()>;
 
     fn for_each_process(&self, f: &mut dyn FnMut(Process) -> IceResult<()>) -> IceResult<()>;
 
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
+    fn thread_id(&self, thread: Thread) -> IceResult<u32>;
+    fn thread_name(&self, thread: Thread) -> IceResult<String>;
 }

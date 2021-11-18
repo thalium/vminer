@@ -131,6 +131,11 @@ impl Os {
         Ok(self.make_proc(py, init))
     }
 
+    fn current_thread(&self, py: Python, cpuid: usize) -> PyResult<Thread> {
+        let thread = self.0.borrow(py)?.0.current_thread(cpuid)?;
+        Ok(Thread::new(py, thread, &self.0))
+    }
+
     fn current_process(&self, py: Python, cpuid: usize) -> PyResult<Process> {
         let proc = self.0.borrow(py)?.0.current_process(cpuid)?;
         Ok(self.make_proc(py, proc))
@@ -209,20 +214,73 @@ impl Process {
     fn children(&self, py: Python) -> PyResult<Vec<Process>> {
         let mut children = Vec::new();
 
-        self.os
-            .borrow(py)?
-            .0
-            .process_for_each_child(self.proc, &mut |proc| {
-                children.push(Process::new(py, proc, &self.os));
-                Ok(())
-            })?;
+        let os = self.os.borrow(py)?;
+        os.0.process_for_each_child(self.proc, &mut |proc| {
+            children.push(Process::new(py, proc, &self.os));
+            Ok(())
+        })?;
 
         Ok(children)
+    }
+
+    fn threads(&self, py: Python) -> PyResult<Vec<Thread>> {
+        let mut threads = Vec::new();
+
+        let os = self.os.borrow(py)?;
+        os.0.process_for_each_thread(self.proc, &mut |thread| {
+            threads.push(Thread::new(py, thread, &self.os));
+            Ok(())
+        })?;
+
+        Ok(threads)
     }
 }
 
 #[pyproto]
 impl<'p> PyGCProtocol<'p> for Process {
+    fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
+        self.os.traverse(visit)
+    }
+
+    fn __clear__(&'p mut self) {
+        self.os.clear()
+    }
+}
+
+#[pyclass(gc)]
+struct Thread {
+    thread: ibc::Thread,
+    os: PyOwned<RawOs>,
+}
+
+impl Thread {
+    fn new(py: Python, thread: ibc::Thread, os: &PyOwned<RawOs>) -> Self {
+        Self {
+            thread,
+            os: os.clone_ref(py),
+        }
+    }
+}
+
+#[pymethods]
+impl Thread {
+    #[getter]
+    fn tid(&self, py: Python) -> PyResult<u32> {
+        let os = self.os.borrow(py)?;
+        let pid = os.0.thread_id(self.thread)?;
+        Ok(pid)
+    }
+
+    #[getter]
+    fn name(&self, py: Python) -> PyResult<String> {
+        let os = self.os.borrow(py)?;
+        let name = os.0.thread_name(self.thread)?;
+        Ok(name)
+    }
+}
+
+#[pyproto]
+impl<'p> PyGCProtocol<'p> for Thread {
     fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
         self.os.traverse(visit)
     }

@@ -215,6 +215,18 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         })
     }
 
+    fn process_for_each_thread(
+        &self,
+        proc: ice::Process,
+        f: &mut dyn FnMut(ice::Thread) -> IceResult<()>,
+    ) -> IceResult<()> {
+        let offsets = &self.profile.fast_offsets;
+
+        self.iterate_list(proc.0 + offsets.task_struct_thread_group, |addr| {
+            f(ibc::Thread(addr - offsets.task_struct_thread_group))
+        })
+    }
+
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
         let mut current = self.init_process()?;
 
@@ -228,6 +240,14 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         }
 
         Ok(())
+    }
+
+    fn thread_id(&self, thread: ice::Thread) -> IceResult<u32> {
+        Process::new(ibc::Process(thread.0), self).tid()
+    }
+
+    fn thread_name(&self, thread: ibc::Thread) -> IceResult<String> {
+        self.process_name(ibc::Process(thread.0))
     }
 }
 
