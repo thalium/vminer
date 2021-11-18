@@ -187,6 +187,10 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Process::new(ibc::Process(thread.0), self).group_leader()
     }
 
+    fn process_is_kernel(&self, proc: ibc::Process) -> IceResult<bool> {
+        Process::new(proc, self).is_kernel()
+    }
+
     fn process_pid(&self, proc: ibc::Process) -> IceResult<u32> {
         Process::new(proc, self).pid()
     }

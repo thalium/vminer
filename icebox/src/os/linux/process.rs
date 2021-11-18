@@ -116,6 +116,17 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
 
         Ok(ibc::Process(addr))
     }
+
+    fn flags(&self) -> IceResult<u32> {
+        let mut flags = 0;
+        self.read_field("flags", bytemuck::bytes_of_mut(&mut flags))?;
+        Ok(flags)
+    }
+
+    pub fn is_kernel(&self) -> IceResult<bool> {
+        let flags = self.flags()?;
+        Ok(flags & 0x200000 != 0)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
