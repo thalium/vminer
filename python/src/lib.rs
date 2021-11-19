@@ -277,6 +277,12 @@ impl Thread {
         let name = os.0.thread_name(self.thread)?;
         Ok(name)
     }
+
+    fn process(&self, py: Python) -> PyResult<Process> {
+        let os = self.os.borrow(py)?;
+        let proc = os.0.thread_process(self.thread)?;
+        Ok(Process::new(py, proc, &self.os))
+    }
 }
 
 #[pyproto]
