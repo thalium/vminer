@@ -29,14 +29,16 @@ fn main() {
 
     let linux = os::Linux::create(vm, profile).unwrap();
 
-    for proc in linux.read_tasks().unwrap() {
-        let proc = proc.unwrap();
-        println!(
-            "{}: {}",
-            linux.process_pid(proc).unwrap(),
-            linux.process_name(proc).unwrap()
-        );
-    }
+    linux
+        .for_each_process(&mut |proc| {
+            println!(
+                "{}: {}",
+                linux.process_pid(proc).unwrap(),
+                linux.process_name(proc).unwrap(),
+            );
+            Ok(())
+        })
+        .unwrap();
 
     /*
     for cpuid in 0..2 {
