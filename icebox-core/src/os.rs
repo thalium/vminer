@@ -1,5 +1,5 @@
 use crate::{GuestPhysAddr, IceResult};
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Thread(pub GuestPhysAddr);
@@ -24,13 +24,28 @@ pub trait Os {
         proc: Process,
         f: &mut dyn FnMut(Process) -> IceResult<()>,
     ) -> IceResult<()>;
+    fn process_collect_children(&self, proc: Process) -> IceResult<Vec<Process>> {
+        let mut procs = Vec::new();
+        self.process_for_each_child(proc, &mut |p| Ok(procs.push(p)))?;
+        Ok(procs)
+    }
     fn process_for_each_thread(
         &self,
         proc: Process,
         f: &mut dyn FnMut(Thread) -> IceResult<()>,
     ) -> IceResult<()>;
+    fn process_collect_threads(&self, proc: Process) -> IceResult<Vec<Thread>> {
+        let mut threads = Vec::new();
+        self.process_for_each_thread(proc, &mut |t| Ok(threads.push(t)))?;
+        Ok(threads)
+    }
 
     fn for_each_process(&self, f: &mut dyn FnMut(Process) -> IceResult<()>) -> IceResult<()>;
+    fn collect_processes(&self) -> IceResult<Vec<Process>> {
+        let mut procs = Vec::new();
+        self.for_each_process(&mut |p| Ok(procs.push(p)))?;
+        Ok(procs)
+    }
 
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
     fn thread_id(&self, thread: Thread) -> IceResult<u32>;

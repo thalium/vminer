@@ -141,15 +141,14 @@ impl Os {
         Ok(self.make_proc(py, proc))
     }
 
-    fn procs(&self, py: Python) -> PyResult<Vec<Process>> {
-        let mut procs = Vec::new();
+    fn procs(&self, py: Python) -> PyResult<ProcessIter> {
+        let os = self.0.borrow(py)?;
+        let procs = os.0.collect_processes()?.into_iter();
 
-        self.0.borrow(py)?.0.for_each_process(&mut |proc| {
-            procs.push(self.make_proc(py, proc));
-            Ok(())
-        })?;
-
-        Ok(procs)
+        Ok(ProcessIter {
+            procs,
+            os: self.0.clone_ref(py),
+        })
     }
 }
 
@@ -211,28 +210,24 @@ impl Process {
         })
     }
 
-    fn children(&self, py: Python) -> PyResult<Vec<Process>> {
-        let mut children = Vec::new();
-
+    fn children(&self, py: Python) -> PyResult<ProcessIter> {
         let os = self.os.borrow(py)?;
-        os.0.process_for_each_child(self.proc, &mut |proc| {
-            children.push(Process::new(py, proc, &self.os));
-            Ok(())
-        })?;
+        let procs = os.0.process_collect_children(self.proc)?.into_iter();
 
-        Ok(children)
+        Ok(ProcessIter {
+            procs,
+            os: self.os.clone_ref(py),
+        })
     }
 
-    fn threads(&self, py: Python) -> PyResult<Vec<Thread>> {
-        let mut threads = Vec::new();
-
+    fn threads(&self, py: Python) -> PyResult<ThreadIter> {
         let os = self.os.borrow(py)?;
-        os.0.process_for_each_thread(self.proc, &mut |thread| {
-            threads.push(Thread::new(py, thread, &self.os));
-            Ok(())
-        })?;
+        let threads = os.0.process_collect_threads(self.proc)?.into_iter();
 
-        Ok(threads)
+        Ok(ThreadIter {
+            threads,
+            os: self.os.clone_ref(py),
+        })
     }
 }
 
@@ -293,6 +288,42 @@ impl<'p> PyGCProtocol<'p> for Thread {
 
     fn __clear__(&'p mut self) {
         self.os.clear()
+    }
+}
+
+#[pyclass]
+struct ProcessIter {
+    procs: std::vec::IntoIter<ibc::Process>,
+    os: PyOwned<RawOs>,
+}
+
+#[pyproto]
+impl pyo3::PyIterProtocol for ProcessIter {
+    fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
+        this
+    }
+
+    fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Process>> {
+        let proc = this.procs.next();
+        Ok(proc.map(|proc| Process::new(this.py(), proc, &this.os)))
+    }
+}
+
+#[pyclass]
+struct ThreadIter {
+    threads: std::vec::IntoIter<ibc::Thread>,
+    os: PyOwned<RawOs>,
+}
+
+#[pyproto]
+impl pyo3::PyIterProtocol for ThreadIter {
+    fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
+        this
+    }
+
+    fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Thread>> {
+        let thread = this.threads.next();
+        Ok(thread.map(|thread| Thread::new(this.py(), thread, &this.os)))
     }
 }
 
