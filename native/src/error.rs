@@ -29,6 +29,13 @@ pub fn wrap_result<T>(result: ibc::IceResult<T>, res: &mut mem::MaybeUninit<T>) 
     }
 }
 
+pub fn wrap_unit_result(result: ibc::IceResult<()>) -> *mut Error {
+    match result {
+        Ok(()) => ptr::null_mut(),
+        Err(err) => error_into(err),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn error_with_message(err: *mut Error, context: *mut c_char) -> *mut Error {
     let context = cstring::from_ut8_lossy(context);
@@ -48,7 +55,7 @@ pub unsafe extern "C" fn error_print(err: *const Error, str: *mut c_char, max_le
         return 0;
     }
 
-    let mut fmt = cstring::Formatter::new(str, max_len - 1);
+    let mut fmt = cstring::Formatter::new(str, max_len);
     if err.is_null() {
         let _ = fmt.write_str("success");
     } else {

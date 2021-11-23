@@ -161,7 +161,7 @@ pub unsafe extern "C" fn os_processes(
         Ok(())
     });
     *n_procs = n;
-    error::wrap_result(res, &mut mem::MaybeUninit::new(()))
+    error::wrap_unit_result(res)
 }
 
 #[no_mangle]
@@ -176,7 +176,7 @@ pub unsafe extern "C" fn process_name(
         let _ = fmt::write(&mut fmt, format_args!("{}", n));
         fmt.finish();
     });
-    error::wrap_result(res, &mut mem::MaybeUninit::new(()))
+    error::wrap_unit_result(res)
 }
 
 #[no_mangle]

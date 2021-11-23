@@ -29,7 +29,7 @@ impl Formatter {
     pub unsafe fn new(ptr: *mut c_char, len: usize) -> Self {
         Self {
             ptr,
-            len,
+            len: len - 1,
             written: 0,
         }
     }
