@@ -341,7 +341,12 @@ impl pyo3::PyIterProtocol for ThreadIter {
 
 /// Python module for Icebox
 #[pymodule]
-fn icebox(_py: Python, m: &PyModule) -> PyResult<()> {
+fn icebox(py: Python, m: &PyModule) -> PyResult<()> {
+    let logger = pyo3_log::Logger::new(py, pyo3_log::Caching::Loggers)?;
+    if let Err(err) = logger.install() {
+        log::error!("{}", err);
+    }
+
     m.add_class::<Backend>()?;
     m.add_class::<Dump>()?;
     m.add_class::<Kvm>()?;
