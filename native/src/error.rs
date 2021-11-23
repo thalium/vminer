@@ -1,7 +1,9 @@
 use crate::{c_char, cstring};
 use core::{
     fmt::{self, Write},
-    mem, ptr,
+    mem,
+    num::NonZeroUsize,
+    ptr,
 };
 use ibc::IceError;
 
@@ -51,9 +53,10 @@ pub unsafe extern "C" fn error_missing_symbol(sym: *mut c_char) -> *mut Error {
 
 #[no_mangle]
 pub unsafe extern "C" fn error_print(err: *const Error, str: *mut c_char, max_len: usize) -> usize {
-    if max_len == 0 {
-        return 0;
-    }
+    let max_len = match NonZeroUsize::new(max_len) {
+        Some(l) => l,
+        None => return 0,
+    };
 
     let mut fmt = cstring::Formatter::new(str, max_len);
     if err.is_null() {

@@ -1,5 +1,5 @@
 use alloc::{borrow::Cow, string::String};
-use core::{cmp, fmt, ptr, slice};
+use core::{cmp, fmt, num::NonZeroUsize, ptr, slice};
 
 use crate::c_char;
 
@@ -26,10 +26,10 @@ pub struct Formatter {
 }
 
 impl Formatter {
-    pub unsafe fn new(ptr: *mut c_char, len: usize) -> Self {
+    pub unsafe fn new(ptr: *mut c_char, len: NonZeroUsize) -> Self {
         Self {
             ptr,
-            len: len - 1,
+            len: len.get() - 1,
             written: 0,
         }
     }

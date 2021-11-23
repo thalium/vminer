@@ -11,6 +11,7 @@ use alloc::{boxed::Box, sync::Arc};
 use core::{
     fmt,
     mem::{self, MaybeUninit},
+    num::NonZeroUsize,
 };
 use ibc::{IceError, IceResult};
 
@@ -172,6 +173,11 @@ pub unsafe extern "C" fn process_name(
     max_len: usize,
 ) -> *mut Error {
     let res = os.0.process_name(proc.into()).map(|n| {
+        let max_len = match NonZeroUsize::new(max_len) {
+            Some(l) => l,
+            None => return,
+        };
+
         let mut fmt = cstring::Formatter::new(name, max_len);
         let _ = fmt::write(&mut fmt, format_args!("{}", n));
         fmt.finish();
