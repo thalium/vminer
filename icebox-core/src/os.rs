@@ -14,6 +14,30 @@ pub trait Os {
         let thread = self.current_thread(cpuid)?;
         self.thread_process(thread)
     }
+    fn find_process_by_name(&self, name: &str) -> IceResult<Option<Process>> {
+        let mut proc = None;
+
+        self.for_each_process(&mut |p| {
+            if self.process_name(p)? == name {
+                proc = Some(p);
+            }
+            Ok(())
+        })?;
+
+        Ok(proc)
+    }
+    fn find_process_by_pid(&self, pid: u32) -> IceResult<Option<Process>> {
+        let mut proc = None;
+
+        self.for_each_process(&mut |p| {
+            if self.process_pid(p)? == pid {
+                proc = Some(p);
+            }
+            Ok(())
+        })?;
+
+        Ok(proc)
+    }
 
     fn process_is_kernel(&self, proc: Process) -> IceResult<bool>;
     fn process_pid(&self, proc: Process) -> IceResult<u32>;

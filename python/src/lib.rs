@@ -150,6 +150,18 @@ impl Os {
             os: self.0.clone_ref(py),
         })
     }
+
+    fn find_process_by_name(&self, py: Python, name: &str) -> PyResult<Option<Process>> {
+        let os = self.0.borrow(py)?;
+        let proc = os.0.find_process_by_name(name)?;
+        Ok(proc.map(|p| self.make_proc(py, p)))
+    }
+
+    fn find_process_by_pid(&self, py: Python, pid: u32) -> PyResult<Option<Process>> {
+        let os = self.0.borrow(py)?;
+        let proc = os.0.find_process_by_pid(pid)?;
+        Ok(proc.map(|p| self.make_proc(py, p)))
+    }
 }
 
 #[pyproto]
