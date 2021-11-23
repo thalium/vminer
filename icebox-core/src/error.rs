@@ -102,6 +102,7 @@ enum Repr {
 }
 
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct IceError {
     repr: Box<Repr>,
 }
@@ -117,12 +118,12 @@ impl IceError {
     }
 
     #[cold]
-    pub(crate) fn missing_symbol(sym: &str) -> Self {
+    pub fn missing_symbol(sym: &str) -> Self {
         Self::from_repr(Repr::MissingSymbol(sym.into()))
     }
 
     #[cold]
-    pub(crate) fn missing_field(field: &str, typ: &str) -> Self {
+    pub fn missing_field(field: &str, typ: &str) -> Self {
         Self::from_repr(Repr::MissingField(field.into(), typ.into()))
     }
 

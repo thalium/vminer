@@ -5,6 +5,7 @@ members = [
     "bin/kvm_dump_live",
     "icebox",
     "icebox-core",
+    "native",
     "patch",
     "python",
 ]

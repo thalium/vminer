@@ -1,0 +1,20 @@
+[package]
+name = "native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+std = ["icebox/std", "icebox/kvm", "icebox/linux", "icebox/dump"]
+
+[dependencies]
+icebox = {path = "../icebox", default-features = false, features = ["object"]}
+ibc = {package = "icebox-core", path = "../icebox-core"}
+
+spin = {version = "0.9", default-features = false, features = ["spin_mutex"]}
+log = "0.4"
+
+[build-dependencies]
+cbindgen = "0.20"
