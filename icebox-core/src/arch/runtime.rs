@@ -1,4 +1,4 @@
-use crate::{arch, GuestPhysAddr, GuestVirtAddr};
+use crate::{arch, PhysicalAddress, VirtualAddress};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Architecture {
@@ -37,7 +37,7 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     }
 
     #[inline]
-    fn kernel_per_cpu(&self, check: impl Fn(GuestVirtAddr) -> bool) -> Option<GuestVirtAddr> {
+    fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
         match self {
             Self::X86_64(vcpu) => vcpu.kernel_per_cpu(check),
             Self::Aarch64(vcpu) => vcpu.kernel_per_cpu(check),
@@ -97,7 +97,7 @@ impl<'a> arch::Vcpus<'a> for Vcpus<'a> {
     }
 
     #[inline]
-    fn find_kernel_pgd(&self, test: impl Fn(GuestPhysAddr) -> bool) -> Option<GuestPhysAddr> {
+    fn find_kernel_pgd(&self, test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
         match self {
             Self::X86_64(vcpus) => vcpus.find_kernel_pgd(test),
             Self::Aarch64(vcpus) => vcpus.find_kernel_pgd(test),
@@ -204,9 +204,9 @@ impl<'a> arch::Architecture<'a> for Architecture {
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
         memory: &M,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> crate::MemoryAccessResult<Option<GuestPhysAddr>> {
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
         match self {
             Self::X86_64(arch) => arch.virtual_to_physical(memory, mmu_addr, addr),
             Self::Aarch64(arch) => arch.virtual_to_physical(memory, mmu_addr, addr),

@@ -1,4 +1,4 @@
-use super::{GuestPhysAddr, MemoryAccessError, MemoryAccessResult};
+use super::{MemoryAccessError, MemoryAccessResult, PhysicalAddress};
 
 #[cfg(feature = "std")]
 use std::{fs, io, path::Path};
@@ -6,7 +6,7 @@ use std::{fs, io, path::Path};
 pub trait Memory {
     fn size(&self) -> u64;
 
-    fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
+    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
     #[cfg(feature = "std")]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
@@ -14,7 +14,7 @@ pub trait Memory {
         let size = self.size();
 
         for addr in (0..size).step_by(buffer.len() as _) {
-            self.read(GuestPhysAddr(addr), &mut buffer)?;
+            self.read(PhysicalAddress(addr), &mut buffer)?;
             writer.write_all(&buffer)?;
         }
 
@@ -29,7 +29,7 @@ impl Memory for [u8] {
     }
 
     #[inline]
-    fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (|| {
             let offset = addr.0.try_into().ok()?;
             let this = self.get(offset..)?;
@@ -53,7 +53,7 @@ impl Memory for alloc::vec::Vec<u8> {
     }
 
     #[inline]
-    fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
     }
 
@@ -71,7 +71,7 @@ impl<M: Memory + ?Sized> Memory for &'_ M {
     }
 
     #[inline]
-    fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
     }
 
@@ -89,7 +89,7 @@ impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
     }
 
     #[inline]
-    fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
     }
 
@@ -131,7 +131,7 @@ impl Memory for File {
     }
 
     #[inline]
-    fn read(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         use sync_file::ReadAt;
 
         let offset = self.start + addr.0;

@@ -1,4 +1,4 @@
-use crate::{GuestPhysAddr, GuestVirtAddr};
+use crate::{PhysicalAddress, VirtualAddress};
 
 use super::runtime;
 
@@ -33,13 +33,13 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     #[inline]
-    fn kernel_per_cpu(&self, check: impl Fn(GuestVirtAddr) -> bool) -> Option<GuestVirtAddr> {
-        let per_cpu = GuestVirtAddr(self.special_registers.gs.base);
+    fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
+        let per_cpu = VirtualAddress(self.special_registers.gs.base);
         if check(per_cpu) {
             return Some(per_cpu);
         }
 
-        let per_cpu = GuestVirtAddr(self.gs_kernel_base);
+        let per_cpu = VirtualAddress(self.gs_kernel_base);
         if check(per_cpu) {
             return Some(per_cpu);
         }
@@ -67,10 +67,10 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 
     #[inline]
-    fn find_kernel_pgd(&self, test: impl Fn(GuestPhysAddr) -> bool) -> Option<GuestPhysAddr> {
+    fn find_kernel_pgd(&self, test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
         // First, try to find one in a cr3 register
         for vcpu in *self {
-            let addr = GuestPhysAddr(vcpu.special_registers.cr3);
+            let addr = PhysicalAddress(vcpu.special_registers.cr3);
             if test(addr) {
                 return Some(addr);
             }
@@ -99,12 +99,12 @@ impl<'a> super::Architecture<'a> for X86_64 {
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
         memory: &M,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> crate::MemoryAccessResult<Option<GuestPhysAddr>> {
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
         let mut mmu_entry = crate::MmPte(0);
 
-        let pml4e_addr = GuestPhysAddr(mmu_addr.0 & (crate::mask(40) << 12)) + 8 * addr.pml4e();
+        let pml4e_addr = PhysicalAddress(mmu_addr.0 & (crate::mask(40) << 12)) + 8 * addr.pml4e();
         memory.read(pml4e_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
         if !mmu_entry.is_valid() {
             return Ok(None);

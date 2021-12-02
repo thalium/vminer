@@ -1,6 +1,6 @@
 use alloc::string::String;
 
-use ibc::{GuestPhysAddr, GuestVirtAddr, IceResult};
+use ibc::{IceResult, PhysicalAddress, VirtualAddress};
 
 #[derive(Debug)]
 pub(super) struct Process<'a, B> {
@@ -34,9 +34,9 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         self.read_value(self.linux.profile.fast_offsets.task_struct_tgid)
     }
 
-    pub fn pgd(&self) -> IceResult<GuestPhysAddr> {
+    pub fn pgd(&self) -> IceResult<PhysicalAddress> {
         let fast_offsets = &self.linux.profile.fast_offsets;
-        let mut mm: GuestVirtAddr =
+        let mut mm: VirtualAddress =
             self.read_value(self.linux.profile.fast_offsets.task_struct_mm)?;
         if mm.is_null() {
             mm = self.read_value(self.linux.profile.fast_offsets.task_struct_active_mm)?;

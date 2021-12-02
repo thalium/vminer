@@ -48,13 +48,13 @@ pub struct GuestPhysAddr {
     val: u64,
 }
 
-impl From<ibc::GuestPhysAddr> for GuestPhysAddr {
-    fn from(addr: ibc::GuestPhysAddr) -> Self {
+impl From<ibc::PhysicalAddress> for GuestPhysAddr {
+    fn from(addr: ibc::PhysicalAddress) -> Self {
         Self { val: addr.0 }
     }
 }
 
-impl From<GuestPhysAddr> for ibc::GuestPhysAddr {
+impl From<GuestPhysAddr> for ibc::PhysicalAddress {
     fn from(addr: GuestPhysAddr) -> Self {
         Self(addr.val)
     }

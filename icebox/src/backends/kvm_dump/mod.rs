@@ -3,7 +3,7 @@ use bytemuck::Zeroable;
 use crate::core::{
     self as ice,
     arch::{self, x86_64},
-    Backend, GuestPhysAddr, Memory,
+    Backend, Memory, PhysicalAddress,
 };
 use std::{
     fs,
@@ -73,7 +73,7 @@ impl DumbDump<Vec<u8>> {
     pub fn dump_vm<B: Backend<Arch = arch::X86_64>>(backend: &B) -> io::Result<Self> {
         let memory = backend.memory();
         let mut mem = vec![0; memory.size() as usize];
-        memory.read(GuestPhysAddr(0), &mut mem).unwrap();
+        memory.read(PhysicalAddress(0), &mut mem).unwrap();
 
         let dump = DumbDump {
             vcpus: backend.vcpus().to_vec(),

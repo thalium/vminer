@@ -3,10 +3,10 @@ use alloc::string::String;
 use crate::core::{self as ice, IceResult};
 
 pub(crate) struct FastSymbols {
-    pub(crate) per_cpu_start: ice::GuestVirtAddr,
-    pub(crate) current_task: ice::GuestVirtAddr,
+    pub(crate) per_cpu_start: ice::VirtualAddress,
+    pub(crate) current_task: ice::VirtualAddress,
 
-    pub(super) init_task: ice::GuestVirtAddr,
+    pub(super) init_task: ice::VirtualAddress,
 }
 
 pub(super) struct FastOffsets {
@@ -129,7 +129,7 @@ pub fn parse_kallsyms<R: std::io::BufRead>(
         })();
 
         if let Some((name, addr)) = sym {
-            syms.insert_addr(name, ice::GuestVirtAddr(addr));
+            syms.insert_addr(name, ice::VirtualAddress(addr));
         }
 
         line.clear();

@@ -4,7 +4,7 @@
 extern crate alloc;
 
 mod addr;
-pub use addr::{GuestPhysAddr, GuestVirtAddr, MmPte};
+pub use addr::{MmPte, PhysicalAddress, VirtualAddress};
 
 pub mod arch;
 pub use arch::Architecture;

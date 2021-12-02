@@ -1,4 +1,4 @@
-use crate::{GuestPhysAddr, GuestVirtAddr};
+use crate::{PhysicalAddress, VirtualAddress};
 
 use super::runtime;
 
@@ -31,7 +31,7 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     #[inline]
-    fn kernel_per_cpu(&self, _check: impl Fn(GuestVirtAddr) -> bool) -> Option<GuestVirtAddr> {
+    fn kernel_per_cpu(&self, _check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
         None
     }
 }
@@ -55,7 +55,7 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 
     #[inline]
-    fn find_kernel_pgd(&self, test: impl Fn(GuestPhysAddr) -> bool) -> Option<GuestPhysAddr> {
+    fn find_kernel_pgd(&self, test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
         super::try_all_addresses(test)
     }
 
@@ -78,9 +78,9 @@ impl<'a> super::Architecture<'a> for Aarch64 {
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
         _memory: &M,
-        _mmu_addr: GuestPhysAddr,
-        _addr: GuestVirtAddr,
-    ) -> crate::MemoryAccessResult<Option<GuestPhysAddr>> {
+        _mmu_addr: PhysicalAddress,
+        _addr: VirtualAddress,
+    ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
         todo!()
     }
 }

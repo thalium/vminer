@@ -1,11 +1,11 @@
-use crate::{GuestPhysAddr, IceResult};
+use crate::{IceResult, PhysicalAddress};
 use alloc::{string::String, vec::Vec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Thread(pub GuestPhysAddr);
+pub struct Thread(pub PhysicalAddress);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Process(pub GuestPhysAddr);
+pub struct Process(pub PhysicalAddress);
 
 pub trait Os {
     fn init_process(&self) -> IceResult<Process>;

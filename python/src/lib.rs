@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ibc::{GuestPhysAddr, GuestVirtAddr, IceError, IceResult, MemoryAccessResultExt};
+use ibc::{IceError, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
 use icebox::os::OsBuilder;
 use pyo3::{exceptions, gc::PyGCProtocol, prelude::*};
 
@@ -45,10 +45,14 @@ struct Backend(Arc<dyn ibc::RuntimeBackend + Send + Sync>);
 #[pymethods]
 impl Backend {
     fn read_u64(&self, addr: u64) -> PyResult<u64> {
-        Ok(self.0.read_value(GuestPhysAddr(addr))?)
+        Ok(self.0.read_value(PhysicalAddress(addr))?)
     }
 
-    fn virtual_to_physical(&self, mmu_addr: GuestPhysAddr, addr: GuestVirtAddr) -> PyResult<u64> {
+    fn virtual_to_physical(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> PyResult<u64> {
         let addr = self.0.virtual_to_physical(mmu_addr, addr).valid()?;
         Ok(addr.0)
     }

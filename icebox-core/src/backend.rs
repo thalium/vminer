@@ -1,6 +1,6 @@
 use crate::{
-    arch, Architecture, GuestPhysAddr, GuestVirtAddr, IceResult, Memory, MemoryAccessResult,
-    MemoryAccessResultExt,
+    arch, Architecture, IceResult, Memory, MemoryAccessResult, MemoryAccessResultExt,
+    PhysicalAddress, VirtualAddress,
 };
 
 pub trait Backend {
@@ -19,12 +19,12 @@ pub trait Backend {
     fn memory(&self) -> &Self::Memory;
 
     #[inline]
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         self.memory().read(addr, buf)
     }
 
     #[inline]
-    fn read_value<T: bytemuck::Pod>(&self, addr: GuestPhysAddr) -> MemoryAccessResult<T> {
+    fn read_value<T: bytemuck::Pod>(&self, addr: PhysicalAddress) -> MemoryAccessResult<T> {
         let mut value = bytemuck::Zeroable::zeroed();
         self.read_memory(addr, bytemuck::bytes_of_mut(&mut value))?;
         Ok(value)
@@ -33,8 +33,8 @@ pub trait Backend {
     #[inline]
     fn read_virtual_memory(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
         buf: &mut [u8],
     ) -> IceResult<()> {
         let addr = self.virtual_to_physical(mmu_addr, addr).valid()?;
@@ -45,8 +45,8 @@ pub trait Backend {
     #[inline]
     fn read_value_virtual<T: bytemuck::Pod>(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
     ) -> IceResult<T> {
         let mut value = bytemuck::Zeroable::zeroed();
         self.read_virtual_memory(mmu_addr, addr, bytemuck::bytes_of_mut(&mut value))?;
@@ -56,9 +56,9 @@ pub trait Backend {
     #[inline]
     fn virtual_to_physical(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
         self.arch()
             .virtual_to_physical(self.memory(), mmu_addr, addr)
     }
@@ -67,8 +67,8 @@ pub trait Backend {
     fn kernel_per_cpu(
         &self,
         cpuid: usize,
-        check: impl Fn(GuestVirtAddr) -> bool,
-    ) -> IceResult<GuestVirtAddr> {
+        check: impl Fn(VirtualAddress) -> bool,
+    ) -> IceResult<VirtualAddress> {
         use arch::Vcpus;
 
         self.vcpus()
@@ -77,7 +77,7 @@ pub trait Backend {
     }
 
     #[inline]
-    fn find_kernel_pgd(&self, test_addr: GuestVirtAddr) -> IceResult<GuestPhysAddr> {
+    fn find_kernel_pgd(&self, test_addr: VirtualAddress) -> IceResult<PhysicalAddress> {
         use arch::Vcpus;
 
         let test = |addr| matches!(self.virtual_to_physical(addr, test_addr), Ok(Some(_)));
@@ -104,14 +104,14 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
         (**self).memory()
     }
 
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read_memory(addr, buf)
     }
 
     fn read_virtual_memory(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
         buf: &mut [u8],
     ) -> IceResult<()> {
         (**self).read_virtual_memory(mmu_addr, addr, buf)
@@ -119,21 +119,21 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
 
     fn virtual_to_physical(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
         (**self).virtual_to_physical(mmu_addr, addr)
     }
 
     fn kernel_per_cpu(
         &self,
         cpuid: usize,
-        check: impl Fn(GuestVirtAddr) -> bool,
-    ) -> IceResult<GuestVirtAddr> {
+        check: impl Fn(VirtualAddress) -> bool,
+    ) -> IceResult<VirtualAddress> {
         (**self).kernel_per_cpu(cpuid, check)
     }
 
-    fn find_kernel_pgd(&self, test_addr: GuestVirtAddr) -> IceResult<GuestPhysAddr> {
+    fn find_kernel_pgd(&self, test_addr: VirtualAddress) -> IceResult<PhysicalAddress> {
         (**self).find_kernel_pgd(test_addr)
     }
 }
@@ -145,20 +145,20 @@ pub trait RuntimeBackend {
 
     fn rt_memory(&self) -> &(dyn Memory + 'static);
 
-    fn rt_read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()>;
+    fn rt_read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
     fn rt_read_virtual_memory(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
         buf: &mut [u8],
     ) -> IceResult<()>;
 
     fn rt_virtual_to_physical(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> MemoryAccessResult<Option<GuestPhysAddr>>;
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> MemoryAccessResult<Option<PhysicalAddress>>;
 }
 
 impl<B> RuntimeBackend for B
@@ -184,15 +184,15 @@ where
     }
 
     #[inline]
-    fn rt_read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn rt_read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         self.read_memory(addr, buf)
     }
 
     #[inline]
     fn rt_read_virtual_memory(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
         buf: &mut [u8],
     ) -> IceResult<()> {
         self.read_virtual_memory(mmu_addr, addr, buf)
@@ -201,9 +201,9 @@ where
     #[inline]
     fn rt_virtual_to_physical(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
         self.virtual_to_physical(mmu_addr, addr)
     }
 }
@@ -228,15 +228,15 @@ impl Backend for dyn RuntimeBackend + '_ {
     }
 
     #[inline]
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         self.rt_read_memory(addr, buf)
     }
 
     #[inline]
     fn read_virtual_memory(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
         buf: &mut [u8],
     ) -> IceResult<()> {
         self.rt_read_virtual_memory(mmu_addr, addr, buf)
@@ -245,9 +245,9 @@ impl Backend for dyn RuntimeBackend + '_ {
     #[inline]
     fn virtual_to_physical(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
         self.rt_virtual_to_physical(mmu_addr, addr)
     }
 }
@@ -272,16 +272,16 @@ impl Backend for dyn RuntimeBackend + Send + Sync + '_ {
     }
 
     #[inline]
-    fn read_memory(&self, addr: GuestPhysAddr, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         self.rt_read_memory(addr, buf)
     }
 
     #[inline]
     fn virtual_to_physical(
         &self,
-        mmu_addr: GuestPhysAddr,
-        addr: GuestVirtAddr,
-    ) -> MemoryAccessResult<Option<GuestPhysAddr>> {
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
         self.rt_virtual_to_physical(mmu_addr, addr)
     }
 }

@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 
 use crate::{IceError, IceResult};
 
-use super::GuestVirtAddr;
+use super::VirtualAddress;
 
 #[derive(Debug, Clone)]
 pub struct StructField {
@@ -68,7 +68,7 @@ impl<'a> Struct<'a> {
 #[derive(Debug, Default)]
 pub struct SymbolsIndexer {
     structs: HashMap<String, OwnedStruct>,
-    addresses: HashMap<String, GuestVirtAddr>,
+    addresses: HashMap<String, VirtualAddress>,
 }
 
 impl SymbolsIndexer {
@@ -90,14 +90,14 @@ impl SymbolsIndexer {
         self.structs.insert(structure.name.clone(), structure);
     }
 
-    pub fn get_addr(&self, name: &str) -> IceResult<GuestVirtAddr> {
+    pub fn get_addr(&self, name: &str) -> IceResult<VirtualAddress> {
         match self.addresses.get(name) {
             Some(addr) => Ok(*addr),
             None => Err(IceError::missing_symbol(name)),
         }
     }
 
-    pub fn insert_addr(&mut self, name: String, addr: GuestVirtAddr) {
+    pub fn insert_addr(&mut self, name: String, addr: VirtualAddress) {
         self.addresses.insert(name, addr);
     }
 
@@ -130,8 +130,8 @@ impl Extend<OwnedStruct> for SymbolsIndexer {
     }
 }
 
-impl Extend<(String, GuestVirtAddr)> for SymbolsIndexer {
-    fn extend<I: IntoIterator<Item = (String, GuestVirtAddr)>>(&mut self, iter: I) {
+impl Extend<(String, VirtualAddress)> for SymbolsIndexer {
+    fn extend<I: IntoIterator<Item = (String, VirtualAddress)>>(&mut self, iter: I) {
         self.addresses.extend(iter)
     }
 }

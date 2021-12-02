@@ -1,7 +1,7 @@
 pub mod process;
 pub mod profile;
 
-use crate::core::{self as ice, GuestPhysAddr, GuestVirtAddr, IceResult, MemoryAccessResultExt};
+use crate::core::{self as ice, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
 use alloc::string::String;
 use core::fmt;
 
@@ -11,15 +11,15 @@ pub use profile::Profile;
 pub struct Linux<B> {
     backend: B,
     profile: Profile,
-    kpgd: GuestPhysAddr,
+    kpgd: PhysicalAddress,
     kaslr: i64,
 }
 
-fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<GuestVirtAddr> {
+fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<VirtualAddress> {
     backend.kernel_per_cpu(cpuid, is_kernel_addr)
 }
 
-fn find_kpgd<B: ice::Backend>(backend: &B) -> IceResult<GuestPhysAddr> {
+fn find_kpgd<B: ice::Backend>(backend: &B) -> IceResult<PhysicalAddress> {
     let valid_addr = per_cpu(backend, 0)?;
     backend.find_kernel_pgd(valid_addr)
 }
@@ -27,7 +27,7 @@ fn find_kpgd<B: ice::Backend>(backend: &B) -> IceResult<GuestPhysAddr> {
 pub fn get_aslr<B: ice::Backend>(
     backend: &B,
     profile: &Profile,
-    kpgd: GuestPhysAddr,
+    kpgd: PhysicalAddress,
 ) -> IceResult<i64> {
     let base_banner_addr = profile.syms.get_addr("linux_banner")?;
     let (banner_addr, _) =
@@ -36,7 +36,7 @@ pub fn get_aslr<B: ice::Backend>(
     Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
 }
 
-pub const fn is_kernel_addr(addr: GuestVirtAddr) -> bool {
+pub const fn is_kernel_addr(addr: VirtualAddress) -> bool {
     (addr.0 as i64) < 0
 }
 
@@ -53,11 +53,11 @@ impl<B: ice::Backend> Linux<B> {
         })
     }
 
-    fn kernel_to_physical(&self, addr: GuestVirtAddr) -> IceResult<GuestPhysAddr> {
+    fn kernel_to_physical(&self, addr: VirtualAddress) -> IceResult<PhysicalAddress> {
         self.backend.virtual_to_physical(self.kpgd, addr).valid()
     }
 
-    fn read_kernel_value<T: bytemuck::Pod>(&self, addr: GuestVirtAddr) -> IceResult<T> {
+    fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
         self.backend.read_value_virtual(self.kpgd, addr)
     }
 
@@ -110,8 +110,8 @@ impl<B: ice::Backend> Linux<B> {
 
     pub fn iterate_list(
         &self,
-        head: GuestPhysAddr,
-        mut f: impl FnMut(GuestPhysAddr) -> IceResult<()>,
+        head: PhysicalAddress,
+        mut f: impl FnMut(PhysicalAddress) -> IceResult<()>,
     ) -> IceResult<()> {
         let mut pos = head;
         let next_offset = self.profile.fast_offsets.list_head_next;
@@ -133,8 +133,8 @@ impl<B: ice::Backend> Linux<B> {
 
 fn get_banner_addr<B: ice::Backend>(
     backend: &B,
-    mmu_addr: GuestPhysAddr,
-) -> ice::MemoryAccessResult<Option<(GuestVirtAddr, GuestPhysAddr)>> {
+    mmu_addr: PhysicalAddress,
+) -> ice::MemoryAccessResult<Option<(VirtualAddress, PhysicalAddress)>> {
     const OFFSET: usize = 0x1000;
     const TARGET: &[u8] = b"Linux version";
 
@@ -145,7 +145,7 @@ fn get_banner_addr<B: ice::Backend>(
     let finder = memchr::memmem::Finder::new(TARGET);
 
     for addr in (KERNEL_START..KERNEL_END).step_by(OFFSET) {
-        let addr = GuestVirtAddr(addr);
+        let addr = VirtualAddress(addr);
         if let Some(paddr) = backend.virtual_to_physical(mmu_addr, addr)? {
             backend.read_memory(paddr, &mut buf)?;
 

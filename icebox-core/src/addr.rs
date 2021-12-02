@@ -6,29 +6,29 @@ use core::{fmt, ops::Add};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
-pub struct GuestPhysAddr(pub u64);
+pub struct PhysicalAddress(pub u64);
 
-impl fmt::LowerHex for GuestPhysAddr {
+impl fmt::LowerHex for PhysicalAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl fmt::UpperHex for GuestPhysAddr {
+impl fmt::UpperHex for PhysicalAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl Add<u64> for GuestPhysAddr {
-    type Output = GuestPhysAddr;
+impl Add<u64> for PhysicalAddress {
+    type Output = PhysicalAddress;
 
     fn add(self, rhs: u64) -> Self::Output {
         Self(self.0 + rhs)
     }
 }
 
-impl Add<i64> for GuestPhysAddr {
+impl Add<i64> for PhysicalAddress {
     type Output = Self;
 
     fn add(self, rhs: i64) -> Self {
@@ -42,8 +42,8 @@ impl Add<i64> for GuestPhysAddr {
     }
 }
 
-impl Sub<u64> for GuestPhysAddr {
-    type Output = GuestPhysAddr;
+impl Sub<u64> for PhysicalAddress {
+    type Output = PhysicalAddress;
 
     fn sub(self, rhs: u64) -> Self::Output {
         Self(self.0 - rhs)
@@ -53,9 +53,9 @@ impl Sub<u64> for GuestPhysAddr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
-pub struct GuestVirtAddr(pub u64);
+pub struct VirtualAddress(pub u64);
 
-impl GuestVirtAddr {
+impl VirtualAddress {
     #[inline]
     pub const fn is_null(self) -> bool {
         self.0 == 0
@@ -100,16 +100,16 @@ impl GuestVirtAddr {
     }
 }
 
-impl Add<u64> for GuestVirtAddr {
-    type Output = GuestVirtAddr;
+impl Add<u64> for VirtualAddress {
+    type Output = VirtualAddress;
 
     fn add(self, rhs: u64) -> Self::Output {
         Self(self.0 + rhs)
     }
 }
 
-impl Add<i64> for GuestVirtAddr {
-    type Output = GuestVirtAddr;
+impl Add<i64> for VirtualAddress {
+    type Output = VirtualAddress;
 
     fn add(self, rhs: i64) -> Self::Output {
         let (res, o) = self.0.overflowing_add(rhs as u64);
@@ -122,15 +122,15 @@ impl Add<i64> for GuestVirtAddr {
     }
 }
 
-impl Sub<GuestVirtAddr> for GuestVirtAddr {
+impl Sub<VirtualAddress> for VirtualAddress {
     type Output = i64;
 
-    fn sub(self, rhs: GuestVirtAddr) -> i64 {
+    fn sub(self, rhs: VirtualAddress) -> i64 {
         self.0.overflowing_sub(rhs.0).0 as i64
     }
 }
 
-impl Sub<u64> for GuestVirtAddr {
+impl Sub<u64> for VirtualAddress {
     type Output = Self;
 
     fn sub(self, rhs: u64) -> Self {
@@ -138,19 +138,19 @@ impl Sub<u64> for GuestVirtAddr {
     }
 }
 
-impl SubAssign<u64> for GuestVirtAddr {
+impl SubAssign<u64> for VirtualAddress {
     fn sub_assign(&mut self, rhs: u64) {
         self.0 -= rhs;
     }
 }
 
-impl fmt::LowerHex for GuestVirtAddr {
+impl fmt::LowerHex for VirtualAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl fmt::UpperHex for GuestVirtAddr {
+impl fmt::UpperHex for VirtualAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -163,20 +163,20 @@ pub struct MmPte(pub u64);
 impl MmPte {
     /// Normal pages (4Ko)
     #[inline]
-    pub const fn page_frame(self) -> GuestPhysAddr {
-        GuestPhysAddr(self.0 & (mask(36) << 12))
+    pub const fn page_frame(self) -> PhysicalAddress {
+        PhysicalAddress(self.0 & (mask(36) << 12))
     }
 
     /// Large pages (2Mo)
     #[inline]
-    pub const fn large_page_frame(self) -> GuestPhysAddr {
-        GuestPhysAddr(self.0 & (mask(31) << 21))
+    pub const fn large_page_frame(self) -> PhysicalAddress {
+        PhysicalAddress(self.0 & (mask(31) << 21))
     }
 
     /// Huge pages (1Go)
     #[inline]
-    pub const fn huge_page_frame(self) -> GuestPhysAddr {
-        GuestPhysAddr(self.0 & (mask(22) << 30))
+    pub const fn huge_page_frame(self) -> PhysicalAddress {
+        PhysicalAddress(self.0 & (mask(22) << 30))
     }
 
     #[inline]
