@@ -26,7 +26,7 @@ typedef struct Allocator {
   void *(*realloc)(void*, void*, uintptr_t, uintptr_t, uintptr_t);
 } Allocator;
 
-struct Error *kvm_connect(int32_t pid, uintptr_t mem_size, struct Backend **kvm);
+struct Error *kvm_connect(int32_t pid, struct Backend **kvm);
 
 struct Error *read_dump(const char *path, struct Backend **dump);
 

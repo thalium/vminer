@@ -8,7 +8,7 @@ fn main() {
     // let mut args = std::env::args();
     // let pid = args.nth(1).expect("missing pid");
     // let pid: i32 = pid.parse().unwrap();
-    // let vm = icebox::backends::kvm::Kvm::connect(pid, 2 << 30).unwrap();
+    // let vm = icebox::backends::kvm::Kvm::connect(pid).unwrap();
 
     let vm = kvm_dump::DumbDump::read("kvm.dump").unwrap();
 

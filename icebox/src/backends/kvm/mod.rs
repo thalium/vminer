@@ -315,7 +315,7 @@ fn get_vcpus_fds(pid: libc::pid_t) -> anyhow::Result<Vec<i32>> {
     }
 
     let fds = fs::read_dir(format!("/proc/{}/fd", pid))?
-        .flat_map(read_one)
+        .filter_map(read_one)
         .collect();
     Ok(fds)
 }
@@ -363,18 +363,17 @@ pub struct Kvm {
 }
 
 impl Kvm {
-    pub fn connect(pid: libc::pid_t, mem_size: u64) -> anyhow::Result<Kvm> {
+    pub fn connect(pid: libc::pid_t) -> anyhow::Result<Kvm> {
         // Parse /proc/pid/maps file to find the adress of the VM memory
-        let mem_offset = {
+        let (mem_offset, mem_size) = {
             let mut maps = io::BufReader::new(fs::File::open(format!("/proc/{}/maps", pid))?);
             let mut line = String::with_capacity(200);
 
-            let start_addr = loop {
-                if maps.read_line(&mut line)? == 0 {
-                    break None;
-                }
+            let mut map_guess = 0;
+            let mut map_size = 0;
 
-                let guess_addr = (|| {
+            while maps.read_line(&mut line)? != 0 {
+                (|| {
                     let i = line.find('-')?;
                     let (start_addr, line) = line.split_at(i);
                     let start_addr = u64::from_str_radix(start_addr, 16).ok()?;
@@ -388,17 +387,25 @@ impl Kvm {
                         return None;
                     }
 
-                    (end_addr - start_addr == mem_size).then(|| start_addr)
+                    let cur_size = end_addr - start_addr;
+                    if cur_size > map_size {
+                        map_size = cur_size;
+                        map_guess = start_addr;
+                    }
+
+                    Some(())
                 })();
 
-                if let Some(addr) = guess_addr {
-                    break Some(addr);
-                }
-
                 line.clear();
-            };
+            }
 
-            start_addr.context("Could not find VM memory")?
+            ensure!(map_guess != 0, "Could not find VM memory");
+            log::info!(
+                "Found KVM memory at of size 0x{:x} at address 0x{:x}",
+                map_size,
+                map_guess
+            );
+            (map_guess, map_size)
         };
 
         // Map VM memory in our address space

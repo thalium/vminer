@@ -77,12 +77,8 @@ impl Backend {
 
 #[no_mangle]
 #[cfg(target_os = "linux")]
-pub extern "C" fn kvm_connect(
-    pid: i32,
-    mem_size: usize,
-    kvm: &mut mem::MaybeUninit<Box<Backend>>,
-) -> *mut Error {
-    let kvm_result = match icebox::backends::kvm::Kvm::connect(pid, mem_size as u64) {
+pub extern "C" fn kvm_connect(pid: i32, kvm: &mut mem::MaybeUninit<Box<Backend>>) -> *mut Error {
+    let kvm_result = match icebox::backends::kvm::Kvm::connect(pid) {
         Ok(kvm) => Ok(Backend::new(kvm)),
         Err(err) => Err(IceError::new(err)),
     };

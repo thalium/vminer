@@ -64,10 +64,10 @@ struct Kvm;
 #[pymethods]
 impl Kvm {
     #[new]
-    fn new(pid: i32, mem_size: u64) -> PyResult<(Self, Backend)> {
+    fn new(pid: i32) -> PyResult<(Self, Backend)> {
         #[cfg(target_os = "linux")]
         {
-            let kvm = icebox::backends::kvm::Kvm::connect(pid, mem_size)?;
+            let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
             Ok((Kvm, Backend(Arc::new(kvm))))
         }
 
