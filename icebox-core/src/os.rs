@@ -1,4 +1,4 @@
-use crate::{IceResult, PhysicalAddress};
+use crate::{IceResult, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6,6 +6,9 @@ pub struct Thread(pub PhysicalAddress);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Process(pub PhysicalAddress);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Vma(pub PhysicalAddress);
 
 pub trait Os {
     fn init_process(&self) -> IceResult<Process>;
@@ -70,8 +73,22 @@ pub trait Os {
         self.for_each_process(&mut |p| Ok(procs.push(p)))?;
         Ok(procs)
     }
+    fn process_for_each_vma(
+        &self,
+        proc: Process,
+        f: &mut dyn FnMut(Vma) -> IceResult<()>,
+    ) -> IceResult<()>;
+    fn process_collect_vmas(&self, proc: Process) -> IceResult<Vec<Vma>> {
+        let mut vmas = Vec::new();
+        self.process_for_each_vma(proc, &mut |vma| Ok(vmas.push(vma)))?;
+        Ok(vmas)
+    }
 
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
     fn thread_id(&self, thread: Thread) -> IceResult<u32>;
     fn thread_name(&self, thread: Thread) -> IceResult<String>;
+
+    fn vma_name(&self, vma: Vma) -> IceResult<Option<String>>;
+    fn vma_start(&self, vma: Vma) -> IceResult<VirtualAddress>;
+    fn vma_end(&self, vma: Vma) -> IceResult<VirtualAddress>;
 }

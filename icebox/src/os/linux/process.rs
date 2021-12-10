@@ -34,17 +34,22 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         self.read_value(self.linux.profile.fast_offsets.task_struct_tgid)
     }
 
-    pub fn pgd(&self) -> IceResult<PhysicalAddress> {
+    pub fn mm(&self) -> IceResult<PhysicalAddress> {
         let fast_offsets = &self.linux.profile.fast_offsets;
-        let mut mm: VirtualAddress =
-            self.read_value(self.linux.profile.fast_offsets.task_struct_mm)?;
+        let mut mm: VirtualAddress = self.read_value(fast_offsets.task_struct_mm)?;
         if mm.is_null() {
-            mm = self.read_value(self.linux.profile.fast_offsets.task_struct_active_mm)?;
+            mm = self.read_value(fast_offsets.task_struct_active_mm)?;
         }
 
+        self.linux.kernel_to_physical(mm)
+    }
+
+    pub fn pgd(&self) -> IceResult<PhysicalAddress> {
+        let mm = self.mm()?;
         let pgd_ptr = self
             .linux
-            .read_kernel_value(mm + fast_offsets.mm_struct_pgd)?;
+            .backend
+            .read_value(mm + self.linux.profile.fast_offsets.mm_struct_pgd)?;
         let pgd = self.linux.kernel_to_physical(pgd_ptr)?;
         Ok(pgd)
     }

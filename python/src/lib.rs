@@ -245,6 +245,16 @@ impl Process {
             os: self.os.clone_ref(py),
         })
     }
+
+    fn vmas(&self, py: Python) -> PyResult<VmaIter> {
+        let os = self.os.borrow(py)?;
+        let vmas = os.0.process_collect_vmas(self.proc)?.into_iter();
+
+        Ok(VmaIter {
+            vmas,
+            os: self.os.clone_ref(py),
+        })
+    }
 }
 
 #[pyproto]
@@ -307,6 +317,49 @@ impl<'p> PyGCProtocol<'p> for Thread {
     }
 }
 
+#[pyclass(gc)]
+struct Vma {
+    vma: ibc::Vma,
+    os: PyOwned<RawOs>,
+}
+
+impl Vma {
+    fn new(py: Python, vma: ibc::Vma, os: &PyOwned<RawOs>) -> Self {
+        Self {
+            vma,
+            os: os.clone_ref(py),
+        }
+    }
+}
+
+#[pymethods]
+impl Vma {
+    #[getter]
+    fn start(&self, py: Python) -> PyResult<u64> {
+        let os = self.os.borrow(py)?;
+        let start = os.0.vma_start(self.vma)?;
+        Ok(start.0)
+    }
+
+    #[getter]
+    fn end(&self, py: Python) -> PyResult<u64> {
+        let os = self.os.borrow(py)?;
+        let end = os.0.vma_end(self.vma)?;
+        Ok(end.0)
+    }
+}
+
+#[pyproto]
+impl<'p> PyGCProtocol<'p> for Vma {
+    fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
+        self.os.traverse(visit)
+    }
+
+    fn __clear__(&'p mut self) {
+        self.os.clear()
+    }
+}
+
 #[pyclass]
 struct ProcessIter {
     procs: std::vec::IntoIter<ibc::Process>,
@@ -340,6 +393,24 @@ impl pyo3::PyIterProtocol for ThreadIter {
     fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Thread>> {
         let thread = this.threads.next();
         Ok(thread.map(|thread| Thread::new(this.py(), thread, &this.os)))
+    }
+}
+
+#[pyclass]
+struct VmaIter {
+    vmas: std::vec::IntoIter<ibc::Vma>,
+    os: PyOwned<RawOs>,
+}
+
+#[pyproto]
+impl pyo3::PyIterProtocol for VmaIter {
+    fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
+        this
+    }
+
+    fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Vma>> {
+        let vma = this.vmas.next();
+        Ok(vma.map(|vma| Vma::new(this.py(), vma, &this.os)))
     }
 }
 

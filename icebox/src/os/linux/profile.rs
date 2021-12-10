@@ -15,6 +15,7 @@ pub(super) struct FastOffsets {
     pub(super) list_head_prev: u64,
 
     pub(super) mm_struct_pgd: u64,
+    pub(super) mm_struct_mmap: u64,
 
     pub(super) task_struct_active_mm: u64,
     pub(super) task_struct_children: u64,
@@ -27,6 +28,10 @@ pub(super) struct FastOffsets {
     pub(super) task_struct_tasks: u64,
     pub(super) task_struct_tgid: u64,
     pub(super) task_struct_thread_group: u64,
+
+    pub(super) vm_area_struct_vm_end: u64,
+    pub(super) vm_area_struct_vm_next: u64,
+    pub(super) vm_area_struct_vm_start: u64,
 }
 
 pub struct Profile {
@@ -60,6 +65,12 @@ impl Profile {
 
         let mm_struct = syms.get_struct("mm_struct")?;
         let mm_struct_pgd = mm_struct.find_offset("pgd")?;
+        let mm_struct_mmap = mm_struct.find_offset("mmap")?;
+
+        let vm_area_struct = syms.get_struct("vm_area_struct")?;
+        let vm_area_struct_vm_end = vm_area_struct.find_offset("vm_end")?;
+        let vm_area_struct_vm_next = vm_area_struct.find_offset("vm_next")?;
+        let vm_area_struct_vm_start = vm_area_struct.find_offset("vm_start")?;
 
         Ok(Self {
             syms,
@@ -71,6 +82,7 @@ impl Profile {
             },
             fast_offsets: FastOffsets {
                 mm_struct_pgd,
+                mm_struct_mmap,
 
                 list_head_next,
                 list_head_prev,
@@ -86,6 +98,10 @@ impl Profile {
                 task_struct_tgid,
                 task_struct_sibling,
                 task_struct_thread_group,
+
+                vm_area_struct_vm_end,
+                vm_area_struct_vm_next,
+                vm_area_struct_vm_start,
             },
         })
     }

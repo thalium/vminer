@@ -232,12 +232,51 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Ok(())
     }
 
+    fn process_for_each_vma(
+        &self,
+        proc: ice::Process,
+        f: &mut dyn FnMut(ice::Vma) -> IceResult<()>,
+    ) -> IceResult<()> {
+        let offsets = &self.profile.fast_offsets;
+
+        let mm = Process::new(proc, self).mm()?;
+        let mut cur_vma: VirtualAddress = self.backend.read_value(mm + offsets.mm_struct_mmap)?;
+
+        while !cur_vma.is_null() {
+            let vma = self.kernel_to_physical(cur_vma)?;
+            f(ice::Vma(vma))?;
+            cur_vma = self
+                .backend
+                .read_value(vma + offsets.vm_area_struct_vm_next)?;
+        }
+
+        Ok(())
+    }
+
     fn thread_id(&self, thread: ice::Thread) -> IceResult<u32> {
         Process::new(ibc::Process(thread.0), self).tid()
     }
 
     fn thread_name(&self, thread: ibc::Thread) -> IceResult<String> {
         self.process_name(ibc::Process(thread.0))
+    }
+
+    fn vma_name(&self, vma: ice::Vma) -> IceResult<Option<String>> {
+        todo!()
+    }
+
+    fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
+        let start = self
+            .backend
+            .read_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_start)?;
+        Ok(start)
+    }
+
+    fn vma_end(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
+        let end = self
+            .backend
+            .read_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_end)?;
+        Ok(end)
     }
 }
 

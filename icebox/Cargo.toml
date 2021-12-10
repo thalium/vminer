@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["all_os", "object"]
+default = ["all_os", "all_backends", "object"]
 std = ["ibc/std"]
 
 object = ["ibc/object"]
@@ -12,6 +12,7 @@ object = ["ibc/object"]
 all_os = ["linux"]
 linux = []
 
+all_backends = ["kvm", "dump"]
 kvm = ["std", "libc", "anyhow"]
 dump = ["std"]
 
