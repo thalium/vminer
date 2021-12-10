@@ -7,13 +7,13 @@ mod inner {
 
     #[derive(Parser, Debug)]
     struct Args {
-        #[clap(short = 'p', long = "pid", about = "input KVM PID")]
+        #[clap(short = 'p', long = "pid", help = "input KVM PID")]
         pid: i32,
         #[clap(
             short = 'o',
             long = "output",
             default_value = "kvm.dump",
-            about = "output file path"
+            help = "output file path"
         )]
         output: std::path::PathBuf,
     }
