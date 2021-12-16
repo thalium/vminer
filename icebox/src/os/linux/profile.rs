@@ -14,6 +14,7 @@ pub(super) struct FastOffsets {
     #[allow(unused)]
     pub(super) list_head_prev: u64,
 
+    pub(super) mm_struct_exe_file: u64,
     pub(super) mm_struct_pgd: u64,
     pub(super) mm_struct_mmap: u64,
 
@@ -78,6 +79,7 @@ impl Profile {
         let task_struct_thread_group = task_struct.find_offset("thread_group")?;
 
         let mm_struct = syms.get_struct("mm_struct")?;
+        let mm_struct_exe_file = mm_struct.find_offset("exe_file")?;
         let mm_struct_pgd = mm_struct.find_offset("pgd")?;
         let mm_struct_mmap = mm_struct.find_offset("mmap")?;
 
@@ -107,6 +109,7 @@ impl Profile {
 
                 file_f_path,
 
+                mm_struct_exe_file,
                 mm_struct_pgd,
                 mm_struct_mmap,
 

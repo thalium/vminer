@@ -230,6 +230,21 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Process::new(proc, self).pgd()
     }
 
+    fn process_exe(&self, proc: ice::Process) -> IceResult<Option<String>> {
+        let mm = Process::new(proc, self).mm()?;
+        let offsets = &self.profile.fast_offsets;
+
+        let file: VirtualAddress = self.backend.read_value(mm + offsets.mm_struct_exe_file)?;
+        if file.is_null() {
+            return Ok(None);
+        }
+        let dentry = self.read_kernel_value(file + offsets.file_f_path + offsets.path_d_entry)?;
+        let mut buf = Vec::new();
+        self.build_path(dentry, &mut buf)?;
+        let name = String::from_utf8(buf).map_err(|err| ice::IceError::new(err))?;
+        Ok(Some(name))
+    }
+
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
         Process::new(proc, self).parent()
     }
