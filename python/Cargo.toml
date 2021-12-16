@@ -8,7 +8,7 @@ name = "iceboxa"
 crate-type = ["cdylib"]
 
 [dependencies]
-icebox = {path = "../icebox"}
+icebox = {path = "../icebox", features = ["all_backends"]}
 icebox-core = {path = "../icebox-core", features = ["python"]}
 
 pyo3 = {version = "0.15", features = ["anyhow"]}

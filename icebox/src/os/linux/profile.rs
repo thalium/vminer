@@ -32,6 +32,13 @@ pub(super) struct FastOffsets {
     pub(super) vm_area_struct_vm_end: u64,
     pub(super) vm_area_struct_vm_next: u64,
     pub(super) vm_area_struct_vm_start: u64,
+    pub(super) vm_area_struct_vm_file: u64,
+
+    pub(super) file_f_path: u64,
+    pub(super) path_d_entry: u64,
+    pub(super) dentry_d_name: u64,
+    pub(super) dentry_d_parent: u64,
+    pub(super) qstr_name: u64,
 }
 
 pub struct Profile {
@@ -45,6 +52,13 @@ impl Profile {
         let per_cpu_start = syms.get_addr("__per_cpu_start")?;
         let current_task = syms.get_addr("current_task")?;
         let init_task = syms.get_addr("init_task")?;
+
+        let dentry = syms.get_struct("dentry")?;
+        let dentry_d_name = dentry.find_offset("d_name")?;
+        let dentry_d_parent = dentry.find_offset("d_parent")?;
+
+        let file = syms.get_struct("file")?;
+        let file_f_path = file.find_offset("f_path")?;
 
         let list_head = syms.get_struct("list_head")?;
         let list_head_next = list_head.find_offset("next")?;
@@ -67,10 +81,17 @@ impl Profile {
         let mm_struct_pgd = mm_struct.find_offset("pgd")?;
         let mm_struct_mmap = mm_struct.find_offset("mmap")?;
 
+        let path = syms.get_struct("path")?;
+        let path_d_entry = path.find_offset("dentry")?;
+
+        let qstr = syms.get_struct("qstr")?;
+        let qstr_name = qstr.find_offset("name")?;
+
         let vm_area_struct = syms.get_struct("vm_area_struct")?;
         let vm_area_struct_vm_end = vm_area_struct.find_offset("vm_end")?;
         let vm_area_struct_vm_next = vm_area_struct.find_offset("vm_next")?;
         let vm_area_struct_vm_start = vm_area_struct.find_offset("vm_start")?;
+        let vm_area_struct_vm_file = vm_area_struct.find_offset("vm_file")?;
 
         Ok(Self {
             syms,
@@ -81,11 +102,20 @@ impl Profile {
                 init_task,
             },
             fast_offsets: FastOffsets {
+                dentry_d_name,
+                dentry_d_parent,
+
+                file_f_path,
+
                 mm_struct_pgd,
                 mm_struct_mmap,
 
                 list_head_next,
                 list_head_prev,
+
+                path_d_entry,
+
+                qstr_name,
 
                 task_struct_active_mm,
                 task_struct_children,
@@ -102,6 +132,7 @@ impl Profile {
                 vm_area_struct_vm_end,
                 vm_area_struct_vm_next,
                 vm_area_struct_vm_start,
+                vm_area_struct_vm_file,
             },
         })
     }

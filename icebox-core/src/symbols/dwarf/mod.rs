@@ -226,6 +226,19 @@ impl DwarfAttribute for DwAtEncoding {
     }
 }
 
+struct DwAtDeclaration;
+impl DwarfAttribute for DwAtDeclaration {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_declaration;
+    type Target = bool;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        match value {
+            gimli::AttributeValue::Flag(flag) => Some(flag),
+            _ => None,
+        }
+    }
+}
+
 struct DwarfNode<'a, 'u, 't, R: GimliReader>(gimli::EntriesTreeNode<'a, 'u, 't, R>);
 
 impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
@@ -233,9 +246,13 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
         DwarfEntry(self.0.entry())
     }
 
-    fn read_struct(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<LazyStruct> {
+    fn read_struct(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<Option<LazyStruct>> {
         let entry = self.entry();
         let size = entry.try_read::<DwAtByteSize>()?.unwrap_or(0);
+
+        if entry.try_read::<DwAtDeclaration>()? == Some(true) {
+            return Ok(None);
+        }
 
         let mut fields = Vec::new();
 
@@ -245,10 +262,10 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
             fields.push(node.entry().read_struct_member(debug_str)?);
         }
 
-        Ok(LazyStruct {
+        Ok(Some(LazyStruct {
             size,
             fields: fields.into(),
-        })
+        }))
     }
 
     fn read_union(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<LazyStruct> {
@@ -288,7 +305,10 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
                 let typ = offset.map(|o| Rc::new(LazyType::unresolved(o)));
                 DwarfType::Ptr(typ)
             }
-            gimli::DW_TAG_structure_type => DwarfType::Struct(self.read_struct(debug_str)?),
+            gimli::DW_TAG_structure_type => match self.read_struct(debug_str)? {
+                Some(struct_) => DwarfType::Struct(struct_),
+                None => return Ok(None),
+            },
             gimli::DW_TAG_union_type => DwarfType::Union(self.read_union(debug_str)?),
             _ => return Ok(None),
         };

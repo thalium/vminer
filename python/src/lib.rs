@@ -347,6 +347,13 @@ impl Vma {
         let end = os.0.vma_end(self.vma)?;
         Ok(end.0)
     }
+
+    #[getter]
+    fn file(&self, py: Python) -> PyResult<Option<String>> {
+        let os = self.os.borrow(py)?;
+        let end = os.0.vma_file(self.vma)?;
+        Ok(end)
+    }
 }
 
 #[pyproto]

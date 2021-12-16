@@ -88,7 +88,7 @@ pub trait Os {
     fn thread_id(&self, thread: Thread) -> IceResult<u32>;
     fn thread_name(&self, thread: Thread) -> IceResult<String>;
 
-    fn vma_name(&self, vma: Vma) -> IceResult<Option<String>>;
+    fn vma_file(&self, vma: Vma) -> IceResult<Option<String>>;
     fn vma_start(&self, vma: Vma) -> IceResult<VirtualAddress>;
     fn vma_end(&self, vma: Vma) -> IceResult<VirtualAddress>;
 }

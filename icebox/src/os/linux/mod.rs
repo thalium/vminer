@@ -2,7 +2,7 @@ pub mod process;
 pub mod profile;
 
 use crate::core::{self as ice, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::fmt;
 
 use process::Process;
@@ -125,6 +125,40 @@ impl<B: ice::Backend> Linux<B> {
             }
 
             f(pos)?;
+        }
+
+        Ok(())
+    }
+
+    fn build_path(&self, dentry: VirtualAddress, buf: &mut Vec<u8>) -> IceResult<()> {
+        let offsets = &self.profile.fast_offsets;
+
+        let p_dentry = self.kernel_to_physical(dentry)?;
+
+        let parent: VirtualAddress = self
+            .backend
+            .read_value(p_dentry + offsets.dentry_d_parent)?;
+        if parent != dentry {
+            self.build_path(parent, buf)?;
+        }
+
+        let name: VirtualAddress = self
+            .backend
+            .read_value(p_dentry + offsets.dentry_d_name + offsets.qstr_name)?;
+
+        // TODO: use qstr.len here
+        let mut len = buf.len();
+        buf.extend_from_slice(&[0; 256]);
+        if len > 0 && buf[len - 1] != b'/' {
+            buf[len] = b'/';
+            len += 1;
+        }
+        self.backend
+            .read_virtual_memory(self.kpgd, name, &mut buf[len..])?;
+
+        match memchr::memchr(0, &buf[len..]) {
+            Some(i) => buf.truncate(len + i),
+            None => todo!(),
         }
 
         Ok(())
@@ -261,8 +295,24 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         self.process_name(ibc::Process(thread.0))
     }
 
-    fn vma_name(&self, vma: ice::Vma) -> IceResult<Option<String>> {
-        todo!()
+    fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<String>> {
+        let offsets = &self.profile.fast_offsets;
+
+        let file: VirtualAddress = self
+            .backend
+            .read_value(vma.0 + offsets.vm_area_struct_vm_file)?;
+
+        if file.is_null() {
+            return Ok(None);
+        }
+
+        let dentry = self.read_kernel_value(file + offsets.file_f_path + offsets.path_d_entry)?;
+        let mut buf = Vec::new();
+
+        self.build_path(dentry, &mut buf)?;
+
+        let name = String::from_utf8(buf).map_err(|err| ice::IceError::new(err))?;
+        Ok(Some(name))
     }
 
     fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {

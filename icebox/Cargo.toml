@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["all_os", "all_backends", "object"]
+default = ["all_os", "object"]
 std = ["ibc/std"]
 
 object = ["ibc/object"]

@@ -27,6 +27,9 @@ where
     }
 }
 
+#[cfg(not(feature = "std"))]
+impl Error for alloc::string::FromUtf8Error {}
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MemoryAccessError {
