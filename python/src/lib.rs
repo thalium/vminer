@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ibc::{IceError, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
 use icebox::os::OsBuilder;
-use pyo3::{exceptions, gc::PyGCProtocol, prelude::*};
+use pyo3::{exceptions, gc::PyGCProtocol, prelude::*, types::PyBytes};
 
 use icebox_core::{self as ibc, Backend as _};
 
@@ -55,6 +55,31 @@ impl Backend {
     ) -> PyResult<u64> {
         let addr = self.0.virtual_to_physical(mmu_addr, addr).valid()?;
         Ok(addr.0)
+    }
+
+    fn read_memory<'py>(
+        &self,
+        py: Python<'py>,
+        addr: PhysicalAddress,
+        len: usize,
+    ) -> PyResult<&'py PyBytes> {
+        PyBytes::new_with(py, len, |buf| {
+            self.0.read_memory(addr, buf).map_err(Into::into)
+        })
+    }
+
+    fn read_virtual_memory<'py>(
+        &self,
+        py: Python<'py>,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        len: usize,
+    ) -> PyResult<&'py PyBytes> {
+        PyBytes::new_with(py, len, |buf| {
+            self.0
+                .read_virtual_memory(mmu_addr, addr, buf)
+                .map_err(Into::into)
+        })
     }
 }
 
