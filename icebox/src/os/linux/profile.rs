@@ -138,13 +138,6 @@ impl Profile {
     }
 }
 
-#[derive(Debug)]
-pub struct Sym {
-    addr: u64,
-    name: String,
-    kind: u8,
-}
-
 #[cfg(feature = "std")]
 pub fn parse_kallsyms<R: std::io::BufRead>(
     mut r: R,
