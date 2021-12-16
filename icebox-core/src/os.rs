@@ -45,6 +45,7 @@ pub trait Os {
     fn process_is_kernel(&self, proc: Process) -> IceResult<bool>;
     fn process_pid(&self, proc: Process) -> IceResult<u32>;
     fn process_name(&self, proc: Process) -> IceResult<String>;
+    fn process_pgd(&self, proc: Process) -> IceResult<PhysicalAddress>;
     fn process_parent(&self, proc: Process) -> IceResult<Process>;
     fn process_for_each_child(
         &self,

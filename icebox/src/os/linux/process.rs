@@ -16,7 +16,6 @@ impl<B> Clone for Process<'_, B> {
 
 impl<B> Copy for Process<'_, B> {}
 
-#[allow(dead_code)]
 impl<'a, B: ibc::Backend> Process<'a, B> {
     pub fn new(raw: ibc::Process, linux: &'a super::Linux<B>) -> Self {
         Self { raw, linux }

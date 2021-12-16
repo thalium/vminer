@@ -226,6 +226,10 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Process::new(proc, self).comm()
     }
 
+    fn process_pgd(&self, proc: ice::Process) -> IceResult<PhysicalAddress> {
+        Process::new(proc, self).pgd()
+    }
+
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
         Process::new(proc, self).parent()
     }

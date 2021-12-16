@@ -217,6 +217,13 @@ impl Process {
         Ok(flags)
     }
 
+    #[getter]
+    fn pgd(&self, py: Python) -> PyResult<u64> {
+        let os = self.os.borrow(py)?;
+        let pgd = os.0.process_pgd(self.proc)?;
+        Ok(pgd.0)
+    }
+
     fn parent(&self, py: Python) -> PyResult<Process> {
         let os = self.os.borrow(py)?;
         let parent = os.0.process_parent(self.proc)?;
