@@ -31,6 +31,7 @@ pub(super) struct FastOffsets {
     pub(super) task_struct_thread_group: u64,
 
     pub(super) vm_area_struct_vm_end: u64,
+    pub(super) vm_area_struct_vm_flags: u64,
     pub(super) vm_area_struct_vm_next: u64,
     pub(super) vm_area_struct_vm_start: u64,
     pub(super) vm_area_struct_vm_file: u64,
@@ -91,6 +92,7 @@ impl Profile {
 
         let vm_area_struct = syms.get_struct("vm_area_struct")?;
         let vm_area_struct_vm_end = vm_area_struct.find_offset("vm_end")?;
+        let vm_area_struct_vm_flags = vm_area_struct.find_offset("vm_flags")?;
         let vm_area_struct_vm_next = vm_area_struct.find_offset("vm_next")?;
         let vm_area_struct_vm_start = vm_area_struct.find_offset("vm_start")?;
         let vm_area_struct_vm_file = vm_area_struct.find_offset("vm_file")?;
@@ -133,6 +135,7 @@ impl Profile {
                 task_struct_thread_group,
 
                 vm_area_struct_vm_end,
+                vm_area_struct_vm_flags,
                 vm_area_struct_vm_next,
                 vm_area_struct_vm_start,
                 vm_area_struct_vm_file,

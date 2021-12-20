@@ -23,7 +23,7 @@ pub use mem::File;
 pub use mem::Memory;
 
 mod os;
-pub use os::{Os, Process, Thread, Vma};
+pub use os::{Os, Process, Thread, Vma, VmaFlags};
 
 pub mod symbols;
 pub use symbols::SymbolsIndexer;

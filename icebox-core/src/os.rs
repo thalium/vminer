@@ -10,6 +10,46 @@ pub struct Process(pub PhysicalAddress);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vma(pub PhysicalAddress);
 
+#[derive(Debug, Clone, Copy)]
+pub struct VmaFlags(pub u64);
+
+impl VmaFlags {
+    pub const READ: Self = Self(0x1);
+    pub const WRITE: Self = Self(0x2);
+    pub const EXEC: Self = Self(0x4);
+
+    #[inline]
+    pub fn is_read(self) -> bool {
+        self.0 & Self::READ.0 != 0
+    }
+
+    #[inline]
+    pub fn is_write(self) -> bool {
+        self.0 & Self::WRITE.0 != 0
+    }
+
+    #[inline]
+    pub fn is_exec(self) -> bool {
+        self.0 & Self::EXEC.0 != 0
+    }
+}
+
+impl core::ops::BitOr for VmaFlags {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl core::ops::BitOrAssign for VmaFlags {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0
+    }
+}
+
 pub trait Os {
     fn init_process(&self) -> IceResult<Process>;
     fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
@@ -93,4 +133,5 @@ pub trait Os {
     fn vma_file(&self, vma: Vma) -> IceResult<Option<String>>;
     fn vma_start(&self, vma: Vma) -> IceResult<VirtualAddress>;
     fn vma_end(&self, vma: Vma) -> IceResult<VirtualAddress>;
+    fn vma_flags(&self, vma: Vma) -> IceResult<VmaFlags>;
 }

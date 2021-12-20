@@ -347,6 +347,13 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             .read_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_end)?;
         Ok(end)
     }
+
+    fn vma_flags(&self, vma: ice::Vma) -> IceResult<ibc::VmaFlags> {
+        let flags: u64 = self
+            .backend
+            .read_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_flags)?;
+        Ok(ibc::VmaFlags(flags))
+    }
 }
 
 impl<B> fmt::Debug for Linux<B> {
