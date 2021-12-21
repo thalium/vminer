@@ -33,6 +33,11 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     #[inline]
+    fn instruction_pointer(&self) -> VirtualAddress {
+        VirtualAddress(self.registers.rip)
+    }
+
+    #[inline]
     fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
         let per_cpu = VirtualAddress(self.special_registers.gs.base);
         if check(per_cpu) {

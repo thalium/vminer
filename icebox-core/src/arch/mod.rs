@@ -49,6 +49,8 @@ pub trait Vcpu<'a> {
 
     fn get_regs(&self) -> <Self::Arch as Architecture<'a>>::Registers;
 
+    fn instruction_pointer(&self) -> VirtualAddress;
+
     fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress>;
 
     fn into_runtime(self) -> runtime::Vcpu<'a>;

@@ -37,6 +37,14 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     }
 
     #[inline]
+    fn instruction_pointer(&self) -> VirtualAddress {
+        match self {
+            Vcpu::X86_64(vcpu) => vcpu.instruction_pointer(),
+            Vcpu::Aarch64(vcpu) => vcpu.instruction_pointer(),
+        }
+    }
+
+    #[inline]
     fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
         match self {
             Self::X86_64(vcpu) => vcpu.kernel_per_cpu(check),
