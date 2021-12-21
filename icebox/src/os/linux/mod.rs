@@ -230,7 +230,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Process::new(proc, self).pgd()
     }
 
-    fn process_exe(&self, proc: ice::Process) -> IceResult<Option<String>> {
+    fn process_exe(&self, proc: ice::Process) -> IceResult<Option<ibc::Path>> {
         let mm = Process::new(proc, self).mm()?;
         let offsets = &self.profile.fast_offsets;
 
@@ -238,11 +238,8 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         if file.is_null() {
             return Ok(None);
         }
-        let dentry = self.read_kernel_value(file + offsets.file_f_path + offsets.path_d_entry)?;
-        let mut buf = Vec::new();
-        self.build_path(dentry, &mut buf)?;
-        let name = String::from_utf8(buf).map_err(|err| ice::IceError::new(err))?;
-        Ok(Some(name))
+        let path = self.kernel_to_physical(file + offsets.file_f_path)?;
+        Ok(Some(ibc::Path(path)))
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
@@ -314,7 +311,19 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         self.process_name(ibc::Process(thread.0))
     }
 
-    fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<String>> {
+    fn path_to_string(&self, path: ice::Path) -> IceResult<String> {
+        let offsets = &self.profile.fast_offsets;
+
+        let dentry = self.backend.read_value(path.0 + offsets.path_d_entry)?;
+        let mut buf = Vec::new();
+
+        self.build_path(dentry, &mut buf)?;
+
+        let name = String::from_utf8(buf).map_err(|err| ice::IceError::new(err))?;
+        Ok(name)
+    }
+
+    fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<ibc::Path>> {
         let offsets = &self.profile.fast_offsets;
 
         let file: VirtualAddress = self
@@ -325,13 +334,8 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             return Ok(None);
         }
 
-        let dentry = self.read_kernel_value(file + offsets.file_f_path + offsets.path_d_entry)?;
-        let mut buf = Vec::new();
-
-        self.build_path(dentry, &mut buf)?;
-
-        let name = String::from_utf8(buf).map_err(|err| ice::IceError::new(err))?;
-        Ok(Some(name))
+        let path = self.kernel_to_physical(file + offsets.file_f_path)?;
+        Ok(Some(ibc::Path(path)))
     }
 
     fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {

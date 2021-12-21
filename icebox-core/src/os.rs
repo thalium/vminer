@@ -8,6 +8,9 @@ pub struct Thread(pub PhysicalAddress);
 pub struct Process(pub PhysicalAddress);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Path(pub PhysicalAddress);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vma(pub PhysicalAddress);
 
 #[derive(Debug, Clone, Copy)]
@@ -86,7 +89,7 @@ pub trait Os {
     fn process_pid(&self, proc: Process) -> IceResult<u32>;
     fn process_name(&self, proc: Process) -> IceResult<String>;
     fn process_pgd(&self, proc: Process) -> IceResult<PhysicalAddress>;
-    fn process_exe(&self, proc: Process) -> IceResult<Option<String>>;
+    fn process_exe(&self, proc: Process) -> IceResult<Option<Path>>;
     fn process_parent(&self, proc: Process) -> IceResult<Process>;
     fn process_for_each_child(
         &self,
@@ -130,7 +133,9 @@ pub trait Os {
     fn thread_id(&self, thread: Thread) -> IceResult<u32>;
     fn thread_name(&self, thread: Thread) -> IceResult<String>;
 
-    fn vma_file(&self, vma: Vma) -> IceResult<Option<String>>;
+    fn path_to_string(&self, path: Path) -> IceResult<String>;
+
+    fn vma_file(&self, vma: Vma) -> IceResult<Option<Path>>;
     fn vma_start(&self, vma: Vma) -> IceResult<VirtualAddress>;
     fn vma_end(&self, vma: Vma) -> IceResult<VirtualAddress>;
     fn vma_flags(&self, vma: Vma) -> IceResult<VmaFlags>;
