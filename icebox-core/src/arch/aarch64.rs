@@ -36,6 +36,11 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     #[inline]
+    fn base_pointer(&self) -> VirtualAddress {
+        unimplemented!()
+    }
+
+    #[inline]
     fn kernel_per_cpu(&self, _check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
         None
     }
