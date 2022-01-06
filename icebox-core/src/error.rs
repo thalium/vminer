@@ -30,23 +30,30 @@ where
 #[cfg(not(feature = "std"))]
 impl From<&'_ str> for Box<dyn Error + Send + Sync> {
     fn from(err: &str) -> Self {
-        struct Str(Box<str>);
+        String::from(err).into()
+    }
+}
 
-        impl fmt::Debug for Str {
+#[cfg(not(feature = "std"))]
+impl From<String> for Box<dyn Error + Send + Sync> {
+    fn from(err: String) -> Self {
+        struct StringErr(String);
+
+        impl fmt::Debug for StringErr {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 self.0.fmt(f)
             }
         }
 
-        impl fmt::Display for Str {
+        impl fmt::Display for StringErr {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 self.0.fmt(f)
             }
         }
 
-        impl Error for Str {}
+        impl Error for StringErr {}
 
-        Box::new(Str(err.into()))
+        Box::new(StringErr(err))
     }
 }
 
