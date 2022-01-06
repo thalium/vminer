@@ -28,6 +28,29 @@ where
 }
 
 #[cfg(not(feature = "std"))]
+impl From<&'_ str> for Box<dyn Error + Send + Sync> {
+    fn from(err: &str) -> Self {
+        struct Str(Box<str>);
+
+        impl fmt::Debug for Str {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl fmt::Display for Str {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl Error for Str {}
+
+        Box::new(Str(err.into()))
+    }
+}
+
+#[cfg(not(feature = "std"))]
 impl Error for alloc::string::FromUtf8Error {}
 
 #[derive(Debug)]
