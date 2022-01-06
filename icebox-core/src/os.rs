@@ -1,16 +1,16 @@
 use crate::{IceResult, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Thread(pub PhysicalAddress);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Process(pub PhysicalAddress);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Path(pub PhysicalAddress);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Vma(pub PhysicalAddress);
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +51,15 @@ impl core::ops::BitOrAssign for VmaFlags {
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0
     }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct StackFrame {
+    pub start: VirtualAddress,
+    pub size: u64,
+    pub base_pointer: VirtualAddress,
+    pub instruction_pointer: VirtualAddress,
+    pub file: String,
 }
 
 pub trait Os {
@@ -128,6 +137,11 @@ pub trait Os {
         self.process_for_each_vma(proc, &mut |vma| Ok(vmas.push(vma)))?;
         Ok(vmas)
     }
+    fn process_callstack(
+        &self,
+        proc: Process,
+        f: &mut dyn FnMut(&StackFrame) -> IceResult<()>,
+    ) -> IceResult<()>;
 
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
     fn thread_id(&self, thread: Thread) -> IceResult<u32>;

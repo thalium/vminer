@@ -351,7 +351,7 @@ fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
     });
 
     attach(pid, &fds).unwrap();
-    println!("Payload succeded");
+    log::info!("Payload succeded");
 
     let regs = handle.join().unwrap()?;
     Ok(regs)

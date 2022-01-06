@@ -2,6 +2,7 @@
 
 members = [
     "bin/check",
+    "bin/force_mmap",
     "bin/kvm_dump_live",
     "icebox",
     "icebox-core",

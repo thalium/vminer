@@ -1,3 +1,4 @@
+pub mod callstack;
 pub mod process;
 pub mod profile;
 
@@ -301,6 +302,14 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         }
 
         Ok(())
+    }
+
+    fn process_callstack(
+        &self,
+        proc: ice::Process,
+        f: &mut dyn FnMut(&ice::StackFrame) -> IceResult<()>,
+    ) -> IceResult<()> {
+        callstack::iter(self, proc, f)
     }
 
     fn thread_id(&self, thread: ice::Thread) -> IceResult<u32> {

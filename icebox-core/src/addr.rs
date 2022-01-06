@@ -3,7 +3,7 @@ use core::ops::Sub;
 use core::ops::SubAssign;
 use core::{fmt, ops::Add};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
 pub struct PhysicalAddress(pub u64);
@@ -50,7 +50,19 @@ impl Sub<u64> for PhysicalAddress {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    bytemuck::Pod,
+    bytemuck::Zeroable,
+)]
 #[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
 pub struct VirtualAddress(pub u64);

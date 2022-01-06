@@ -15,6 +15,7 @@ pub use backend::{Backend, RuntimeBackend};
 mod error;
 pub use error::{
     Error, IceError, IceResult, MemoryAccessError, MemoryAccessResult, MemoryAccessResultExt,
+    ResultExt,
 };
 
 mod mem;
@@ -23,7 +24,7 @@ pub use mem::File;
 pub use mem::Memory;
 
 mod os;
-pub use os::{Os, Path, Process, Thread, Vma, VmaFlags};
+pub use os::{Os, Path, Process, StackFrame, Thread, Vma, VmaFlags};
 
 pub mod symbols;
 pub use symbols::SymbolsIndexer;

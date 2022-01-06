@@ -1,3 +1,4 @@
+use gimli::UnwindSection;
 use icebox::backends::kvm_dump;
 use icebox::core::{self as ice, Backend, Os};
 use icebox::os;
@@ -12,11 +13,6 @@ fn main() {
 
     let vm = kvm_dump::DumbDump::read("kvm.dump").unwrap();
 
-    for vcpu in vm.vcpus() {
-        println!("{:016x}", vcpu.special_registers.gs.base);
-        println!("{:016x}", vcpu.gs_kernel_base);
-    }
-
     //let addr = virtual_to_physical(GuestVirtAddr(vm.get_regs().rip)).unwrap();
     //let _ = dbg!(os::Linux::quick_check());
     //println!("0x{:x}", addr);
@@ -29,6 +25,28 @@ fn main() {
 
     let linux = os::Linux::create(vm, profile).unwrap();
 
+    let proc = 'ok: loop {
+        for i in 0..2 {
+            let proc = linux.current_process(i).unwrap();
+            if !linux.process_is_kernel(proc).unwrap() {
+                break 'ok proc;
+            }
+        }
+
+        panic!("No proc found");
+    };
+
+    linux
+        .process_callstack(proc, &mut |frame| {
+            println!(
+                "Frame: 0x{:x} (+0x{:x}): 0x{:x} [0x{:x}] {}",
+                frame.start, frame.size, frame.instruction_pointer, frame.base_pointer, frame.file
+            );
+            Ok(())
+        })
+        .unwrap();
+
+    /*
     linux
         .for_each_process(&mut |proc| {
             println!(
@@ -39,6 +57,7 @@ fn main() {
             Ok(())
         })
         .unwrap();
+    */
 
     /*
     for cpuid in 0..2 {
