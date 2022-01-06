@@ -38,7 +38,7 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     #[inline]
-    fn base_pointer(&self) -> VirtualAddress {
+    fn stack_pointer(&self) -> VirtualAddress {
         VirtualAddress(self.registers.rsp)
     }
 

@@ -45,10 +45,10 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     }
 
     #[inline]
-    fn base_pointer(&self) -> VirtualAddress {
+    fn stack_pointer(&self) -> VirtualAddress {
         match self {
-            Vcpu::X86_64(vcpu) => vcpu.base_pointer(),
-            Vcpu::Aarch64(vcpu) => vcpu.base_pointer(),
+            Vcpu::X86_64(vcpu) => vcpu.stack_pointer(),
+            Vcpu::Aarch64(vcpu) => vcpu.stack_pointer(),
         }
     }
 

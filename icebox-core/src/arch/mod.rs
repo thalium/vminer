@@ -51,7 +51,7 @@ pub trait Vcpu<'a> {
 
     fn instruction_pointer(&self) -> VirtualAddress;
 
-    fn base_pointer(&self) -> VirtualAddress;
+    fn stack_pointer(&self) -> VirtualAddress;
 
     fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress>;
 
