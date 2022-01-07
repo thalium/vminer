@@ -248,7 +248,7 @@ pub fn iter<B: ibc::Backend>(
 
     let mut frame = ibc::StackFrame {
         instruction_pointer: rip,
-        base_pointer: rsp,
+        stack_pointer: rsp,
         ..Default::default()
     };
     let mut rbp = VirtualAddress(rbp);
@@ -296,7 +296,7 @@ pub fn iter<B: ibc::Backend>(
         let cfa = match row.cfa() {
             gimli::CfaRule::RegisterAndOffset { register, offset } => match register {
                 gimli::Register(6) => rbp + *offset,
-                gimli::Register(7) => frame.base_pointer + *offset,
+                gimli::Register(7) => frame.stack_pointer + *offset,
                 gimli::Register(n) => {
                     return Err(IceError::new(format!("unsupported register in CFA: {}", n)))
                 }
@@ -307,7 +307,7 @@ pub fn iter<B: ibc::Backend>(
         };
 
         let old_bp = rbp;
-        let old_sp = frame.base_pointer;
+        let old_sp = frame.stack_pointer;
         let old_ip = frame.instruction_pointer;
 
         rbp = match row.register(gimli::Register(6)) {
@@ -340,7 +340,7 @@ pub fn iter<B: ibc::Backend>(
             _ => return Err(IceError::new("cannot retreive instruction pointer")),
         };
 
-        frame.base_pointer = cfa;
+        frame.stack_pointer = cfa;
     }
 
     Ok(())

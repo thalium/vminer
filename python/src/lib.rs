@@ -294,6 +294,20 @@ impl Process {
             os: self.os.clone_ref(py),
         })
     }
+
+    fn callstack(&self, py: Python) -> PyResult<CallStackIter> {
+        let os = self.os.borrow(py)?;
+
+        let mut frames = Vec::new();
+        os.0.process_callstack(self.proc, &mut |frame| {
+            frames.push(frame.clone());
+            Ok(())
+        })?;
+
+        Ok(CallStackIter {
+            frames: frames.into_iter(),
+        })
+    }
 }
 
 #[pyproto]
@@ -407,6 +421,37 @@ impl<'p> PyGCProtocol<'p> for Vma {
 }
 
 #[pyclass]
+struct StackFrame(ibc::StackFrame);
+
+#[pymethods]
+impl StackFrame {
+    #[getter]
+    fn start(&self) -> u64 {
+        self.0.start.0
+    }
+
+    #[getter]
+    fn size(&self) -> u64 {
+        self.0.size
+    }
+
+    #[getter]
+    fn stack_pointer(&self) -> u64 {
+        self.0.stack_pointer.0
+    }
+
+    #[getter]
+    fn instruction_pointer(&self) -> u64 {
+        self.0.instruction_pointer.0
+    }
+
+    #[getter]
+    fn file(&self) -> String {
+        self.0.file.clone()
+    }
+}
+
+#[pyclass]
 struct ProcessIter {
     procs: std::vec::IntoIter<ibc::Process>,
     os: PyOwned<RawOs>,
@@ -457,6 +502,22 @@ impl pyo3::PyIterProtocol for VmaIter {
     fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Vma>> {
         let vma = this.vmas.next();
         Ok(vma.map(|vma| Vma::new(this.py(), vma, &this.os)))
+    }
+}
+
+#[pyclass]
+struct CallStackIter {
+    frames: std::vec::IntoIter<ibc::StackFrame>,
+}
+
+#[pyproto]
+impl pyo3::PyIterProtocol for CallStackIter {
+    fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
+        this
+    }
+
+    fn __next__(mut this: PyRefMut<Self>) -> Option<StackFrame> {
+        this.frames.next().map(StackFrame)
     }
 }
 

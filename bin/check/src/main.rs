@@ -40,7 +40,7 @@ fn main() {
         .process_callstack(proc, &mut |frame| {
             println!(
                 "Frame: 0x{:x} (+0x{:x}): 0x{:x} [0x{:x}] {}",
-                frame.start, frame.size, frame.instruction_pointer, frame.base_pointer, frame.file
+                frame.start, frame.size, frame.instruction_pointer, frame.stack_pointer, frame.file
             );
             Ok(())
         })
