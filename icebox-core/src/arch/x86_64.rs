@@ -1,8 +1,7 @@
-use crate::{PhysicalAddress, VirtualAddress};
+use bytemuck::{Pod, Zeroable};
 
 use super::runtime;
-
-use bytemuck::{Pod, Zeroable};
+use crate::{LittleEndian, PhysicalAddress, VirtualAddress};
 
 #[derive(Debug, Clone, Copy)]
 pub struct X86_64;
@@ -100,10 +99,16 @@ impl<'a> super::Architecture<'a> for X86_64 {
     type Registers = Registers;
     type Vcpu = &'a Vcpu;
     type Vcpus = &'a [Vcpu];
+    type Endian = LittleEndian;
 
     #[inline]
     fn into_runtime(self) -> runtime::Architecture {
         runtime::Architecture::X86_64(self)
+    }
+
+    #[inline]
+    fn endianness(&self) -> LittleEndian {
+        LittleEndian
     }
 
     fn virtual_to_physical<M: crate::Memory + ?Sized>(

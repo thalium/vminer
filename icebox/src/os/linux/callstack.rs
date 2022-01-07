@@ -3,8 +3,8 @@ use alloc::{format, vec::Vec};
 use gimli::UnwindSection;
 use hashbrown::HashMap;
 use ibc::{
-    IceError, IceResult, MemoryAccessResult, MemoryAccessResultExt, Os, PhysicalAddress,
-    VirtualAddress,
+    Architecture, Endianness, IceError, IceResult, MemoryAccessResult, MemoryAccessResultExt, Os,
+    PhysicalAddress, VirtualAddress,
 };
 use once_cell::unsync::OnceCell;
 
@@ -25,13 +25,14 @@ impl Vma {
 
 struct UnwindData {
     bases: gimli::BaseAddresses,
+    endian: gimli::RunTimeEndian,
     segment: Vec<u8>,
     eh_frame: usize,
 }
 
 impl UnwindData {
     fn eh_frame(&self) -> gimli::EhFrame<impl gimli::Reader + '_> {
-        gimli::EhFrame::new(&self.segment[self.eh_frame..], gimli::LittleEndian)
+        gimli::EhFrame::new(&self.segment[self.eh_frame..], self.endian)
     }
 }
 
@@ -147,6 +148,10 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             log::debug!("Looking for .eh_frame for {}", path);
         }
 
+        let endian = match self.linux.backend.arch().endianness().as_runtime_endian() {
+            ibc::RuntimeEndian::Little => gimli::RunTimeEndian::Little,
+            ibc::RuntimeEndian::Big => gimli::RunTimeEndian::Big,
+        };
         let mut vma_data = Vec::with_capacity(0x1000);
 
         for vma in &self.vmas {
@@ -165,7 +170,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             log::trace!("Trying VMA starting at {:x}", vma.start);
 
             for i in memchr::memmem::find_iter(&vma_data, b"\x01") {
-                let header = gimli::EhFrameHdr::new(&vma_data[i..], gimli::LittleEndian);
+                let header = gimli::EhFrameHdr::new(&vma_data[i..], endian);
                 let eh_frame_hdr = vma.start + i as u64;
                 let mut bases = gimli::BaseAddresses::default().set_eh_frame_hdr(eh_frame_hdr.0);
 
@@ -196,8 +201,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 let eh_frame_offset = (eh_frame_addr - vma.start) as usize;
                 bases = bases.set_eh_frame(eh_frame_addr.0);
 
-                let eh_frame =
-                    gimli::EhFrame::new(&vma_data[eh_frame_offset..], gimli::LittleEndian);
+                let eh_frame = gimli::EhFrame::new(&vma_data[eh_frame_offset..], endian);
                 let fde = eh_frame.fde_for_address(&bases, ip.0, |this, bases, offset| {
                     this.cie_from_offset(bases, offset)
                 });
@@ -209,6 +213,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
 
                 return Ok(UnwindData {
                     bases,
+                    endian,
                     segment: vma_data,
                     eh_frame: eh_frame_offset,
                 });

@@ -1,4 +1,4 @@
-use crate::{arch, PhysicalAddress, VirtualAddress};
+use crate::{arch, Endianness, PhysicalAddress, RuntimeEndian, VirtualAddress};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Architecture {
@@ -210,10 +210,19 @@ impl<'a> arch::Architecture<'a> for Architecture {
     type Registers = Registers;
     type Vcpu = Vcpu<'a>;
     type Vcpus = Vcpus<'a>;
+    type Endian = RuntimeEndian;
 
     #[inline]
     fn into_runtime(self) -> Architecture {
         self
+    }
+
+    #[inline]
+    fn endianness(&self) -> RuntimeEndian {
+        match self {
+            Architecture::X86_64(arch) => arch.endianness().as_runtime_endian(),
+            Architecture::Aarch64(arch) => arch.endianness().as_runtime_endian(),
+        }
     }
 
     #[inline]

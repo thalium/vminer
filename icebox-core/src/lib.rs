@@ -12,6 +12,9 @@ pub use arch::Architecture;
 mod backend;
 pub use backend::{Backend, RuntimeBackend};
 
+mod endian;
+pub use endian::{BigEndian, Endianness, LittleEndian, RuntimeEndian};
+
 mod error;
 pub use error::{
     Error, IceError, IceResult, MemoryAccessError, MemoryAccessResult, MemoryAccessResultExt,

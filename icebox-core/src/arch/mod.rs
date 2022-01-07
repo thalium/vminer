@@ -62,8 +62,11 @@ pub trait Architecture<'a> {
     type Vcpu: Vcpu<'a, Arch = Self>;
     type Vcpus: Vcpus<'a, Arch = Self>;
     type Registers;
+    type Endian: crate::Endianness;
 
     fn into_runtime(self) -> runtime::Architecture;
+
+    fn endianness(&self) -> Self::Endian;
 
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
