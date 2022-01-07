@@ -1,0 +1,8 @@
+[package]
+name = "force_mmap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+memchr = "2.4"
+sync_file = "0.2"
