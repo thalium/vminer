@@ -253,6 +253,13 @@ impl From<&str> for IceError {
     }
 }
 
+impl From<String> for IceError {
+    #[cold]
+    fn from(msg: String) -> Self {
+        Self::from_repr(Repr::Message(msg.into(), None))
+    }
+}
+
 impl From<MemoryAccessError> for IceError {
     #[cold]
     fn from(err: MemoryAccessError) -> Self {
