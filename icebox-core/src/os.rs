@@ -53,13 +53,14 @@ impl core::ops::BitOrAssign for VmaFlags {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct StackFrame {
     pub start: VirtualAddress,
     pub size: u64,
     pub stack_pointer: VirtualAddress,
     pub instruction_pointer: VirtualAddress,
-    pub file: String,
+    pub vma: Vma,
+    pub file: Option<Path>,
 }
 
 pub trait Os {

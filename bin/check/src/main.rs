@@ -38,9 +38,10 @@ fn main() {
 
     linux
         .process_callstack(proc, &mut |frame| {
+            let file = linux.path_to_string(frame.file.unwrap())?;
             println!(
                 "Frame: 0x{:x} (+0x{:x}): 0x{:x} [0x{:x}] {}",
-                frame.start, frame.size, frame.instruction_pointer, frame.stack_pointer, frame.file
+                frame.start, frame.size, frame.instruction_pointer, frame.stack_pointer, file
             );
             Ok(())
         })

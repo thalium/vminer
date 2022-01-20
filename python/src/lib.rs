@@ -300,7 +300,15 @@ impl Process {
 
         let mut frames = Vec::new();
         os.0.process_callstack(self.proc, &mut |frame| {
-            frames.push(frame.clone());
+            let file = match frame.file {
+                Some(file) => Some(os.0.path_to_string(file)?),
+                None => None,
+            };
+
+            frames.push(StackFrame {
+                frame: frame.clone(),
+                file,
+            });
             Ok(())
         })?;
 
@@ -421,33 +429,36 @@ impl<'p> PyGCProtocol<'p> for Vma {
 }
 
 #[pyclass]
-struct StackFrame(ibc::StackFrame);
+struct StackFrame {
+    frame: ibc::StackFrame,
+    file: Option<String>,
+}
 
 #[pymethods]
 impl StackFrame {
     #[getter]
     fn start(&self) -> u64 {
-        self.0.start.0
+        self.frame.start.0
     }
 
     #[getter]
     fn size(&self) -> u64 {
-        self.0.size
+        self.frame.size
     }
 
     #[getter]
     fn stack_pointer(&self) -> u64 {
-        self.0.stack_pointer.0
+        self.frame.stack_pointer.0
     }
 
     #[getter]
     fn instruction_pointer(&self) -> u64 {
-        self.0.instruction_pointer.0
+        self.frame.instruction_pointer.0
     }
 
     #[getter]
-    fn file(&self) -> String {
-        self.0.file.clone()
+    fn file(&self) -> Option<String> {
+        self.file.clone()
     }
 }
 
@@ -507,7 +518,7 @@ impl pyo3::PyIterProtocol for VmaIter {
 
 #[pyclass]
 struct CallStackIter {
-    frames: std::vec::IntoIter<ibc::StackFrame>,
+    frames: std::vec::IntoIter<StackFrame>,
 }
 
 #[pyproto]
@@ -517,7 +528,7 @@ impl pyo3::PyIterProtocol for CallStackIter {
     }
 
     fn __next__(mut this: PyRefMut<Self>) -> Option<StackFrame> {
-        this.frames.next().map(StackFrame)
+        this.frames.next()
     }
 }
 

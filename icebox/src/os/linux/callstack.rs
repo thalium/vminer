@@ -13,6 +13,7 @@ use super::Linux;
 struct Vma {
     start: VirtualAddress,
     end: VirtualAddress,
+    vma: ibc::Vma,
     perms: ibc::VmaFlags,
     file: ibc::Path,
 }
@@ -53,6 +54,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 vmas.push(Vma {
                     start: linux.vma_start(vma)?,
                     end: linux.vma_end(vma)?,
+                    vma,
                     perms: ibc::VmaFlags(linux.vma_flags(vma)?.0 & 7),
                     file,
                 });
@@ -254,21 +256,23 @@ pub fn iter<B: ibc::Backend>(
     let mut frame = ibc::StackFrame {
         instruction_pointer: rip,
         stack_pointer: rsp,
-        ..Default::default()
+        size: 0,
+        start: VirtualAddress(0),
+        vma: ibc::Vma(PhysicalAddress(0)),
+        file: None,
     };
     let mut rbp = VirtualAddress(rbp);
 
     loop {
-        let path = match ctx.find_vma_by_address(frame.instruction_pointer) {
-            Some(vma) => vma.file,
-            None => return Err(IceError::new("anonymous page")),
-        };
+        let vma = ctx
+            .find_vma_by_address(frame.instruction_pointer)
+            .ok_or("encountered anonymous page")?;
+        frame.vma = vma.vma;
+        frame.file = Some(vma.file);
 
-        let cie_cache = cie_cache.entry(path).or_insert_with(HashMap::new);
+        let cie_cache = cie_cache.entry(vma.file).or_insert_with(HashMap::new);
 
-        frame.file = linux.path_to_string(path)?;
-
-        let data = ctx.get_unwind_data(path, frame.instruction_pointer)?;
+        let data = ctx.get_unwind_data(vma.file, frame.instruction_pointer)?;
         let eh_frame = data.eh_frame();
 
         let fde = eh_frame
