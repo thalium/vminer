@@ -144,15 +144,49 @@ impl Profile {
     }
 }
 
+trait BufRead {
+    fn read_one_line(&mut self, buf: &mut String) -> IceResult<usize>;
+}
+
 #[cfg(feature = "std")]
-pub fn parse_kallsyms<R: std::io::BufRead>(
-    mut r: R,
+// #[cfg(not(feature = "std"))]
+impl<R: std::io::BufRead> BufRead for R {
+    fn read_one_line(&mut self, buf: &mut String) -> IceResult<usize> {
+        Ok(self.read_line(buf)?)
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl BufRead for &[u8] {
+    fn read_one_line(&mut self, buf: &mut String) -> IceResult<usize> {
+        let line = match memchr::memchr(b'\n', self) {
+            Some(i) => &self[..i],
+            None => self,
+        };
+
+        buf.push_str(core::str::from_utf8(line).map_err(ibc::IceError::new)?);
+        Ok(line.len())
+    }
+}
+
+#[cfg(feature = "std")]
+pub fn parse_symbol_file<R: std::io::BufRead>(
+    r: R,
     syms: &mut ice::SymbolsIndexer,
-) -> std::io::Result<()> {
+) -> IceResult<()> {
+    parse_symbol_file_inner(r, syms)
+}
+
+pub fn parse_symbol_file_from_bytes(bytes: &[u8], syms: &mut ice::SymbolsIndexer) -> IceResult<()> {
+    parse_symbol_file_inner(bytes, syms)
+}
+
+#[cfg(feature = "std")]
+fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ice::SymbolsIndexer) -> IceResult<()> {
     let mut line = String::with_capacity(200);
 
     loop {
-        if r.read_line(&mut line)? == 0 {
+        if r.read_one_line(&mut line)? == 0 {
             break;
         }
 

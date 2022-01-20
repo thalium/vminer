@@ -124,7 +124,7 @@ impl RawOs {
             Ok(true) => {
                 let mut syms = ibc::SymbolsIndexer::new();
                 let kallsyms = std::io::BufReader::new(std::fs::File::open("../kallsyms")?);
-                icebox::os::linux::profile::parse_kallsyms(kallsyms, &mut syms)?;
+                icebox::os::linux::profile::parse_symbol_file(kallsyms, &mut syms)?;
                 syms.read_object_file("../elf").unwrap();
                 let profile = icebox::os::linux::Profile::new(syms)?;
                 let linux = icebox::os::Linux::create(backend.0, profile)?;

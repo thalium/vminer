@@ -60,6 +60,9 @@ impl From<String> for Box<dyn Error + Send + Sync> {
 #[cfg(not(feature = "std"))]
 impl Error for alloc::string::FromUtf8Error {}
 
+#[cfg(not(feature = "std"))]
+impl Error for core::str::Utf8Error {}
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MemoryAccessError {

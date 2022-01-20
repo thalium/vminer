@@ -19,7 +19,7 @@ fn main() {
 
     let mut syms = ice::SymbolsIndexer::new();
     let kallsyms = std::io::BufReader::new(std::fs::File::open("../kallsyms").unwrap());
-    os::linux::profile::parse_kallsyms(kallsyms, &mut syms).unwrap();
+    os::linux::profile::parse_symbol_file(kallsyms, &mut syms).unwrap();
     syms.read_object_file("../elf").unwrap();
     let profile = os::linux::Profile::new(syms).unwrap();
 
