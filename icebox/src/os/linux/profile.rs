@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{borrow::ToOwned, string::String};
 
 use crate::core::{self as ice, IceResult};
 
@@ -181,7 +181,6 @@ pub fn parse_symbol_file_from_bytes(bytes: &[u8], syms: &mut ice::SymbolsIndexer
     parse_symbol_file_inner(bytes, syms)
 }
 
-#[cfg(feature = "std")]
 fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ice::SymbolsIndexer) -> IceResult<()> {
     let mut line = String::with_capacity(200);
 
