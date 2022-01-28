@@ -304,6 +304,7 @@ dependencies = [
  "log",
  "memchr",
  "once_cell",
+ "spin",
 ]
 
 [[package]]

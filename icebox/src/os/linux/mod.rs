@@ -3,17 +3,30 @@ pub mod process;
 pub mod profile;
 
 use crate::core::{self as ice, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
+use crate::utils::OnceCell;
 use alloc::{string::String, vec::Vec};
 use core::fmt;
+use hashbrown::HashMap;
 
 use process::Process;
 pub use profile::Profile;
+
+#[derive(Default)]
+struct ProcessData {
+    name: OnceCell<String>,
+    pid: OnceCell<u32>,
+
+    parent: OnceCell<ibc::Process>,
+    children: OnceCell<Vec<ibc::Process>>,
+}
 
 pub struct Linux<B> {
     backend: B,
     profile: Profile,
     kpgd: PhysicalAddress,
     kaslr: i64,
+
+    processes: OnceCell<HashMap<ibc::Process, ProcessData>>,
 }
 
 fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<VirtualAddress> {
@@ -51,6 +64,8 @@ impl<B: ice::Backend> Linux<B> {
             profile,
             kpgd,
             kaslr,
+
+            processes: OnceCell::new(),
         })
     }
 
@@ -129,6 +144,40 @@ impl<B: ice::Backend> Linux<B> {
         }
 
         Ok(())
+    }
+
+    fn processes(&self) -> IceResult<&HashMap<ibc::Process, ProcessData>> {
+        self.processes.get_or_try_init(|| {
+            let mut processes = HashMap::new();
+
+            let offsets = &self.profile.fast_offsets;
+            let init = ibc::Os::init_process(self)?;
+
+            processes.insert(init, ProcessData::default());
+            self.iterate_list(init.0 + offsets.task_struct_tasks, |addr| {
+                let proc = ibc::Process(addr - offsets.task_struct_tasks);
+                processes.insert(proc, ProcessData::default());
+                Ok(())
+            })?;
+
+            Ok(processes)
+        })
+    }
+
+    fn process(&self, proc: ibc::Process) -> IceResult<Option<&ProcessData>> {
+        let procs = self.processes()?;
+        Ok(procs.get(&proc))
+    }
+
+    fn process_iter_children<F>(&self, proc: ibc::Process, mut f: F) -> IceResult<()>
+    where
+        F: FnMut(ibc::Process) -> IceResult<()>,
+    {
+        let offsets = &self.profile.fast_offsets;
+
+        self.iterate_list(proc.0 + offsets.task_struct_children, |addr| {
+            f(ibc::Process(addr - offsets.task_struct_sibling))
+        })
     }
 
     fn build_path(&self, dentry: VirtualAddress, buf: &mut Vec<u8>) -> IceResult<()> {
@@ -220,11 +269,21 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_pid(&self, proc: ibc::Process) -> IceResult<u32> {
-        Process::new(proc, self).pid()
+        let get_pid = || Process::new(proc, self).pid();
+
+        match self.process(proc)? {
+            Some(proc) => proc.pid.get_or_try_init(get_pid).map(|pid| *pid),
+            None => get_pid(),
+        }
     }
 
     fn process_name(&self, proc: ice::Process) -> IceResult<String> {
-        Process::new(proc, self).comm()
+        let get_name = || Process::new(proc, self).comm();
+
+        match self.process(proc)? {
+            Some(proc) => proc.name.get_or_try_init(get_name).map(Clone::clone),
+            None => get_name(),
+        }
     }
 
     fn process_pgd(&self, proc: ice::Process) -> IceResult<PhysicalAddress> {
@@ -244,7 +303,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
-        Process::new(proc, self).parent()
+        let get_parent = || Process::new(proc, self).parent();
+
+        match self.process(proc)? {
+            Some(proc) => proc.parent.get_or_try_init(get_parent).map(|p| *p),
+            None => get_parent(),
+        }
     }
 
     fn process_for_each_child(
@@ -252,11 +316,21 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
     ) -> IceResult<()> {
-        let offsets = &self.profile.fast_offsets;
+        match self.process(proc)? {
+            Some(proc_data) => {
+                let children = proc_data.children.get_or_try_init(|| {
+                    let mut children = Vec::new();
+                    self.process_iter_children(proc, |child| {
+                        children.push(child);
+                        Ok(())
+                    })?;
+                    Ok(children)
+                })?;
 
-        self.iterate_list(proc.0 + offsets.task_struct_children, |addr| {
-            f(ibc::Process(addr - offsets.task_struct_sibling))
-        })
+                children.iter().copied().try_for_each(f)
+            }
+            None => self.process_iter_children(proc, f),
+        }
     }
 
     fn process_for_each_thread(
@@ -272,15 +346,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
-        let offsets = &self.profile.fast_offsets;
-        let init = self.init_process()?;
-
-        f(init)?;
-        self.iterate_list(init.0 + offsets.task_struct_tasks, |addr| {
-            f(ibc::Process(addr - offsets.task_struct_tasks))
-        })?;
-
-        Ok(())
+        self.processes()?.keys().copied().try_for_each(f)
     }
 
     fn process_for_each_vma(
