@@ -11,12 +11,12 @@ typedef struct Error Error;
 
 typedef struct Os Os;
 
-typedef struct GuestPhysAddr {
+typedef struct VirtualAddress {
   uint64_t val;
-} GuestPhysAddr;
+} VirtualAddress;
 
 typedef struct Process {
-  struct GuestPhysAddr addr;
+  struct VirtualAddress addr;
 } Process;
 
 typedef struct Allocator {

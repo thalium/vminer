@@ -22,7 +22,7 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
     }
 
     fn read_value<T: bytemuck::Pod>(&self, offset: u64) -> IceResult<T> {
-        Ok(self.linux.backend.read_value(self.raw.0 + offset)?)
+        self.linux.read_kernel_value(self.raw.0 + offset)
     }
 
     pub fn tid(&self) -> IceResult<u32> {
@@ -33,35 +33,32 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         self.read_value(self.linux.profile.fast_offsets.task_struct_tgid)
     }
 
-    pub fn mm(&self) -> IceResult<PhysicalAddress> {
+    pub fn mm(&self) -> IceResult<VirtualAddress> {
         let fast_offsets = &self.linux.profile.fast_offsets;
-        let mut mm: VirtualAddress = self.read_value(fast_offsets.task_struct_mm)?;
+        let mm: VirtualAddress = self.read_value(fast_offsets.task_struct_mm)?;
         if mm.is_null() {
-            mm = self.read_value(fast_offsets.task_struct_active_mm)?;
+            self.read_value(fast_offsets.task_struct_active_mm)
+        } else {
+            Ok(mm)
         }
-
-        self.linux.kernel_to_physical(mm)
     }
 
     pub fn pgd(&self) -> IceResult<PhysicalAddress> {
         let mm = self.mm()?;
         let pgd_ptr = self
             .linux
-            .backend
-            .read_value(mm + self.linux.profile.fast_offsets.mm_struct_pgd)?;
-        let pgd = self.linux.kernel_to_physical(pgd_ptr)?;
-        Ok(pgd)
+            .read_kernel_value(mm + self.linux.profile.fast_offsets.mm_struct_pgd)?;
+        self.linux.kernel_to_physical(pgd_ptr)
     }
 
     pub fn group_leader(&self) -> IceResult<ibc::Process> {
         let addr = self.read_value(self.linux.profile.fast_offsets.task_struct_group_leader)?;
-        let addr = self.linux.kernel_to_physical(addr)?;
         Ok(ibc::Process(addr))
     }
 
     pub fn read_comm(&self, buf: &mut [u8]) -> IceResult<()> {
         let buf = if buf.len() >= 16 { &mut buf[..16] } else { buf };
-        self.linux.backend.read_memory(
+        self.linux.read_kernel_memory(
             self.raw.0 + self.linux.profile.fast_offsets.task_struct_comm,
             buf,
         )?;
@@ -82,7 +79,6 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
 
     pub fn parent(&self) -> IceResult<ibc::Process> {
         let addr = self.read_value(self.linux.profile.fast_offsets.task_struct_real_parent)?;
-        let addr = self.linux.kernel_to_physical(addr)?;
         Ok(ibc::Process(addr))
     }
 
@@ -95,7 +91,7 @@ impl<'a, B: ibc::Backend> Process<'a, B> {
         } else {
             buf
         };
-        self.linux.backend.read_memory(self.raw.0 + offset, buf)?;
+        self.linux.read_kernel_memory(self.raw.0 + offset, buf)?;
         Ok(())
     }
 

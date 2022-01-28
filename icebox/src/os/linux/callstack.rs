@@ -258,7 +258,7 @@ pub fn iter<B: ibc::Backend>(
         stack_pointer: rsp,
         size: 0,
         start: VirtualAddress(0),
-        vma: ibc::Vma(PhysicalAddress(0)),
+        vma: ibc::Vma(VirtualAddress(0)),
         file: None,
     };
     let mut rbp = VirtualAddress(rbp);

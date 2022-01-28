@@ -77,6 +77,10 @@ impl<B: ice::Backend> Linux<B> {
         self.backend.read_value_virtual(self.kpgd, addr)
     }
 
+    fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+        self.backend.read_virtual_memory(self.kpgd, addr, buf)
+    }
+
     #[cfg(feature = "std")]
     pub fn read_current_task(&self, cpuid: usize) -> IceResult<()> {
         let current_task = per_cpu(&self.backend, cpuid)?
@@ -119,22 +123,19 @@ impl<B: ice::Backend> Linux<B> {
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
 
         let addr = self.read_kernel_value(current_task)?;
-        let addr = self.kernel_to_physical(addr)?;
-
         Ok(ibc::Thread(addr))
     }
 
     pub fn iterate_list(
         &self,
-        head: PhysicalAddress,
-        mut f: impl FnMut(PhysicalAddress) -> IceResult<()>,
+        head: VirtualAddress,
+        mut f: impl FnMut(VirtualAddress) -> IceResult<()>,
     ) -> IceResult<()> {
         let mut pos = head;
         let next_offset = self.profile.fast_offsets.list_head_next;
 
         loop {
-            let next = self.backend.read_value(pos + next_offset)?;
-            pos = self.kernel_to_physical(next)?;
+            pos = self.read_kernel_value(pos + next_offset)?;
 
             if pos == head {
                 break;
@@ -183,18 +184,13 @@ impl<B: ice::Backend> Linux<B> {
     fn build_path(&self, dentry: VirtualAddress, buf: &mut Vec<u8>) -> IceResult<()> {
         let offsets = &self.profile.fast_offsets;
 
-        let p_dentry = self.kernel_to_physical(dentry)?;
-
-        let parent: VirtualAddress = self
-            .backend
-            .read_value(p_dentry + offsets.dentry_d_parent)?;
+        let parent: VirtualAddress = self.read_kernel_value(dentry + offsets.dentry_d_parent)?;
         if parent != dentry {
             self.build_path(parent, buf)?;
         }
 
-        let name: VirtualAddress = self
-            .backend
-            .read_value(p_dentry + offsets.dentry_d_name + offsets.qstr_name)?;
+        let name: VirtualAddress =
+            self.read_kernel_value(dentry + offsets.dentry_d_name + offsets.qstr_name)?;
 
         // TODO: use qstr.len here
         let mut len = buf.len();
@@ -203,8 +199,7 @@ impl<B: ice::Backend> Linux<B> {
             buf[len] = b'/';
             len += 1;
         }
-        self.backend
-            .read_virtual_memory(self.kpgd, name, &mut buf[len..])?;
+        self.read_kernel_memory(name, &mut buf[len..])?;
 
         match memchr::memchr(0, &buf[len..]) {
             Some(i) => buf.truncate(len + i),
@@ -252,8 +247,7 @@ impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {
 
 impl<B: ice::Backend> ice::Os for Linux<B> {
     fn init_process(&self) -> IceResult<ibc::Process> {
-        let init_task = self.profile.fast_syms.init_task + self.kaslr;
-        Ok(ibc::Process(self.kernel_to_physical(init_task)?))
+        Ok(ibc::Process(self.profile.fast_syms.init_task + self.kaslr))
     }
 
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
@@ -294,12 +288,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         let mm = Process::new(proc, self).mm()?;
         let offsets = &self.profile.fast_offsets;
 
-        let file: VirtualAddress = self.backend.read_value(mm + offsets.mm_struct_exe_file)?;
+        let file: VirtualAddress = self.read_kernel_value(mm + offsets.mm_struct_exe_file)?;
         if file.is_null() {
             return Ok(None);
         }
-        let path = self.kernel_to_physical(file + offsets.file_f_path)?;
-        Ok(Some(ibc::Path(path)))
+        // let path = self.kernel_to_physical(file + offsets.file_f_path)?;
+        Ok(Some(ibc::Path(file + offsets.file_f_path)))
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
@@ -357,14 +351,11 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         let offsets = &self.profile.fast_offsets;
 
         let mm = Process::new(proc, self).mm()?;
-        let mut cur_vma: VirtualAddress = self.backend.read_value(mm + offsets.mm_struct_mmap)?;
+        let mut cur_vma: VirtualAddress = self.read_kernel_value(mm + offsets.mm_struct_mmap)?;
 
         while !cur_vma.is_null() {
-            let vma = self.kernel_to_physical(cur_vma)?;
-            f(ice::Vma(vma))?;
-            cur_vma = self
-                .backend
-                .read_value(vma + offsets.vm_area_struct_vm_next)?;
+            f(ice::Vma(cur_vma))?;
+            cur_vma = self.read_kernel_value(cur_vma + offsets.vm_area_struct_vm_next)?;
         }
 
         Ok(())
@@ -389,48 +380,37 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn path_to_string(&self, path: ice::Path) -> IceResult<String> {
         let offsets = &self.profile.fast_offsets;
 
-        let dentry = self.backend.read_value(path.0 + offsets.path_d_entry)?;
+        let dentry = self.read_kernel_value(path.0 + offsets.path_d_entry)?;
         let mut buf = Vec::new();
 
         self.build_path(dentry, &mut buf)?;
 
-        let name = String::from_utf8(buf).map_err(|err| ice::IceError::new(err))?;
-        Ok(name)
+        String::from_utf8(buf).map_err(|err| ice::IceError::new(err))
     }
 
     fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<ibc::Path>> {
         let offsets = &self.profile.fast_offsets;
 
-        let file: VirtualAddress = self
-            .backend
-            .read_value(vma.0 + offsets.vm_area_struct_vm_file)?;
+        let file: VirtualAddress =
+            self.read_kernel_value(vma.0 + offsets.vm_area_struct_vm_file)?;
 
         if file.is_null() {
             return Ok(None);
         }
-
-        let path = self.kernel_to_physical(file + offsets.file_f_path)?;
-        Ok(Some(ibc::Path(path)))
+        Ok(Some(ibc::Path(file + offsets.file_f_path)))
     }
 
     fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
-        let start = self
-            .backend
-            .read_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_start)?;
-        Ok(start)
+        self.read_kernel_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_start)
     }
 
     fn vma_end(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
-        let end = self
-            .backend
-            .read_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_end)?;
-        Ok(end)
+        self.read_kernel_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_end)
     }
 
     fn vma_flags(&self, vma: ice::Vma) -> IceResult<ibc::VmaFlags> {
-        let flags: u64 = self
-            .backend
-            .read_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_flags)?;
+        let flags: u64 =
+            self.read_kernel_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_flags)?;
         Ok(ibc::VmaFlags(flags))
     }
 }

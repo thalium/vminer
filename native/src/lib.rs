@@ -26,7 +26,7 @@ pub struct Os(Box<dyn ibc::Os + Send + Sync>);
 
 #[repr(C)]
 pub struct Process {
-    addr: GuestPhysAddr,
+    addr: VirtualAddress,
 }
 
 impl From<ibc::Process> for Process {
@@ -44,18 +44,35 @@ impl From<Process> for ibc::Process {
 }
 
 #[repr(C)]
-pub struct GuestPhysAddr {
+pub struct PhysicalAddress {
     val: u64,
 }
 
-impl From<ibc::PhysicalAddress> for GuestPhysAddr {
+#[repr(C)]
+pub struct VirtualAddress {
+    val: u64,
+}
+
+impl From<ibc::PhysicalAddress> for PhysicalAddress {
     fn from(addr: ibc::PhysicalAddress) -> Self {
         Self { val: addr.0 }
     }
 }
 
-impl From<GuestPhysAddr> for ibc::PhysicalAddress {
-    fn from(addr: GuestPhysAddr) -> Self {
+impl From<PhysicalAddress> for ibc::PhysicalAddress {
+    fn from(addr: PhysicalAddress) -> Self {
+        Self(addr.val)
+    }
+}
+
+impl From<ibc::VirtualAddress> for VirtualAddress {
+    fn from(addr: ibc::VirtualAddress) -> Self {
+        Self { val: addr.0 }
+    }
+}
+
+impl From<VirtualAddress> for ibc::VirtualAddress {
+    fn from(addr: VirtualAddress) -> Self {
         Self(addr.val)
     }
 }

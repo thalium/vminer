@@ -2,16 +2,16 @@ use crate::{IceResult, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Thread(pub PhysicalAddress);
+pub struct Thread(pub VirtualAddress);
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Process(pub PhysicalAddress);
+pub struct Process(pub VirtualAddress);
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Path(pub PhysicalAddress);
+pub struct Path(pub VirtualAddress);
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Vma(pub PhysicalAddress);
+pub struct Vma(pub VirtualAddress);
 
 #[derive(Debug, Clone, Copy)]
 pub struct VmaFlags(pub u64);
