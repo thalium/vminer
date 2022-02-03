@@ -1,5 +1,4 @@
 pub mod callstack;
-pub mod process;
 pub mod profile;
 
 use crate::core::{self as ice, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
@@ -8,8 +7,79 @@ use alloc::{string::String, vec::Vec};
 use core::fmt;
 use hashbrown::HashMap;
 
-use process::Process;
 pub use profile::Profile;
+
+use self::profile::{Pointer, StructOffset};
+
+trait Readable: Sized {
+    fn read<B: ice::Backend>(linux: &Linux<B>, addr: VirtualAddress) -> IceResult<Self>;
+}
+
+impl<T: bytemuck::Pod> Readable for T {
+    fn read<B: ice::Backend>(linux: &Linux<B>, addr: VirtualAddress) -> IceResult<Self> {
+        let val = linux.read_kernel_value(addr)?;
+        Ok(val)
+    }
+}
+
+impl<T> Readable for Pointer<T> {
+    fn read<B: ice::Backend>(linux: &Linux<B>, addr: VirtualAddress) -> IceResult<Self> {
+        let addr = VirtualAddress(linux.read_kernel_value(addr)?);
+        Ok(Pointer::new(addr))
+    }
+}
+
+trait HasStruct<Layout> {
+    fn get_struct_layout(&self) -> &Layout;
+}
+
+impl From<ice::Path> for Pointer<profile::Path> {
+    fn from(path: ice::Path) -> Self {
+        Self::new(path.0)
+    }
+}
+
+impl From<Pointer<profile::Path>> for ice::Path {
+    fn from(path: Pointer<profile::Path>) -> Self {
+        Self(path.addr)
+    }
+}
+
+impl From<ice::Process> for Pointer<profile::TaskStruct> {
+    fn from(proc: ice::Process) -> Self {
+        Self::new(proc.0)
+    }
+}
+
+impl From<Pointer<profile::TaskStruct>> for ice::Process {
+    fn from(path: Pointer<profile::TaskStruct>) -> Self {
+        Self(path.addr)
+    }
+}
+
+impl From<ice::Thread> for Pointer<profile::TaskStruct> {
+    fn from(thread: ice::Thread) -> Self {
+        Self::new(thread.0)
+    }
+}
+
+impl From<Pointer<profile::TaskStruct>> for ice::Thread {
+    fn from(path: Pointer<profile::TaskStruct>) -> Self {
+        Self(path.addr)
+    }
+}
+
+impl From<ice::Vma> for Pointer<profile::VmAreaStruct> {
+    fn from(vma: ice::Vma) -> Self {
+        Self::new(vma.0)
+    }
+}
+
+impl From<Pointer<profile::VmAreaStruct>> for ice::Vma {
+    fn from(path: Pointer<profile::VmAreaStruct>) -> Self {
+        Self(path.addr)
+    }
+}
 
 #[derive(Default)]
 struct ProcessData {
@@ -81,6 +151,35 @@ impl<B: ice::Backend> Linux<B> {
         self.backend.read_virtual_memory(self.kpgd, addr, buf)
     }
 
+    fn read_struct<L, T>(
+        &self,
+        pointer: Pointer<L>,
+        get_offset: impl FnOnce(&L) -> StructOffset<T>,
+    ) -> Pointer<T>
+    where
+        Self: HasStruct<L>,
+    {
+        let offset = get_offset(self.get_struct_layout());
+        Pointer::new(pointer.addr + offset.offset)
+    }
+
+    fn read_struct_pointer<L, T: Readable>(
+        &self,
+        pointer: Pointer<L>,
+        get_offset: impl FnOnce(&L) -> StructOffset<T>,
+    ) -> IceResult<T>
+    where
+        Self: HasStruct<L>,
+    {
+        let offset = get_offset(self.get_struct_layout());
+        T::read(self, pointer.addr + offset.offset)
+    }
+
+    #[allow(dead_code)]
+    fn read_pointer<T: Readable>(&self, pointer: Pointer<T>) -> IceResult<T> {
+        T::read(self, pointer.addr)
+    }
+
     #[cfg(feature = "std")]
     pub fn read_current_task(&self, cpuid: usize) -> IceResult<()> {
         let current_task = per_cpu(&self.backend, cpuid)?
@@ -118,7 +217,7 @@ impl<B: ice::Backend> Linux<B> {
         Ok(())
     }
 
-    pub fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
+    fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
         let current_task = per_cpu(&self.backend, cpuid)?
             + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
 
@@ -126,22 +225,28 @@ impl<B: ice::Backend> Linux<B> {
         Ok(ibc::Thread(addr))
     }
 
-    pub fn iterate_list(
+    fn iterate_list<T, O, F>(
         &self,
-        head: VirtualAddress,
-        mut f: impl FnMut(VirtualAddress) -> IceResult<()>,
-    ) -> IceResult<()> {
+        head: Pointer<profile::ListHead>,
+        get_offset: O,
+        mut f: F,
+    ) -> IceResult<()>
+    where
+        Self: HasStruct<T> + HasStruct<profile::ListHead>,
+        O: FnOnce(&T) -> StructOffset<profile::ListHead>,
+        F: FnMut(Pointer<T>) -> IceResult<()>,
+    {
         let mut pos = head;
-        let next_offset = self.profile.fast_offsets.list_head_next;
+        let offset = get_offset(self.get_struct_layout()).offset;
 
         loop {
-            pos = self.read_kernel_value(pos + next_offset)?;
+            pos = self.read_struct_pointer(pos, |list| list.next)?;
 
             if pos == head {
                 break;
             }
 
-            f(pos)?;
+            f(Pointer::new(pos.addr - offset))?;
         }
 
         Ok(())
@@ -151,15 +256,18 @@ impl<B: ice::Backend> Linux<B> {
         self.processes.get_or_try_init(|| {
             let mut processes = HashMap::new();
 
-            let offsets = &self.profile.fast_offsets;
             let init = ibc::Os::init_process(self)?;
 
             processes.insert(init, ProcessData::default());
-            self.iterate_list(init.0 + offsets.task_struct_tasks, |addr| {
-                let proc = ibc::Process(addr - offsets.task_struct_tasks);
-                processes.insert(proc, ProcessData::default());
-                Ok(())
-            })?;
+
+            self.iterate_list::<profile::TaskStruct, _, _>(
+                self.read_struct(init.into(), |ts| ts.tasks),
+                |ts| ts.tasks,
+                |proc| {
+                    processes.insert(proc.into(), ProcessData::default());
+                    Ok(())
+                },
+            )?;
 
             Ok(processes)
         })
@@ -174,23 +282,22 @@ impl<B: ice::Backend> Linux<B> {
     where
         F: FnMut(ibc::Process) -> IceResult<()>,
     {
-        let offsets = &self.profile.fast_offsets;
-
-        self.iterate_list(proc.0 + offsets.task_struct_children, |addr| {
-            f(ibc::Process(addr - offsets.task_struct_sibling))
-        })
+        let children = self.read_struct(proc.into(), |ts| ts.children);
+        self.iterate_list::<profile::TaskStruct, _, _>(
+            children,
+            |ts| ts.sibling,
+            |child| f(child.into()),
+        )
     }
 
-    fn build_path(&self, dentry: VirtualAddress, buf: &mut Vec<u8>) -> IceResult<()> {
-        let offsets = &self.profile.fast_offsets;
-
-        let parent: VirtualAddress = self.read_kernel_value(dentry + offsets.dentry_d_parent)?;
+    fn build_path(&self, dentry: Pointer<profile::Dentry>, buf: &mut Vec<u8>) -> IceResult<()> {
+        let parent = self.read_struct_pointer(dentry, |d| d.d_parent)?;
         if parent != dentry {
             self.build_path(parent, buf)?;
         }
 
-        let name: VirtualAddress =
-            self.read_kernel_value(dentry + offsets.dentry_d_name + offsets.qstr_name)?;
+        let qstr = self.read_struct(dentry, |d| d.d_name);
+        let name = self.read_struct_pointer(qstr, |qstr| qstr.name)?;
 
         // TODO: use qstr.len here
         let mut len = buf.len();
@@ -207,6 +314,17 @@ impl<B: ice::Backend> Linux<B> {
         }
 
         Ok(())
+    }
+
+    fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct>> {
+        let proc = proc.into();
+        let mut mm = self.read_struct_pointer(proc, |ts| ts.mm)?;
+
+        if mm.is_null() {
+            mm = self.read_struct_pointer(proc, |ts| ts.active_mm)?;
+        }
+
+        Ok(mm)
     }
 }
 
@@ -255,15 +373,17 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn thread_process(&self, thread: ibc::Thread) -> IceResult<ibc::Process> {
-        Process::new(ibc::Process(thread.0), self).group_leader()
+        let pointer = self.read_struct_pointer(thread.into(), |ts| ts.group_leader)?;
+        Ok(pointer.into())
     }
 
     fn process_is_kernel(&self, proc: ibc::Process) -> IceResult<bool> {
-        Process::new(proc, self).is_kernel()
+        let flags = self.read_struct_pointer(proc.into(), |ts| ts.flags)?;
+        Ok(flags & 0x200000 != 0)
     }
 
     fn process_pid(&self, proc: ibc::Process) -> IceResult<u32> {
-        let get_pid = || Process::new(proc, self).pid();
+        let get_pid = || self.read_struct_pointer(proc.into(), |ts| ts.tgid);
 
         match self.process(proc)? {
             Some(proc) => proc.pid.get_or_try_init(get_pid).map(|pid| *pid),
@@ -272,7 +392,16 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_name(&self, proc: ice::Process) -> IceResult<String> {
-        let get_name = || Process::new(proc, self).comm();
+        let get_name = || {
+            let comm = self.read_struct_pointer(proc.into(), |ts| ts.comm)?;
+
+            let buf = match memchr::memchr(0, &comm) {
+                Some(i) => &comm[..i],
+                None => &comm,
+            };
+
+            Ok(String::from_utf8_lossy(buf).into_owned())
+        };
 
         match self.process(proc)? {
             Some(proc) => proc.name.get_or_try_init(get_name).map(Clone::clone),
@@ -281,23 +410,27 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_pgd(&self, proc: ice::Process) -> IceResult<PhysicalAddress> {
-        Process::new(proc, self).pgd()
+        let mm = self.process_mm(proc)?;
+        let pgd = self.read_struct_pointer(mm, |mms| mms.pgd)?;
+        self.kernel_to_physical(pgd)
     }
 
     fn process_exe(&self, proc: ice::Process) -> IceResult<Option<ibc::Path>> {
-        let mm = Process::new(proc, self).mm()?;
-        let offsets = &self.profile.fast_offsets;
+        let mm = self.process_mm(proc)?;
 
-        let file: VirtualAddress = self.read_kernel_value(mm + offsets.mm_struct_exe_file)?;
+        let file = self.read_struct_pointer(mm, |mm| mm.exe_file)?;
         if file.is_null() {
             return Ok(None);
         }
-        // let path = self.kernel_to_physical(file + offsets.file_f_path)?;
-        Ok(Some(ibc::Path(file + offsets.file_f_path)))
+        let path = self.read_struct(file, |file| file.f_path);
+        Ok(Some(path.into()))
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
-        let get_parent = || Process::new(proc, self).parent();
+        let get_parent = || {
+            let proc = self.read_struct_pointer(proc.into(), |ts| ts.real_parent)?;
+            Ok(proc.into())
+        };
 
         match self.process(proc)? {
             Some(proc) => proc.parent.get_or_try_init(get_parent).map(|p| *p),
@@ -332,11 +465,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ice::Process,
         f: &mut dyn FnMut(ice::Thread) -> IceResult<()>,
     ) -> IceResult<()> {
-        let offsets = &self.profile.fast_offsets;
-
-        self.iterate_list(proc.0 + offsets.task_struct_thread_group, |addr| {
-            f(ibc::Thread(addr - offsets.task_struct_thread_group))
-        })
+        let thread_group = self.read_struct(proc.into(), |ts| ts.thread_group);
+        self.iterate_list::<profile::TaskStruct, _, _>(
+            thread_group,
+            |ts| ts.thread_group,
+            |thread| f(thread.into()),
+        )
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
@@ -348,14 +482,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ice::Process,
         f: &mut dyn FnMut(ice::Vma) -> IceResult<()>,
     ) -> IceResult<()> {
-        let offsets = &self.profile.fast_offsets;
-
-        let mm = Process::new(proc, self).mm()?;
-        let mut cur_vma: VirtualAddress = self.read_kernel_value(mm + offsets.mm_struct_mmap)?;
+        let mm = self.process_mm(proc)?;
+        let mut cur_vma = self.read_struct_pointer(mm, |mm| mm.mmap)?;
 
         while !cur_vma.is_null() {
-            f(ice::Vma(cur_vma))?;
-            cur_vma = self.read_kernel_value(cur_vma + offsets.vm_area_struct_vm_next)?;
+            f(cur_vma.into())?;
+            cur_vma = self.read_struct_pointer(cur_vma, |vma| vma.vm_next)?;
         }
 
         Ok(())
@@ -370,7 +502,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn thread_id(&self, thread: ice::Thread) -> IceResult<u32> {
-        Process::new(ibc::Process(thread.0), self).tid()
+        self.read_struct_pointer(thread.into(), |ts| ts.pid)
     }
 
     fn thread_name(&self, thread: ibc::Thread) -> IceResult<String> {
@@ -378,39 +510,34 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn path_to_string(&self, path: ice::Path) -> IceResult<String> {
-        let offsets = &self.profile.fast_offsets;
-
-        let dentry = self.read_kernel_value(path.0 + offsets.path_d_entry)?;
+        let dentry = self.read_struct_pointer(path.into(), |p| p.dentry)?;
         let mut buf = Vec::new();
 
         self.build_path(dentry, &mut buf)?;
 
-        String::from_utf8(buf).map_err(|err| ice::IceError::new(err))
+        String::from_utf8(buf).map_err(ice::IceError::new)
     }
 
     fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<ibc::Path>> {
-        let offsets = &self.profile.fast_offsets;
-
-        let file: VirtualAddress =
-            self.read_kernel_value(vma.0 + offsets.vm_area_struct_vm_file)?;
+        let file = self.read_struct_pointer(vma.into(), |vma| vma.vm_file)?;
 
         if file.is_null() {
             return Ok(None);
         }
-        Ok(Some(ibc::Path(file + offsets.file_f_path)))
+        let path = self.read_struct(file, |file| file.f_path);
+        Ok(Some(path.into()))
     }
 
     fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
-        self.read_kernel_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_start)
+        self.read_struct_pointer(vma.into(), |vma| vma.vm_start)
     }
 
     fn vma_end(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
-        self.read_kernel_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_end)
+        self.read_struct_pointer(vma.into(), |vma| vma.vm_end)
     }
 
     fn vma_flags(&self, vma: ice::Vma) -> IceResult<ibc::VmaFlags> {
-        let flags: u64 =
-            self.read_kernel_value(vma.0 + self.profile.fast_offsets.vm_area_struct_vm_flags)?;
+        let flags: u64 = self.read_struct_pointer(vma.into(), |vma| vma.vm_flags)?;
         Ok(ibc::VmaFlags(flags))
     }
 }

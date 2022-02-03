@@ -1,6 +1,8 @@
 use alloc::{borrow::ToOwned, string::String};
 
 use crate::core::{self as ice, IceResult};
+use core::marker::PhantomData;
+use ice::VirtualAddress;
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_start: ice::VirtualAddress,
@@ -9,44 +11,205 @@ pub(crate) struct FastSymbols {
     pub(super) init_task: ice::VirtualAddress,
 }
 
-pub(super) struct FastOffsets {
-    pub(super) list_head_next: u64,
-    #[allow(unused)]
-    pub(super) list_head_prev: u64,
+pub struct StructOffset<T> {
+    pub offset: u64,
+    _type: PhantomData<T>,
+}
 
-    pub(super) mm_struct_exe_file: u64,
-    pub(super) mm_struct_pgd: u64,
-    pub(super) mm_struct_mmap: u64,
+impl<T> Clone for StructOffset<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 
-    pub(super) task_struct_active_mm: u64,
-    pub(super) task_struct_children: u64,
-    pub(super) task_struct_comm: u64,
-    pub(super) task_struct_group_leader: u64,
-    pub(super) task_struct_mm: u64,
-    pub(super) task_struct_real_parent: u64,
-    pub(super) task_struct_pid: u64,
-    pub(super) task_struct_sibling: u64,
-    pub(super) task_struct_tasks: u64,
-    pub(super) task_struct_tgid: u64,
-    pub(super) task_struct_thread_group: u64,
+impl<T> Copy for StructOffset<T> {}
 
-    pub(super) vm_area_struct_vm_end: u64,
-    pub(super) vm_area_struct_vm_flags: u64,
-    pub(super) vm_area_struct_vm_next: u64,
-    pub(super) vm_area_struct_vm_start: u64,
-    pub(super) vm_area_struct_vm_file: u64,
+impl<T> StructOffset<T> {
+    fn new(layout: ice::symbols::Struct, field_name: &str) -> IceResult<Self> {
+        let offset = layout.find_offset(field_name)?;
+        Ok(Self::from_offset(offset))
+    }
 
-    pub(super) file_f_path: u64,
-    pub(super) path_d_entry: u64,
-    pub(super) dentry_d_name: u64,
-    pub(super) dentry_d_parent: u64,
-    pub(super) qstr_name: u64,
+    fn from_offset(offset: u64) -> Self {
+        Self {
+            offset,
+            _type: PhantomData,
+        }
+    }
+}
+
+pub(crate) struct Pointer<T> {
+    pub addr: VirtualAddress,
+    _typ: PhantomData<T>,
+}
+
+impl<T> Pointer<T> {
+    pub const fn new(addr: VirtualAddress) -> Self {
+        Self {
+            addr,
+            _typ: PhantomData,
+        }
+    }
+
+    pub const fn is_null(self) -> bool {
+        self.addr.is_null()
+    }
+}
+
+impl<T> Clone for Pointer<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Pointer<T> {}
+
+impl<T> PartialEq for Pointer<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr
+    }
+}
+
+impl<T> Eq for Pointer<T> {}
+
+/// This macro defines Rust types to access kernel structures with type checking
+macro_rules! define_kernel_structs {
+    (
+        // The structure to store all layouts
+        struct $layouts:ident { .. }
+
+        $(
+            // Each structure has to define the name of the matching kernel
+            // struct and the fields it wants to access
+            #[kernel_name($kname:ident)]
+            $( #[ $attr:meta ] )*
+            struct $struct_name:ident {
+                $(
+                    $( #[ $field_attr:meta ] )*
+                    $field:ident : $typ:ty,
+                )*
+            }
+        )*
+    ) => {
+        $(
+            // First, redefine all fields within `StructOffset`s
+            #[non_exhaustive]
+            $( #[ $attr ] )*
+            pub(crate) struct $struct_name {
+                $(
+                    $( #[ $field_attr ] )*
+                    pub $field: StructOffset<$typ>,
+                )*
+            }
+
+            // Make a constructor
+            impl $struct_name {
+                fn new(layout: ice::symbols::Struct) -> IceResult<Self> {
+                    Ok(Self {
+                        $(
+                            $field: StructOffset::new(layout, stringify!($field))?,
+                        )*
+                    })
+                }
+            }
+
+            // Make the struct easily available
+            impl<B: ice::Backend> super::HasStruct<$struct_name> for super::Linux<B> {
+                fn get_struct_layout(&self) -> &$struct_name {
+                    &self.profile.layouts.$kname
+                }
+            }
+        )*
+
+        // Then put all layouts in a single structure
+        pub(super) struct $layouts {
+            $(
+                $kname: $struct_name,
+            )*
+        }
+
+        impl Layouts {
+            fn new(syms: &ice::SymbolsIndexer) -> IceResult<Self> {
+                Ok(Self {
+                    $(
+                        $kname: $struct_name::new(syms.get_struct(stringify!($kname))?)?,
+                    )*
+                })
+            }
+        }
+    };
+}
+
+// Please keep all these lists in alphetical order
+define_kernel_structs! {
+    struct Layouts { .. }
+
+    #[kernel_name(dentry)]
+    struct Dentry {
+        d_name: Qstr,
+        d_parent: Pointer<Dentry>,
+    }
+
+    #[kernel_name(file)]
+    struct File {
+        f_path: Path,
+    }
+
+    #[kernel_name(list_head)]
+    struct ListHead {
+        next: Pointer<ListHead>,
+        #[allow(dead_code)]
+        prev: Pointer<ListHead>,
+    }
+
+    #[kernel_name(mm_struct)]
+    struct MmStruct {
+        exe_file: Pointer<File>,
+        mmap: Pointer<VmAreaStruct>,
+        pgd: VirtualAddress,
+    }
+
+    #[kernel_name(path)]
+    struct Path {
+        dentry: Pointer<Dentry>,
+    }
+
+    #[kernel_name(qstr)]
+    struct Qstr {
+        name: VirtualAddress,
+    }
+
+    #[kernel_name(task_struct)]
+    struct TaskStruct {
+        active_mm: Pointer<MmStruct>,
+        children: ListHead,
+        comm: [u8; 16],
+        flags: u32,
+        group_leader: Pointer<TaskStruct>,
+        mm: Pointer<MmStruct>,
+        pid: u32,
+        real_parent: Pointer<TaskStruct>,
+        sibling: ListHead,
+        tasks: ListHead,
+        tgid: u32,
+        thread_group: ListHead,
+    }
+
+    #[kernel_name(vm_area_struct)]
+    struct VmAreaStruct {
+        vm_end: VirtualAddress,
+        vm_file: Pointer<File>,
+        vm_flags: u64,
+        vm_next: Pointer<VmAreaStruct>,
+        vm_start: VirtualAddress,
+    }
 }
 
 pub struct Profile {
     pub(crate) syms: ice::SymbolsIndexer,
     pub(crate) fast_syms: FastSymbols,
-    pub(super) fast_offsets: FastOffsets,
+
+    pub(super) layouts: Layouts,
 }
 
 impl Profile {
@@ -55,91 +218,16 @@ impl Profile {
         let current_task = syms.get_addr("current_task")?;
         let init_task = syms.get_addr("init_task")?;
 
-        let dentry = syms.get_struct("dentry")?;
-        let dentry_d_name = dentry.find_offset("d_name")?;
-        let dentry_d_parent = dentry.find_offset("d_parent")?;
-
-        let file = syms.get_struct("file")?;
-        let file_f_path = file.find_offset("f_path")?;
-
-        let list_head = syms.get_struct("list_head")?;
-        let list_head_next = list_head.find_offset("next")?;
-        let list_head_prev = list_head.find_offset("prev")?;
-
-        let task_struct = syms.get_struct("task_struct")?;
-        let task_struct_active_mm = task_struct.find_offset("active_mm")?;
-        let task_struct_children = task_struct.find_offset("children")?;
-        let task_struct_comm = task_struct.find_offset("comm")?;
-        let task_struct_group_leader = task_struct.find_offset("group_leader")?;
-        let task_struct_mm = task_struct.find_offset("mm")?;
-        let task_struct_parent = task_struct.find_offset("real_parent")?;
-        let task_struct_pid = task_struct.find_offset("pid")?;
-        let task_struct_sibling = task_struct.find_offset("sibling")?;
-        let task_struct_tasks = task_struct.find_offset("tasks")?;
-        let task_struct_tgid = task_struct.find_offset("tgid")?;
-        let task_struct_thread_group = task_struct.find_offset("thread_group")?;
-
-        let mm_struct = syms.get_struct("mm_struct")?;
-        let mm_struct_exe_file = mm_struct.find_offset("exe_file")?;
-        let mm_struct_pgd = mm_struct.find_offset("pgd")?;
-        let mm_struct_mmap = mm_struct.find_offset("mmap")?;
-
-        let path = syms.get_struct("path")?;
-        let path_d_entry = path.find_offset("dentry")?;
-
-        let qstr = syms.get_struct("qstr")?;
-        let qstr_name = qstr.find_offset("name")?;
-
-        let vm_area_struct = syms.get_struct("vm_area_struct")?;
-        let vm_area_struct_vm_end = vm_area_struct.find_offset("vm_end")?;
-        let vm_area_struct_vm_flags = vm_area_struct.find_offset("vm_flags")?;
-        let vm_area_struct_vm_next = vm_area_struct.find_offset("vm_next")?;
-        let vm_area_struct_vm_start = vm_area_struct.find_offset("vm_start")?;
-        let vm_area_struct_vm_file = vm_area_struct.find_offset("vm_file")?;
+        let layouts = Layouts::new(&syms)?;
 
         Ok(Self {
             syms,
             fast_syms: FastSymbols {
                 per_cpu_start,
                 current_task,
-
                 init_task,
             },
-            fast_offsets: FastOffsets {
-                dentry_d_name,
-                dentry_d_parent,
-
-                file_f_path,
-
-                mm_struct_exe_file,
-                mm_struct_pgd,
-                mm_struct_mmap,
-
-                list_head_next,
-                list_head_prev,
-
-                path_d_entry,
-
-                qstr_name,
-
-                task_struct_active_mm,
-                task_struct_children,
-                task_struct_comm,
-                task_struct_group_leader,
-                task_struct_mm,
-                task_struct_real_parent: task_struct_parent,
-                task_struct_pid,
-                task_struct_tasks,
-                task_struct_tgid,
-                task_struct_sibling,
-                task_struct_thread_group,
-
-                vm_area_struct_vm_end,
-                vm_area_struct_vm_flags,
-                vm_area_struct_vm_next,
-                vm_area_struct_vm_start,
-                vm_area_struct_vm_file,
-            },
+            layouts,
         })
     }
 }
