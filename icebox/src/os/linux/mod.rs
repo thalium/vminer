@@ -547,18 +547,3 @@ impl<B> fmt::Debug for Linux<B> {
         f.debug_struct("Linux").finish_non_exhaustive()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::backends;
-    use crate::os::{Linux, OsBuilder};
-
-    #[test]
-    fn quick_check() {
-        let vm = backends::kvm_dump::DumbDump::read("../linux.dump").unwrap();
-        assert!(Linux::quick_check(&vm).unwrap());
-
-        let vm = backends::kvm_dump::DumbDump::read("../grub.dump").unwrap();
-        assert!(!Linux::quick_check(&vm).unwrap());
-    }
-}

@@ -1,0 +1,520 @@
+{
+  "pid": 0,
+  "name": "swapper/0",
+  "children": [
+    {
+      "pid": 1,
+      "name": "systemd",
+      "children": [
+        {
+          "pid": 237,
+          "name": "systemd-journal"
+        },
+        {
+          "pid": 257,
+          "name": "systemd-udevd"
+        },
+        {
+          "pid": 370,
+          "name": "systemd-timesyn",
+          "threads": [
+            {
+              "tid": 439,
+              "name": "sd-resolve"
+            }
+          ]
+        },
+        {
+          "pid": 442,
+          "name": "cron"
+        },
+        {
+          "pid": 444,
+          "name": "dbus-daemon"
+        },
+        {
+          "pid": 448,
+          "name": "qemu-ga",
+          "threads": [
+            {
+              "tid": 460,
+              "name": "qemu-ga"
+            }
+          ]
+        },
+        {
+          "pid": 451,
+          "name": "rsyslogd",
+          "threads": [
+            {
+              "tid": 465,
+              "name": "in:imuxsock"
+            },
+            {
+              "tid": 466,
+              "name": "in:imklog"
+            },
+            {
+              "tid": 468,
+              "name": "rs:main Q:Reg"
+            }
+          ]
+        },
+        {
+          "pid": 455,
+          "name": "systemd-logind"
+        },
+        {
+          "pid": 464,
+          "name": "agetty"
+        },
+        {
+          "pid": 473,
+          "name": "sshd",
+          "children": [
+            {
+              "pid": 602,
+              "name": "sshd",
+              "children": [
+                {
+                  "pid": 631,
+                  "name": "sshd",
+                  "children": [
+                    {
+                      "pid": 632,
+                      "name": "bash",
+                      "children": [
+                        {
+                          "pid": 651,
+                          "name": "callstack"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "pid": 397,
+          "name": "dhclient",
+          "threads": [
+            {
+              "tid": 409,
+              "name": "isc-worker0000"
+            },
+            {
+              "tid": 410,
+              "name": "isc-socket"
+            },
+            {
+              "tid": 411,
+              "name": "isc-timer"
+            }
+          ]
+        },
+        {
+          "pid": 505,
+          "name": "systemd",
+          "children": [
+            {
+              "pid": 506,
+              "name": "(sd-pam)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "pid": 2,
+      "name": "kthreadd",
+      "children": [
+        {
+          "pid": 3,
+          "name": "rcu_gp"
+        },
+        {
+          "pid": 4,
+          "name": "rcu_par_gp"
+        },
+        {
+          "pid": 6,
+          "name": "kworker/0:0H"
+        },
+        {
+          "pid": 9,
+          "name": "mm_percpu_wq"
+        },
+        {
+          "pid": 10,
+          "name": "rcu_tasks_rude_"
+        },
+        {
+          "pid": 11,
+          "name": "rcu_tasks_trace"
+        },
+        {
+          "pid": 12,
+          "name": "ksoftirqd/0"
+        },
+        {
+          "pid": 13,
+          "name": "rcu_sched"
+        },
+        {
+          "pid": 14,
+          "name": "migration/0"
+        },
+        {
+          "pid": 15,
+          "name": "cpuhp/0"
+        },
+        {
+          "pid": 16,
+          "name": "cpuhp/1"
+        },
+        {
+          "pid": 17,
+          "name": "migration/1"
+        },
+        {
+          "pid": 18,
+          "name": "ksoftirqd/1"
+        },
+        {
+          "pid": 20,
+          "name": "kworker/1:0H"
+        },
+        {
+          "pid": 23,
+          "name": "kdevtmpfs"
+        },
+        {
+          "pid": 24,
+          "name": "netns"
+        },
+        {
+          "pid": 25,
+          "name": "kauditd"
+        },
+        {
+          "pid": 26,
+          "name": "khungtaskd"
+        },
+        {
+          "pid": 27,
+          "name": "oom_reaper"
+        },
+        {
+          "pid": 28,
+          "name": "writeback"
+        },
+        {
+          "pid": 29,
+          "name": "kcompactd0"
+        },
+        {
+          "pid": 30,
+          "name": "ksmd"
+        },
+        {
+          "pid": 31,
+          "name": "khugepaged"
+        },
+        {
+          "pid": 49,
+          "name": "kintegrityd"
+        },
+        {
+          "pid": 50,
+          "name": "kblockd"
+        },
+        {
+          "pid": 51,
+          "name": "blkcg_punt_bio"
+        },
+        {
+          "pid": 52,
+          "name": "edac-poller"
+        },
+        {
+          "pid": 53,
+          "name": "devfreq_wq"
+        },
+        {
+          "pid": 55,
+          "name": "kworker/0:1H"
+        },
+        {
+          "pid": 56,
+          "name": "kswapd0"
+        },
+        {
+          "pid": 57,
+          "name": "kthrotld"
+        },
+        {
+          "pid": 58,
+          "name": "irq/24-aerdrv"
+        },
+        {
+          "pid": 59,
+          "name": "irq/24-pciehp"
+        },
+        {
+          "pid": 60,
+          "name": "irq/25-aerdrv"
+        },
+        {
+          "pid": 61,
+          "name": "irq/25-pciehp"
+        },
+        {
+          "pid": 62,
+          "name": "irq/26-aerdrv"
+        },
+        {
+          "pid": 63,
+          "name": "irq/26-pciehp"
+        },
+        {
+          "pid": 64,
+          "name": "irq/27-aerdrv"
+        },
+        {
+          "pid": 65,
+          "name": "irq/27-pciehp"
+        },
+        {
+          "pid": 66,
+          "name": "irq/28-aerdrv"
+        },
+        {
+          "pid": 67,
+          "name": "irq/28-pciehp"
+        },
+        {
+          "pid": 68,
+          "name": "irq/29-aerdrv"
+        },
+        {
+          "pid": 69,
+          "name": "irq/29-pciehp"
+        },
+        {
+          "pid": 70,
+          "name": "irq/30-aerdrv"
+        },
+        {
+          "pid": 71,
+          "name": "irq/30-pciehp"
+        },
+        {
+          "pid": 72,
+          "name": "irq/31-aerdrv"
+        },
+        {
+          "pid": 73,
+          "name": "irq/31-pciehp"
+        },
+        {
+          "pid": 74,
+          "name": "irq/32-aerdrv"
+        },
+        {
+          "pid": 75,
+          "name": "irq/32-pciehp"
+        },
+        {
+          "pid": 76,
+          "name": "irq/33-aerdrv"
+        },
+        {
+          "pid": 77,
+          "name": "irq/33-pciehp"
+        },
+        {
+          "pid": 78,
+          "name": "irq/34-aerdrv"
+        },
+        {
+          "pid": 79,
+          "name": "irq/34-pciehp"
+        },
+        {
+          "pid": 80,
+          "name": "irq/35-aerdrv"
+        },
+        {
+          "pid": 81,
+          "name": "irq/35-pciehp"
+        },
+        {
+          "pid": 82,
+          "name": "irq/36-aerdrv"
+        },
+        {
+          "pid": 83,
+          "name": "irq/36-pciehp"
+        },
+        {
+          "pid": 84,
+          "name": "irq/37-aerdrv"
+        },
+        {
+          "pid": 85,
+          "name": "irq/37-pciehp"
+        },
+        {
+          "pid": 86,
+          "name": "irq/38-aerdrv"
+        },
+        {
+          "pid": 87,
+          "name": "irq/38-pciehp"
+        },
+        {
+          "pid": 88,
+          "name": "irq/39-aerdrv"
+        },
+        {
+          "pid": 89,
+          "name": "irq/39-pciehp"
+        },
+        {
+          "pid": 90,
+          "name": "acpi_thermal_pm"
+        },
+        {
+          "pid": 91,
+          "name": "kworker/1:1H"
+        },
+        {
+          "pid": 92,
+          "name": "ipv6_addrconf"
+        },
+        {
+          "pid": 101,
+          "name": "kstrp"
+        },
+        {
+          "pid": 104,
+          "name": "zswap-shrink"
+        },
+        {
+          "pid": 105,
+          "name": "kworker/u5:0"
+        },
+        {
+          "pid": 147,
+          "name": "ata_sff"
+        },
+        {
+          "pid": 150,
+          "name": "scsi_eh_0"
+        },
+        {
+          "pid": 151,
+          "name": "scsi_tmf_0"
+        },
+        {
+          "pid": 152,
+          "name": "scsi_eh_1"
+        },
+        {
+          "pid": 153,
+          "name": "scsi_tmf_1"
+        },
+        {
+          "pid": 154,
+          "name": "scsi_eh_2"
+        },
+        {
+          "pid": 155,
+          "name": "scsi_tmf_2"
+        },
+        {
+          "pid": 156,
+          "name": "scsi_eh_3"
+        },
+        {
+          "pid": 157,
+          "name": "scsi_tmf_3"
+        },
+        {
+          "pid": 158,
+          "name": "scsi_eh_4"
+        },
+        {
+          "pid": 159,
+          "name": "scsi_tmf_4"
+        },
+        {
+          "pid": 160,
+          "name": "scsi_eh_5"
+        },
+        {
+          "pid": 161,
+          "name": "scsi_tmf_5"
+        },
+        {
+          "pid": 165,
+          "name": "kworker/u4:5"
+        },
+        {
+          "pid": 168,
+          "name": "kworker/0:3"
+        },
+        {
+          "pid": 199,
+          "name": "jbd2/vda1-8"
+        },
+        {
+          "pid": 200,
+          "name": "ext4-rsv-conver"
+        },
+        {
+          "pid": 211,
+          "name": "hwrng"
+        },
+        {
+          "pid": 286,
+          "name": "watchdogd"
+        },
+        {
+          "pid": 301,
+          "name": "ttm_swap"
+        },
+        {
+          "pid": 310,
+          "name": "cryptd"
+        },
+        {
+          "pid": 562,
+          "name": "kworker/0:1"
+        },
+        {
+          "pid": 594,
+          "name": "kworker/u4:0"
+        },
+        {
+          "pid": 598,
+          "name": "kworker/1:0"
+        },
+        {
+          "pid": 600,
+          "name": "kworker/1:1"
+        },
+        {
+          "pid": 626,
+          "name": "kworker/u4:1"
+        },
+        {
+          "pid": 650,
+          "name": "kworker/1:2"
+        }
+      ]
+    }
+  ]
+}

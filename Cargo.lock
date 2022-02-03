@@ -304,6 +304,8 @@ dependencies = [
  "log",
  "memchr",
  "once_cell",
+ "serde",
+ "serde_json",
  "spin",
 ]
 
