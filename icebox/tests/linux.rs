@@ -1,4 +1,4 @@
-use ibc::{IceResult, Os};
+use ibc::{IceResult, Os, VirtualAddress};
 use icebox::{backends::kvm_dump::DumbDump, os::Linux};
 use once_cell::sync::Lazy;
 
@@ -73,6 +73,7 @@ fn proc_tree() {
     // Code to generate the expected result
     // let mut file = std::io::BufWriter::new(std::fs::File::create(result_path).unwrap());
     // serde_json::to_writer_pretty(&mut file, &procs).unwrap();
+    // drop(file);
 
     let mut file = std::io::BufReader::new(std::fs::File::open(result_path).unwrap());
     let expected = serde_json::from_reader(&mut file).unwrap();
@@ -89,4 +90,92 @@ fn current_process() {
 
     let proc = linux.current_process(1).unwrap();
     assert_eq!(linux.process_pid(proc).unwrap(), 651);
+}
+
+#[test]
+fn vmas() {
+    #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    struct Vma {
+        start: VirtualAddress,
+        end: VirtualAddress,
+        path: Option<String>,
+    }
+
+    let linux = &*LINUX;
+    let result_path = "tests/results/linux-vmas.json";
+
+    let proc = linux.find_process_by_name("callstack").unwrap().unwrap();
+    assert_eq!(linux.process_pid(proc).unwrap(), 651);
+
+    let mut vmas = Vec::new();
+    linux
+        .process_for_each_vma(proc, &mut |vma| {
+            let start = linux.vma_start(vma)?;
+            let end = linux.vma_end(vma)?;
+            let path = linux
+                .vma_file(vma)?
+                .map(|path| linux.path_to_string(path).unwrap());
+
+            vmas.push(Vma { start, end, path });
+            Ok(())
+        })
+        .unwrap();
+
+    // Code to generate the expected result
+    // let mut file = std::io::BufWriter::new(std::fs::File::create(result_path).unwrap());
+    // serde_json::to_writer_pretty(&mut file, &vmas).unwrap();
+    // drop(file);
+
+    let mut file = std::io::BufReader::new(std::fs::File::open(result_path).unwrap());
+    let expected: Vec<Vma> = serde_json::from_reader(&mut file).unwrap();
+
+    assert_eq!(vmas, expected);
+}
+
+#[test]
+fn callstack() {
+    #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    struct StackFrame {
+        start: VirtualAddress,
+        size: u64,
+        stack_pointer: VirtualAddress,
+        instruction_pointer: VirtualAddress,
+    }
+
+    let linux = &*LINUX;
+    let result_path = "tests/results/linux-callstack.json";
+
+    let proc = linux.current_process(1).unwrap();
+    assert_eq!(linux.process_pid(proc).unwrap(), 651);
+
+    let mut frames = Vec::new();
+    linux
+        .process_callstack(proc, &mut |frame| {
+            let &ibc::StackFrame {
+                start,
+                size,
+                stack_pointer,
+                instruction_pointer,
+                ..
+            } = frame;
+
+            frames.push(StackFrame {
+                start,
+                size,
+                stack_pointer,
+                instruction_pointer,
+            });
+            Ok(())
+        })
+        .unwrap();
+
+    // Code to generate the expected result
+    // let mut file = std::io::BufWriter::new(std::fs::File::create(result_path).unwrap());
+    // serde_json::to_writer_pretty(&mut file, &frames).unwrap();
+    // drop(file);
+
+    let mut file = std::io::BufReader::new(std::fs::File::open(result_path).unwrap());
+    let expected: Vec<StackFrame> = serde_json::from_reader(&mut file).unwrap();
+
+    assert_eq!(frames, expected);
 }

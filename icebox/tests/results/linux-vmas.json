@@ -1,0 +1,232 @@
+[
+  {
+    "start": 93983404867584,
+    "end": 93983404908544,
+    "path": "/home/a/callstack"
+  },
+  {
+    "start": 93983404908544,
+    "end": 93983405305856,
+    "path": "/home/a/callstack"
+  },
+  {
+    "start": 93983405305856,
+    "end": 93983405404160,
+    "path": "/home/a/callstack"
+  },
+  {
+    "start": 93983405408256,
+    "end": 93983405428736,
+    "path": "/home/a/callstack"
+  },
+  {
+    "start": 93983405428736,
+    "end": 93983405432832,
+    "path": "/home/a/callstack"
+  },
+  {
+    "start": 93983418728448,
+    "end": 93983418863616,
+    "path": null
+  },
+  {
+    "start": 140254238257152,
+    "end": 140254238265344,
+    "path": null
+  },
+  {
+    "start": 140254238265344,
+    "end": 140254238269440,
+    "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
+  },
+  {
+    "start": 140254238269440,
+    "end": 140254238277632,
+    "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
+  },
+  {
+    "start": 140254238277632,
+    "end": 140254238281728,
+    "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
+  },
+  {
+    "start": 140254238281728,
+    "end": 140254238285824,
+    "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
+  },
+  {
+    "start": 140254238285824,
+    "end": 140254238289920,
+    "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
+  },
+  {
+    "start": 140254238289920,
+    "end": 140254238302208,
+    "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+  },
+  {
+    "start": 140254238302208,
+    "end": 140254238371840,
+    "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+  },
+  {
+    "start": 140254238371840,
+    "end": 140254238388224,
+    "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+  },
+  {
+    "start": 140254238388224,
+    "end": 140254238392320,
+    "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+  },
+  {
+    "start": 140254238392320,
+    "end": 140254238396416,
+    "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
+  },
+  {
+    "start": 140254238396416,
+    "end": 140254238425088,
+    "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
+  },
+  {
+    "start": 140254238425088,
+    "end": 140254238490624,
+    "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
+  },
+  {
+    "start": 140254238490624,
+    "end": 140254238511104,
+    "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
+  },
+  {
+    "start": 140254238511104,
+    "end": 140254238515200,
+    "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
+  },
+  {
+    "start": 140254238515200,
+    "end": 140254238519296,
+    "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
+  },
+  {
+    "start": 140254238519296,
+    "end": 140254238535680,
+    "path": null
+  },
+  {
+    "start": 140254238535680,
+    "end": 140254238597120,
+    "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
+  },
+  {
+    "start": 140254238597120,
+    "end": 140254239227904,
+    "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
+  },
+  {
+    "start": 140254239227904,
+    "end": 140254239854592,
+    "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
+  },
+  {
+    "start": 140254239854592,
+    "end": 140254239858688,
+    "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
+  },
+  {
+    "start": 140254239858688,
+    "end": 140254239862784,
+    "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
+  },
+  {
+    "start": 140254239862784,
+    "end": 140254240014336,
+    "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
+  },
+  {
+    "start": 140254240014336,
+    "end": 140254241370112,
+    "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
+  },
+  {
+    "start": 140254241370112,
+    "end": 140254241673216,
+    "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
+  },
+  {
+    "start": 140254241673216,
+    "end": 140254241677312,
+    "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
+  },
+  {
+    "start": 140254241677312,
+    "end": 140254241689600,
+    "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
+  },
+  {
+    "start": 140254241689600,
+    "end": 140254241701888,
+    "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
+  },
+  {
+    "start": 140254241701888,
+    "end": 140254241726464,
+    "path": null
+  },
+  {
+    "start": 140254241734656,
+    "end": 140254241738752,
+    "path": null
+  },
+  {
+    "start": 140254241738752,
+    "end": 140254241746944,
+    "path": null
+  },
+  {
+    "start": 140254241746944,
+    "end": 140254241751040,
+    "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
+  },
+  {
+    "start": 140254241751040,
+    "end": 140254241882112,
+    "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
+  },
+  {
+    "start": 140254241882112,
+    "end": 140254241914880,
+    "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
+  },
+  {
+    "start": 140254241918976,
+    "end": 140254241923072,
+    "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
+  },
+  {
+    "start": 140254241923072,
+    "end": 140254241927168,
+    "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
+  },
+  {
+    "start": 140254241927168,
+    "end": 140254241931264,
+    "path": null
+  },
+  {
+    "start": 140729961029632,
+    "end": 140729961164800,
+    "path": null
+  },
+  {
+    "start": 140729961381888,
+    "end": 140729961398272,
+    "path": null
+  },
+  {
+    "start": 140729961398272,
+    "end": 140729961406464,
+    "path": null
+  }
+]
