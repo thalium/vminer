@@ -107,6 +107,7 @@ impl Tracee {
         self.mem.write_all_at(buf, addr as _)
     }
 
+    #[allow(dead_code)]
     fn single_step(&mut self) -> io::Result<()> {
         unsafe {
             check!(libc::ptrace(
@@ -185,36 +186,38 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     let their_dlsym = their_libdl + (libc::dlsym as u64 - our_libdl);
     let their_dlerror = their_libdl + (libc::dlerror as u64 - our_libdl);
 
+    let our_libc = find_lib(std::process::id() as _, "libc-2")?;
+    let their_libc = find_lib(pid, "libc-2")?;
+    let their_mmap = their_libc + (libc::mmap as u64 - our_libc);
+
     let mut tracee = Tracee::attach(pid).context("attach")?;
 
     let old_regs = tracee.registers().context("regs1")?;
+    let mut new_regs = old_regs;
     let rip = old_regs.rip as *mut libc::c_void;
 
-    // mmap(NULL, PAGE_SIZE, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
-    let mut new_regs = old_regs;
-    new_regs.rax = libc::SYS_mmap as _;
-    new_regs.rdi = 0;
-    new_regs.rsi = 0x1000;
-    new_regs.rdx = (libc::PROT_READ) as _;
-    new_regs.r10 = (libc::MAP_PRIVATE | libc::MAP_ANONYMOUS) as _;
-    new_regs.r8 = -1 as _;
-    new_regs.r9 = 0;
-    new_regs.rsp = old_regs.rsp - 0x100; // Accounts for the red zone
-    tracee.set_registers(&new_regs)?;
-
     let new_instrs = [
-        0x0f, 0x05, // syscall
         0xff, 0xd0, // call rax
         0xcc, // trap
     ];
-    let mut old_instrs = [0; 5];
+    let mut old_instrs = [0; 3];
     assert_eq!(new_instrs.len(), old_instrs.len());
 
     tracee.peek_data(rip, &mut old_instrs).context("peek")?;
     tracee.poke_data(rip, &new_instrs).context("poke")?;
 
-    // Call mmap
-    tracee.single_step().context("step 1")?;
+    // mmap(NULL, PAGE_SIZE, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+    new_regs.rax = their_mmap;
+    new_regs.rdi = 0;
+    new_regs.rsi = 0x1000;
+    new_regs.rdx = (libc::PROT_READ) as _;
+    new_regs.rcx = (libc::MAP_PRIVATE | libc::MAP_ANONYMOUS) as _;
+    new_regs.r8 = -1 as _;
+    new_regs.r9 = 0;
+    new_regs.rsp = old_regs.rsp - 0x100; // Accounts for the red zone
+    tracee.set_registers(&new_regs)?;
+    tracee.restart()?;
+
     let mut new_regs = tracee.registers().context("regs2")?;
     ensure!(new_regs.rax != -1 as _, "mmap failed");
 
@@ -229,6 +232,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
         .context("copy_buffer")?;
 
     // void *handle = dlopen(LIB_PATH, RTLD_NOW);
+    new_regs.rip = old_regs.rip;
     new_regs.rax = their_dlopen;
     new_regs.rdi = mmap_addr as _;
     new_regs.rsi = libc::RTLD_NOW as _;
@@ -238,7 +242,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     new_regs = tracee.registers().context("regs3")?;
     let handle = new_regs.rax;
     if handle == 0 {
-        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, rip as u64 + 2)
+        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, old_regs.rip)
             .context("get_dlerror")?;
 
         tracee.poke_data(rip, &old_instrs).context("a")?;
@@ -249,7 +253,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     }
 
     // dlsym(handle, FUN_NAME);
-    new_regs.rip = (rip as u64) + 2;
+    new_regs.rip = old_regs.rip;
     new_regs.rax = their_dlsym;
     new_regs.rdi = handle;
     new_regs.rsi = mmap_addr as u64 + LIB_PATH.len() as u64;
@@ -259,7 +263,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     new_regs = tracee.registers().context("regs4")?;
     let payload = new_regs.rax;
     if handle == 0 {
-        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, rip as u64 + 2)?;
+        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, old_regs.rip)?;
 
         tracee.poke_data(rip, &old_instrs)?;
         tracee.set_registers(&old_regs)?;
@@ -271,7 +275,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     // payload(fds)
     tracee.poke_data(mmap_addr, bytemuck::cast_slice(fds))?;
 
-    new_regs.rip = (rip as u64) + 2;
+    new_regs.rip = old_regs.rip;
     new_regs.rax = payload;
     new_regs.rdi = mmap_addr as u64;
     new_regs.rsi = fds.len() as u64;
