@@ -9,6 +9,10 @@ use std::{
 
 use crate::core::{self as ice, arch::x86_64, Backend};
 
+#[cfg(target_arch = "x86_64")]
+#[path = "x86_64.rs"]
+mod arch;
+
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
 const TOTAL_LEN: usize = LIB_PATH.len() + FUN_NAME.len();
@@ -75,9 +79,9 @@ impl Tracee {
         unsafe { this.raw_detach() }
     }
 
-    fn registers(&mut self) -> io::Result<libc::user_regs_struct> {
+    fn registers(&mut self) -> io::Result<arch::Registers> {
         unsafe {
-            let mut regs = mem::zeroed::<libc::user_regs_struct>();
+            let mut regs = mem::zeroed::<arch::Registers>();
             libc::ptrace(
                 libc::PTRACE_GETREGS,
                 self.pid,
@@ -88,7 +92,7 @@ impl Tracee {
         }
     }
 
-    fn set_registers(&mut self, regs: &libc::user_regs_struct) -> io::Result<()> {
+    fn set_registers(&mut self, regs: &arch::Registers) -> io::Result<()> {
         unsafe {
             check!(libc::ptrace(
                 libc::PTRACE_SETREGS,
@@ -99,11 +103,11 @@ impl Tracee {
         }
     }
 
-    fn peek_data(&mut self, addr: *mut libc::c_void, buf: &mut [u8]) -> io::Result<()> {
+    fn peek_data(&mut self, addr: u64, buf: &mut [u8]) -> io::Result<()> {
         self.mem.read_exact_at(buf, addr as _)
     }
 
-    fn poke_data(&mut self, addr: *mut libc::c_void, buf: &[u8]) -> io::Result<()> {
+    fn poke_data(&mut self, addr: u64, buf: &[u8]) -> io::Result<()> {
         self.mem.write_all_at(buf, addr as _)
     }
 
@@ -148,20 +152,20 @@ impl Drop for Tracee {
     }
 }
 
+#[cold]
 fn get_dlerror(
     tracee: &mut Tracee,
-    regs: &mut libc::user_regs_struct,
+    regs: &mut arch::Registers,
     dlerror: u64,
     rip: u64,
 ) -> anyhow::Result<String> {
     // char *error = dlerror();
-    regs.rip = rip;
-    regs.rax = dlerror;
+    regs.prepare_funcall0(rip, dlerror);
     tracee.set_registers(regs).context("p")?;
     tracee.restart().context("qsd")?;
     let res = tracee.registers().context("er")?;
 
-    let mut addr = res.rax as _;
+    let mut addr = res.return_value();
     let mut error = Vec::with_capacity(32);
     let mut buf = [0];
 
@@ -194,34 +198,31 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
 
     let old_regs = tracee.registers().context("regs1")?;
     let mut new_regs = old_regs;
-    let rip = old_regs.rip as *mut libc::c_void;
+    let rip = old_regs.instruction_pointer();
 
-    let new_instrs = [
-        0xff, 0xd0, // call rax
-        0xcc, // trap
-    ];
-    let mut old_instrs = [0; 3];
-    assert_eq!(new_instrs.len(), old_instrs.len());
-
+    let mut old_instrs = [0; arch::INSTRUCTIONS.len()];
     tracee.peek_data(rip, &mut old_instrs).context("peek")?;
-    tracee.poke_data(rip, &new_instrs).context("poke")?;
+    tracee.poke_data(rip, &arch::INSTRUCTIONS).context("poke")?;
+
+    new_regs.move_stack(0x100);
 
     // mmap(NULL, PAGE_SIZE, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
-    new_regs.rax = their_mmap;
-    new_regs.rdi = 0;
-    new_regs.rsi = 0x1000;
-    new_regs.rdx = (libc::PROT_READ) as _;
-    new_regs.rcx = (libc::MAP_PRIVATE | libc::MAP_ANONYMOUS) as _;
-    new_regs.r8 = -1 as _;
-    new_regs.r9 = 0;
-    new_regs.rsp = old_regs.rsp - 0x100; // Accounts for the red zone
+    new_regs.prepare_funcall6(
+        rip,
+        their_mmap,
+        0,
+        0x1000,
+        (libc::PROT_READ) as _,
+        (libc::MAP_PRIVATE | libc::MAP_ANONYMOUS) as _,
+        -1 as _,
+        0,
+    );
     tracee.set_registers(&new_regs)?;
     tracee.restart()?;
 
     let mut new_regs = tracee.registers().context("regs2")?;
-    ensure!(new_regs.rax != -1 as _, "mmap failed");
-
-    let mmap_addr = new_regs.rax as *mut libc::c_void;
+    let mmap_addr = new_regs.return_value();
+    ensure!(mmap_addr != -1 as _, "mmap failed");
 
     let mut buffer = [0u8; TOTAL_LEN];
     buffer[..LIB_PATH.len()].copy_from_slice(LIB_PATH);
@@ -232,18 +233,14 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
         .context("copy_buffer")?;
 
     // void *handle = dlopen(LIB_PATH, RTLD_NOW);
-    new_regs.rip = old_regs.rip;
-    new_regs.rax = their_dlopen;
-    new_regs.rdi = mmap_addr as _;
-    new_regs.rsi = libc::RTLD_NOW as _;
+    new_regs.prepare_funcall2(rip, their_dlopen, mmap_addr, libc::RTLD_NOW as _);
     tracee.set_registers(&new_regs).context("set regs1")?;
     tracee.restart()?;
 
     new_regs = tracee.registers().context("regs3")?;
-    let handle = new_regs.rax;
+    let handle = new_regs.return_value();
     if handle == 0 {
-        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, old_regs.rip)
-            .context("get_dlerror")?;
+        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, rip)?;
 
         tracee.poke_data(rip, &old_instrs).context("a")?;
         tracee.set_registers(&old_regs).context("b")?;
@@ -253,17 +250,14 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     }
 
     // dlsym(handle, FUN_NAME);
-    new_regs.rip = old_regs.rip;
-    new_regs.rax = their_dlsym;
-    new_regs.rdi = handle;
-    new_regs.rsi = mmap_addr as u64 + LIB_PATH.len() as u64;
+    new_regs.prepare_funcall2(rip, their_dlsym, handle, mmap_addr + LIB_PATH.len() as u64);
     tracee.set_registers(&new_regs).context("set regs2")?;
     tracee.restart().context("continue 1")?;
 
     new_regs = tracee.registers().context("regs4")?;
-    let payload = new_regs.rax;
+    let payload = new_regs.return_value();
     if handle == 0 {
-        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, old_regs.rip)?;
+        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, rip)?;
 
         tracee.poke_data(rip, &old_instrs)?;
         tracee.set_registers(&old_regs)?;
@@ -275,21 +269,19 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     // payload(fds)
     tracee.poke_data(mmap_addr, bytemuck::cast_slice(fds))?;
 
-    new_regs.rip = old_regs.rip;
-    new_regs.rax = payload;
-    new_regs.rdi = mmap_addr as u64;
-    new_regs.rsi = fds.len() as u64;
+    new_regs.prepare_funcall2(rip, payload, mmap_addr, fds.len() as u64);
     tracee.set_registers(&new_regs).context("set regs3")?;
     tracee.restart().context("continue 2")?;
 
     new_regs = tracee.registers()?;
+    let error = new_regs.return_value();
 
     tracee.poke_data(rip, &old_instrs)?;
     tracee.set_registers(&old_regs)?;
     tracee.continu()?;
 
-    if new_regs.rax != 0 {
-        let err = io::Error::from_raw_os_error(new_regs.rax as _);
+    if error != 0 {
+        let err = io::Error::from_raw_os_error(error as _);
         bail!("Payload failed: {}", err);
     }
 
