@@ -7,6 +7,9 @@ pub const INSTRUCTIONS: [u8; 3] = [
 #[derive(Clone, Copy)]
 pub struct Registers(libc::user_regs_struct);
 
+unsafe impl bytemuck::Zeroable for Registers {}
+unsafe impl bytemuck::Pod for Registers {}
+
 impl Registers {
     pub fn instruction_pointer(&self) -> u64 {
         self.0.rip

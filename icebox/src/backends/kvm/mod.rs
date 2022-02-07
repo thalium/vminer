@@ -1,4 +1,5 @@
 use anyhow::{bail, ensure, Context};
+use bytemuck::Zeroable;
 use std::{
     fs,
     io::{self, BufRead, Read},
@@ -80,25 +81,46 @@ impl Tracee {
     }
 
     fn registers(&mut self) -> io::Result<arch::Registers> {
+        let mut regs = arch::Registers::zeroed();
+        let mut iovec = std::io::IoSliceMut::new(bytemuck::bytes_of_mut(&mut regs));
+
         unsafe {
-            let mut regs = mem::zeroed::<arch::Registers>();
-            libc::ptrace(
-                libc::PTRACE_GETREGS,
+            check!(libc::ptrace(
+                libc::PTRACE_GETREGSET,
                 self.pid,
-                ptr::null_mut::<libc::c_void>(),
-                &mut regs,
-            );
+                libc::NT_PRSTATUS,
+                &mut iovec,
+            ))?;
+        }
+
+        if iovec.len() == mem::size_of::<arch::Registers>() {
             Ok(regs)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Failed to fill registers",
+            ))
         }
     }
 
     fn set_registers(&mut self, regs: &arch::Registers) -> io::Result<()> {
+        let mut iovec = std::io::IoSlice::new(bytemuck::bytes_of(regs));
+
         unsafe {
             check!(libc::ptrace(
-                libc::PTRACE_SETREGS,
+                libc::PTRACE_SETREGSET,
                 self.pid,
-                ptr::null_mut::<libc::c_void>(),
-                regs
+                libc::NT_PRSTATUS,
+                &mut iovec,
+            ))?;
+        }
+
+        if iovec.len() == mem::size_of::<arch::Registers>() {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Failed to set registers",
             ))
         }
     }
