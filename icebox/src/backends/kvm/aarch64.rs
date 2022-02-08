@@ -1,11 +1,17 @@
+pub use ibc::arch::aarch64::Vcpu;
+pub use ibc::arch::Aarch64 as Arch;
+
 pub const INSTRUCTIONS: [u8; 8] = [
     0x00, 0x01, 0x3f, 0xd6, // blr x8
     0x00, 0x00, 0x20, 0xd4, // brk #0
 ];
 
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Registers(libc::user_regs_struct);
+
+unsafe impl bytemuck::Zeroable for Registers {}
+unsafe impl bytemuck::Pod for Registers {}
 
 impl Registers {
     pub fn instruction_pointer(&self) -> u64 {

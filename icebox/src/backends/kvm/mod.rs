@@ -8,10 +8,14 @@ use std::{
     ptr,
 };
 
-use crate::core::{self as ice, arch::x86_64, Backend};
+use crate::core::{self as ice, Backend};
 
 #[cfg(target_arch = "x86_64")]
 #[path = "x86_64.rs"]
+mod arch;
+
+#[cfg(target_arch = "aarch64")]
+#[path = "aarch64.rs"]
 mod arch;
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
@@ -245,6 +249,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     let mut new_regs = tracee.registers().context("regs2")?;
     let mmap_addr = new_regs.return_value();
     ensure!(mmap_addr != -1 as _, "mmap failed");
+    log::trace!("mmap at 0x{mmap_addr:x}");
 
     let mut buffer = [0u8; TOTAL_LEN];
     buffer[..LIB_PATH.len()].copy_from_slice(LIB_PATH);
@@ -270,15 +275,16 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
 
         anyhow::bail!("dlopen failed: {}", err);
     }
+    log::trace!("dlopen handle at 0x{handle:x}");
 
-    // dlsym(handle, FUN_NAME);
+    // payload = dlsym(handle, FUN_NAME);
     new_regs.prepare_funcall2(rip, their_dlsym, handle, mmap_addr + LIB_PATH.len() as u64);
     tracee.set_registers(&new_regs).context("set regs2")?;
     tracee.restart().context("continue 1")?;
 
     new_regs = tracee.registers().context("regs4")?;
     let payload = new_regs.return_value();
-    if handle == 0 {
+    if payload == 0 {
         let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, rip)?;
 
         tracee.poke_data(rip, &old_instrs)?;
@@ -287,6 +293,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
 
         anyhow::bail!("dlsym failed: {}", err);
     }
+    log::trace!("payload at 0x{payload:x}");
 
     // payload(fds)
     tracee.poke_data(mmap_addr, bytemuck::cast_slice(fds))?;
@@ -335,10 +342,11 @@ fn get_vcpus_fds(pid: libc::pid_t) -> anyhow::Result<Vec<i32>> {
     let fds = fs::read_dir(format!("/proc/{}/fd", pid))?
         .filter_map(read_one)
         .collect();
+    log::debug!("Found KVM vCPU files: {fds:?}");
     Ok(fds)
 }
 
-fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
+fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<arch::Vcpu>> {
     let fds = get_vcpus_fds(pid)?;
     let n_fds = fds.len();
 
@@ -349,21 +357,31 @@ fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
 
     let handle = std::thread::spawn(move || -> anyhow::Result<_> {
         let mut registers = bytemuck::Zeroable::zeroed();
+        #[cfg(target_arch = "x86_64")]
         let mut special_registers = bytemuck::Zeroable::zeroed();
+        #[cfg(target_arch = "x86_64")]
         let mut gs_kernel_base = 0;
 
         let (mut socket, _) = listener.accept().context("accept")?;
 
         (0..n_fds)
             .map(|_| {
-                socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
-                socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
-                socket.read_exact(bytemuck::bytes_of_mut(&mut gs_kernel_base))?;
-                Ok(x86_64::Vcpu {
-                    registers,
-                    special_registers,
-                    gs_kernel_base,
-                })
+                #[cfg(target_arch = "x86_64")]
+                {
+                    socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
+                    socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
+                    socket.read_exact(bytemuck::bytes_of_mut(&mut gs_kernel_base))?;
+                    Ok(arch::Vcpu {
+                        registers,
+                        special_registers,
+                        gs_kernel_base,
+                    })
+                }
+                #[cfg(target_arch = "aarch64")]
+                {
+                    socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
+                    Ok(arch::Vcpu { registers })
+                }
             })
             .collect()
     });
@@ -377,7 +395,7 @@ fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<x86_64::Vcpu>> {
 
 pub struct Kvm {
     mem: ice::File,
-    vcpus: Vec<x86_64::Vcpu>,
+    vcpus: Vec<arch::Vcpu>,
 }
 
 impl Kvm {
@@ -418,7 +436,7 @@ impl Kvm {
             }
 
             ensure!(map_guess != 0, "Could not find VM memory");
-            log::info!(
+            log::debug!(
                 "Found KVM memory at of size 0x{:x} at address 0x{:x}",
                 map_size,
                 map_guess
@@ -439,11 +457,11 @@ impl Kvm {
 }
 
 impl Backend for Kvm {
-    type Arch = ice::arch::X86_64;
+    type Arch = arch::Arch;
     type Memory = ice::File;
 
     #[inline]
-    fn vcpus(&self) -> &[x86_64::Vcpu] {
+    fn vcpus(&self) -> &[arch::Vcpu] {
         &self.vcpus
     }
 

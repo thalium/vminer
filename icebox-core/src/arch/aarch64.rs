@@ -31,12 +31,12 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
 
     #[inline]
     fn instruction_pointer(&self) -> VirtualAddress {
-        unimplemented!()
+        VirtualAddress(self.registers.pc)
     }
 
     #[inline]
     fn stack_pointer(&self) -> VirtualAddress {
-        unimplemented!()
+        VirtualAddress(self.registers.sp)
     }
 
     #[inline]
@@ -102,4 +102,9 @@ impl<'a> super::Architecture<'a> for Aarch64 {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-pub struct Registers {}
+pub struct Registers {
+    pub regs: [u64; 31],
+    pub sp: u64,
+    pub pc: u64,
+    pub pstate: u64,
+}

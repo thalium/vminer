@@ -1,3 +1,6 @@
+pub use ibc::arch::x86_64::Vcpu;
+pub use ibc::arch::X86_64 as Arch;
+
 pub const INSTRUCTIONS: [u8; 3] = [
     0xff, 0xd0, // call rax
     0xcc, // trap
