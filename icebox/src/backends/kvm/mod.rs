@@ -1,14 +1,14 @@
-use anyhow::{bail, ensure, Context};
-use bytemuck::Zeroable;
+use ice::{IceError, IceResult, ResultExt};
 use std::{
     fs,
     io::{self, BufRead, Read},
-    mem,
     os::unix::{net::UnixListener, prelude::*},
-    ptr,
+    thread,
 };
 
 use crate::core::{self as ice, Backend};
+
+mod ptrace;
 
 #[cfg(target_arch = "x86_64")]
 #[path = "x86_64.rs"]
@@ -22,8 +22,9 @@ const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
 const TOTAL_LEN: usize = LIB_PATH.len() + FUN_NAME.len();
 
-fn find_lib(pid: libc::pid_t, name: &str) -> io::Result<u64> {
-    let file = fs::File::open(format!("/proc/{}/maps", pid))?;
+fn find_lib(pid: libc::pid_t, name: &str) -> IceResult<u64> {
+    let path = format!("/proc/{}/maps", pid);
+    let file = fs::File::open(&path)?;
     let file = io::BufReader::new(file);
 
     for line in file.lines() {
@@ -31,187 +32,63 @@ fn find_lib(pid: libc::pid_t, name: &str) -> io::Result<u64> {
 
         if line.contains(name) && line.contains("r-xp ") {
             let end = line.find('-').unwrap();
-            return u64::from_str_radix(&line[..end], 16).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("{:?}: {}", e, line))
-            });
+            return u64::from_str_radix(&line[..end], 16)
+                .with_context(|| format!("failed to parse {path}"));
         }
     }
 
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        "Could not find address",
-    ))
+    Err(IceError::new(format!(
+        "failed to find address of \"{name}\""
+    )))
 }
 
-macro_rules! check {
-    ($e:expr) => {
-        match $e {
-            -1 => Err(io::Error::last_os_error()),
-            _ => Ok(()),
-        }
-    };
-}
+#[cold]
+fn get_dlerror(tracee: &ptrace::Tracee, dlerror: u64) -> IceError {
+    let error: IceResult<_> = (|| {
+        // char *error = dlerror();
+        let mut addr = tracee.funcall0(dlerror)?;
 
-pub struct Tracee {
-    pid: libc::pid_t,
-    mem: fs::File,
-}
+        let mut error = Vec::with_capacity(128);
+        let mut buf = [0];
 
-impl Tracee {
-    fn wait(&mut self) -> io::Result<()> {
-        unsafe { check!(libc::waitpid(self.pid, ptr::null_mut(), libc::WSTOPPED)) }
-    }
+        loop {
+            tracee.peek_data(addr, &mut buf)?;
 
-    fn attach(pid: libc::pid_t) -> io::Result<Self> {
-        unsafe {
-            check!(libc::ptrace(libc::PTRACE_ATTACH, pid))?;
-        }
-        let mem = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(format!("/proc/{}/mem", pid))?;
-        let mut this = Self { pid, mem };
-        this.wait()?;
-        Ok(this)
-    }
-
-    unsafe fn raw_detach(&mut self) -> io::Result<()> {
-        check!(libc::ptrace(libc::PTRACE_DETACH, self.pid))
-    }
-
-    pub fn detach(self) -> io::Result<()> {
-        let mut this = mem::ManuallyDrop::new(self);
-        unsafe { this.raw_detach() }
-    }
-
-    fn registers(&mut self) -> io::Result<arch::Registers> {
-        let mut regs = arch::Registers::zeroed();
-        let mut iovec = std::io::IoSliceMut::new(bytemuck::bytes_of_mut(&mut regs));
-
-        unsafe {
-            check!(libc::ptrace(
-                libc::PTRACE_GETREGSET,
-                self.pid,
-                libc::NT_PRSTATUS,
-                &mut iovec,
-            ))?;
+            match buf {
+                [0] => break,
+                [n] => error.push(n),
+            }
+            addr = addr.wrapping_add(1);
         }
 
-        if iovec.len() == mem::size_of::<arch::Registers>() {
-            Ok(regs)
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to fill registers",
-            ))
-        }
-    }
-
-    fn set_registers(&mut self, regs: &arch::Registers) -> io::Result<()> {
-        let mut iovec = std::io::IoSlice::new(bytemuck::bytes_of(regs));
-
-        unsafe {
-            check!(libc::ptrace(
-                libc::PTRACE_SETREGSET,
-                self.pid,
-                libc::NT_PRSTATUS,
-                &mut iovec,
-            ))?;
-        }
-
-        if iovec.len() == mem::size_of::<arch::Registers>() {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to set registers",
-            ))
-        }
-    }
-
-    fn peek_data(&mut self, addr: u64, buf: &mut [u8]) -> io::Result<()> {
-        self.mem.read_exact_at(buf, addr as _)
-    }
-
-    fn poke_data(&mut self, addr: u64, buf: &[u8]) -> io::Result<()> {
-        self.mem.write_all_at(buf, addr as _)
-    }
-
-    #[allow(dead_code)]
-    fn single_step(&mut self) -> io::Result<()> {
-        unsafe {
-            check!(libc::ptrace(
-                libc::PTRACE_SINGLESTEP,
-                self.pid,
-                ptr::null_mut::<libc::c_void>(),
-                0usize
-            ))?;
-        }
-        self.wait()?;
-        Ok(())
-    }
-
-    fn restart(&mut self) -> io::Result<()> {
-        self.continu()?;
-        self.wait()?;
-        Ok(())
-    }
-
-    fn continu(&mut self) -> io::Result<()> {
-        unsafe {
-            check!(libc::ptrace(
-                libc::PTRACE_CONT,
-                self.pid,
-                ptr::null_mut::<libc::c_void>(),
-                0usize
-            ))?;
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Tracee {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = self.raw_detach();
-        }
+        Ok(String::from_utf8_lossy(&error).into_owned())
+    })();
+    match error {
+        Ok(error) => IceError::new(error),
+        Err(err) => IceError::with_context("failed to get dlerror", err),
     }
 }
 
 #[cold]
-fn get_dlerror(
-    tracee: &mut Tracee,
-    regs: &mut arch::Registers,
-    dlerror: u64,
-    rip: u64,
-) -> anyhow::Result<String> {
-    // char *error = dlerror();
-    regs.prepare_funcall0(rip, dlerror);
-    tracee.set_registers(regs).context("p")?;
-    tracee.restart().context("qsd")?;
-    let res = tracee.registers().context("er")?;
+fn get_errno(tracee: &ptrace::Tracee, errno: u64) -> IceError {
+    let errno: IceResult<_> = (|| {
+        // int *errno = __errno_location();
+        let addr = tracee.funcall0(errno)?;
 
-    let mut addr = res.return_value();
-    let mut error = Vec::with_capacity(32);
-    let mut buf = [0];
-
-    loop {
-        tracee.peek_data(addr, &mut buf).context("os")?;
-
-        match buf {
-            [0] => break,
-            [n] => error.push(n),
-        }
-        addr = addr.wrapping_add(1);
+        let mut errno: libc::c_int = 0;
+        tracee.peek_data(addr, bytemuck::bytes_of_mut(&mut errno))?;
+        Ok(errno)
+    })();
+    match errno {
+        Ok(errno) => io::Error::from_raw_os_error(errno).into(),
+        Err(err) => IceError::with_context("failed to get errno", err),
     }
-
-    Ok(String::from_utf8_lossy(&error).into_owned())
 }
 
-#[allow(clippy::fn_to_numeric_cast, clippy::unnecessary_cast)]
-fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
-    let our_libdl = find_lib(std::process::id() as _, "libdl-2").context("our libdl")?;
-    let their_libdl = find_lib(pid, "libdl-2").context("their libdl")?;
+#[allow(clippy::fn_to_numeric_cast)]
+fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
+    let our_libdl = find_lib(std::process::id() as _, "libdl-2")?;
+    let their_libdl = find_lib(pid, "libdl-2")?;
     let their_dlopen = their_libdl + (libc::dlopen as u64 - our_libdl);
     let their_dlsym = their_libdl + (libc::dlsym as u64 - our_libdl);
     let their_dlerror = their_libdl + (libc::dlerror as u64 - our_libdl);
@@ -219,105 +96,63 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> anyhow::Result<()> {
     let our_libc = find_lib(std::process::id() as _, "libc-2")?;
     let their_libc = find_lib(pid, "libc-2")?;
     let their_mmap = their_libc + (libc::mmap as u64 - our_libc);
+    let their_errno = their_libc + (libc::__errno_location as u64 - our_libc);
 
-    let mut tracee = Tracee::attach(pid).context("attach")?;
-
-    let old_regs = tracee.registers().context("regs1")?;
-    let mut new_regs = old_regs;
-    let rip = old_regs.instruction_pointer();
-
-    let mut old_instrs = [0; arch::INSTRUCTIONS.len()];
-    tracee.peek_data(rip, &mut old_instrs).context("peek")?;
-    tracee.poke_data(rip, &arch::INSTRUCTIONS).context("poke")?;
-
-    new_regs.move_stack(0x100);
+    let tracee = ptrace::Tracee::attach(pid).context("failed to attach to KVM")?;
+    log::trace!("Attached to KVM");
 
     // mmap(NULL, PAGE_SIZE, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
-    new_regs.prepare_funcall6(
-        rip,
+    let mmap_addr = tracee.funcall6(
         their_mmap,
         0,
         0x1000,
         (libc::PROT_READ) as _,
         (libc::MAP_PRIVATE | libc::MAP_ANONYMOUS) as _,
-        -1 as _,
+        -1i64 as _,
         0,
-    );
-    tracee.set_registers(&new_regs)?;
-    tracee.restart()?;
-
-    let mut new_regs = tracee.registers().context("regs2")?;
-    let mmap_addr = new_regs.return_value();
-    ensure!(mmap_addr != -1 as _, "mmap failed");
+    )?;
+    if mmap_addr as i32 == -1 {
+        let err = get_errno(&tracee, their_errno);
+        return Err(IceError::with_context("remote mmap failed", err));
+    }
     log::trace!("mmap at 0x{mmap_addr:x}");
 
+    // Copy arguments of dlopen and dlsym
     let mut buffer = [0u8; TOTAL_LEN];
     buffer[..LIB_PATH.len()].copy_from_slice(LIB_PATH);
     buffer[LIB_PATH.len()..].copy_from_slice(FUN_NAME);
 
-    tracee
-        .poke_data(mmap_addr, &buffer)
-        .context("copy_buffer")?;
+    tracee.poke_data(mmap_addr, &buffer)?;
 
     // void *handle = dlopen(LIB_PATH, RTLD_NOW);
-    new_regs.prepare_funcall2(rip, their_dlopen, mmap_addr, libc::RTLD_NOW as _);
-    tracee.set_registers(&new_regs).context("set regs1")?;
-    tracee.restart()?;
-
-    new_regs = tracee.registers().context("regs3")?;
-    let handle = new_regs.return_value();
+    let handle = tracee.funcall2(their_dlopen, mmap_addr, libc::RTLD_NOW as _)?;
     if handle == 0 {
-        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, rip)?;
-
-        tracee.poke_data(rip, &old_instrs).context("a")?;
-        tracee.set_registers(&old_regs).context("b")?;
-        tracee.continu().context("v")?;
-
-        anyhow::bail!("dlopen failed: {}", err);
+        let err = get_dlerror(&tracee, their_dlerror);
+        return Err(IceError::with_context("remote dlopen failed", err));
     }
     log::trace!("dlopen handle at 0x{handle:x}");
 
     // payload = dlsym(handle, FUN_NAME);
-    new_regs.prepare_funcall2(rip, their_dlsym, handle, mmap_addr + LIB_PATH.len() as u64);
-    tracee.set_registers(&new_regs).context("set regs2")?;
-    tracee.restart().context("continue 1")?;
-
-    new_regs = tracee.registers().context("regs4")?;
-    let payload = new_regs.return_value();
+    let payload = tracee.funcall2(their_dlsym, handle, mmap_addr + LIB_PATH.len() as u64)?;
     if payload == 0 {
-        let err = get_dlerror(&mut tracee, &mut new_regs, their_dlerror, rip)?;
-
-        tracee.poke_data(rip, &old_instrs)?;
-        tracee.set_registers(&old_regs)?;
-        tracee.continu()?;
-
-        anyhow::bail!("dlsym failed: {}", err);
+        let err = get_dlerror(&tracee, their_dlerror);
+        return Err(IceError::with_context("remote dlsym failed", err));
     }
     log::trace!("payload at 0x{payload:x}");
 
     // payload(fds)
     tracee.poke_data(mmap_addr, bytemuck::cast_slice(fds))?;
 
-    new_regs.prepare_funcall2(rip, payload, mmap_addr, fds.len() as u64);
-    tracee.set_registers(&new_regs).context("set regs3")?;
-    tracee.restart().context("continue 2")?;
-
-    new_regs = tracee.registers()?;
-    let error = new_regs.return_value();
-
-    tracee.poke_data(rip, &old_instrs)?;
-    tracee.set_registers(&old_regs)?;
-    tracee.continu()?;
-
+    let error = tracee.funcall2(payload, mmap_addr, fds.len() as u64)?;
     if error != 0 {
         let err = io::Error::from_raw_os_error(error as _);
-        bail!("Payload failed: {}", err);
+        return Err(IceError::with_context("payload failed", err));
     }
 
     Ok(())
 }
 
-fn get_vcpus_fds(pid: libc::pid_t) -> anyhow::Result<Vec<i32>> {
+fn get_vcpus_fds(pid: libc::pid_t) -> IceResult<Vec<i32>> {
     fn read_one(entry: io::Result<fs::DirEntry>) -> Option<i32> {
         let (path, fd_name) = entry
             .and_then(|entry| {
@@ -346,25 +181,26 @@ fn get_vcpus_fds(pid: libc::pid_t) -> anyhow::Result<Vec<i32>> {
     Ok(fds)
 }
 
-fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<arch::Vcpu>> {
-    let fds = get_vcpus_fds(pid)?;
-    let n_fds = fds.len();
+fn start_listener(
+    socket_path: &str,
+    fds: &[i32],
+) -> IceResult<thread::JoinHandle<IceResult<Vec<arch::Vcpu>>>> {
+    let fds_len = fds.len();
 
-    let socket_path = "/tmp/get_fds";
     let _ = fs::remove_file(socket_path);
-    let listener = UnixListener::bind(socket_path).context("bind").unwrap();
-    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777)).unwrap();
+    let listener = UnixListener::bind(socket_path).context("failed to bind listener socket")?;
+    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
 
-    let handle = std::thread::spawn(move || -> anyhow::Result<_> {
+    Ok(thread::spawn(move || {
         let mut registers = bytemuck::Zeroable::zeroed();
         #[cfg(target_arch = "x86_64")]
         let mut special_registers = bytemuck::Zeroable::zeroed();
         #[cfg(target_arch = "x86_64")]
         let mut gs_kernel_base = 0;
 
-        let (mut socket, _) = listener.accept().context("accept")?;
+        let (mut socket, _) = listener.accept()?;
 
-        (0..n_fds)
+        (0..fds_len)
             .map(|_| {
                 #[cfg(target_arch = "x86_64")]
                 {
@@ -384,9 +220,15 @@ fn get_regs(pid: libc::pid_t) -> anyhow::Result<Vec<arch::Vcpu>> {
                 }
             })
             .collect()
-    });
+    }))
+}
 
-    attach(pid, &fds).unwrap();
+fn get_regs(pid: libc::pid_t) -> IceResult<Vec<arch::Vcpu>> {
+    let fds = get_vcpus_fds(pid)?;
+    let socket_path = "/tmp/get_fds";
+    let handle = start_listener(socket_path, &fds)?;
+
+    attach(pid, &fds)?;
     log::info!("Payload succeded");
 
     let regs = handle.join().unwrap()?;
@@ -399,7 +241,7 @@ pub struct Kvm {
 }
 
 impl Kvm {
-    pub fn connect(pid: libc::pid_t) -> anyhow::Result<Kvm> {
+    pub fn connect(pid: libc::pid_t) -> IceResult<Kvm> {
         // Parse /proc/pid/maps file to find the adress of the VM memory
         let (mem_offset, mem_size) = {
             let mut maps = io::BufReader::new(fs::File::open(format!("/proc/{}/maps", pid))?);
@@ -435,7 +277,10 @@ impl Kvm {
                 line.clear();
             }
 
-            ensure!(map_guess != 0, "Could not find VM memory");
+            if map_guess == 0 {
+                return Err(IceError::new("failed to find VM memory"));
+            }
+
             log::debug!(
                 "Found KVM memory at of size 0x{:x} at address 0x{:x}",
                 map_size,

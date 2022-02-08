@@ -41,7 +41,7 @@ pub fn wrap_unit_result(result: ibc::IceResult<()>) -> *mut Error {
 #[no_mangle]
 pub unsafe extern "C" fn error_with_message(err: *mut Error, context: *mut c_char) -> *mut Error {
     let context = cstring::from_ut8_lossy(context);
-    let err = IceError::with_message(context, error_from(err));
+    let err = IceError::with_context(context, error_from(err));
     error_into(err)
 }
 

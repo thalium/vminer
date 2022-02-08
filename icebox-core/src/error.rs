@@ -133,8 +133,7 @@ enum Repr {
     #[cfg(feature = "std")]
     Io(std::io::Error),
     Other(Box<dyn Error + Send + Sync>),
-    Message(Box<str>, Option<Box<dyn Error + Send + Sync>>),
-    Context(Box<str>, IceError),
+    Context(Box<str>, Option<Box<dyn Error + Send + Sync>>),
 }
 
 #[derive(Debug)]
@@ -169,11 +168,8 @@ impl IceError {
     }
 
     #[cold]
-    pub fn with_message(
-        context: impl fmt::Display,
-        err: impl Into<Box<dyn Error + Send + Sync>>,
-    ) -> Self {
-        Self::from_repr(Repr::Message(context.to_string().into(), Some(err.into())))
+    pub fn with_context(msg: impl ToString, err: impl Into<Box<dyn Error + Send + Sync>>) -> Self {
+        Self::from_repr(Repr::Context(msg.to_string().into(), Some(err.into())))
     }
 
     #[cold]
@@ -206,7 +202,7 @@ impl fmt::Display for Repr {
 
             #[cfg(feature = "std")]
             Repr::Io(_) => f.write_str("I/O error"),
-            Repr::Message(msg, _) | Repr::Context(msg, _) => f.write_str(msg),
+            Repr::Context(msg, _) => f.write_str(msg),
             Repr::Other(err) => err.fmt(f),
         }
     }
@@ -241,9 +237,8 @@ impl Error for IceError {
             Repr::Memory(err) => Some(err),
             #[cfg(feature = "std")]
             Repr::Io(err) => Some(err),
-            Repr::Message(_, err) => Some(&**err.as_ref()?),
+            Repr::Context(_, err) => Some(&**err.as_ref()?),
             Repr::Other(err) => err.source(),
-            Repr::Context(_, err) => Some(err),
             _ => None,
         }
     }
@@ -252,14 +247,14 @@ impl Error for IceError {
 impl From<&str> for IceError {
     #[cold]
     fn from(msg: &str) -> Self {
-        Self::from_repr(Repr::Message(msg.into(), None))
+        Self::from_repr(Repr::Context(msg.into(), None))
     }
 }
 
 impl From<String> for IceError {
     #[cold]
     fn from(msg: String) -> Self {
-        Self::from_repr(Repr::Message(msg.into(), None))
+        Self::from_repr(Repr::Context(msg.into(), None))
     }
 }
 
@@ -290,11 +285,27 @@ impl<T> MemoryAccessResultExt<T> for MemoryAccessResult<Option<T>> {
 
 pub trait ResultExt<T>: seal::Sealed {
     fn context(self, msg: impl ToString) -> IceResult<T>;
+
+    fn with_context<F, S>(self, msg: F) -> IceResult<T>
+    where
+        F: FnOnce() -> S,
+        S: ToString;
 }
 
-impl<T> ResultExt<T> for IceResult<T> {
+impl<T, E> ResultExt<T> for Result<T, E>
+where
+    E: Into<Box<dyn Error + Send + Sync>>,
+{
     fn context(self, msg: impl ToString) -> IceResult<T> {
-        self.map_err(|err| IceError::from_repr(Repr::Context(msg.to_string().into(), err)))
+        self.map_err(|err| IceError::with_context(msg.to_string(), err))
+    }
+
+    fn with_context<F, S>(self, msg: F) -> IceResult<T>
+    where
+        F: FnOnce() -> S,
+        S: ToString,
+    {
+        self.map_err(|err| IceError::with_context(msg().to_string(), err))
     }
 }
 

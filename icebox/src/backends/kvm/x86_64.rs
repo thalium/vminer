@@ -22,30 +22,17 @@ impl Registers {
         self.0.rsp -= amount;
     }
 
-    pub fn prepare_funcall0(&mut self, ip: u64, addr: u64) {
-        self.0.rip = ip;
+    pub fn prepare_funcall0(&mut self, addr: u64) {
         self.0.rax = addr;
     }
 
-    pub fn prepare_funcall2(&mut self, ip: u64, addr: u64, a: u64, b: u64) {
-        self.0.rip = ip;
+    pub fn prepare_funcall2(&mut self, addr: u64, a: u64, b: u64) {
         self.0.rax = addr;
         self.0.rdi = a;
         self.0.rsi = b;
     }
 
-    pub fn prepare_funcall6(
-        &mut self,
-        ip: u64,
-        addr: u64,
-        a: u64,
-        b: u64,
-        c: u64,
-        d: u64,
-        e: u64,
-        f: u64,
-    ) {
-        self.0.rip = ip;
+    pub fn prepare_funcall6(&mut self, addr: u64, a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) {
         self.0.rax = addr;
         self.0.rdi = a;
         self.0.rsi = b;
