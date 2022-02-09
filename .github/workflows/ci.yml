@@ -62,7 +62,12 @@ jobs:
 
   test:
     name: Run tests
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runner:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
