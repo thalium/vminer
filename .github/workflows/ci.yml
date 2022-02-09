@@ -6,7 +6,7 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  test:
+  check:
     strategy:
       matrix:
         runner:
@@ -59,3 +59,30 @@ jobs:
 
       - name: cargo fmt -- --check
         run: cargo fmt -- --check
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Get test data
+        uses: actions/checkout@v2
+        with:
+          repository: thalium/icebox2_data
+          lfs: true
+          path: data
+          ssh-key: ${{ secrets.DUMPS_DEPLOY_KEY }}
+
+      - name: Decompress dump
+        run: zstd -d data/linux-5.10/dump.zst -o data/linux-5.10/dump
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: cargo test
+        run: cargo test -p icebox --all-features
