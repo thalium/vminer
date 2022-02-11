@@ -180,47 +180,13 @@ impl<B: ice::Backend> Linux<B> {
         T::read(self, pointer.addr)
     }
 
-    #[cfg(feature = "std")]
-    pub fn read_current_task(&self, cpuid: usize) -> IceResult<()> {
-        let current_task = per_cpu(&self.backend, cpuid)?
-            + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
-
-        let addr = self.read_kernel_value(current_task)?;
-
-        let addr = self.kernel_to_physical(addr)?;
-        let task_struct = self.profile.syms.get_struct("task_struct")?;
-
-        for win in task_struct.fields[..100].windows(2) {
-            match win {
-                [current, next] => {
-                    let size = (next.offset - current.offset) as usize;
-                    let mut buf = [0; 1024];
-                    let buf = &mut buf[..size];
-                    self.backend.read_memory(addr + current.offset, buf)?;
-
-                    match size {
-                        4 => {
-                            let x: &u32 = bytemuck::from_bytes(buf);
-                            println!("{} ({}): {}", current.name, size, x);
-                        }
-                        8 => {
-                            let x: &u64 = bytemuck::from_bytes(buf);
-                            println!("{} ({}): {}", current.name, size, x);
-                        }
-                        _ => println!("{} ({}): {:02x?}", current.name, size, buf),
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        Ok(())
+    pub fn per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
+        let per_cpu_offset = self.profile.fast_syms.per_cpu_offset + self.kaslr;
+        self.read_kernel_value(per_cpu_offset + 8 * cpuid as u64)
     }
 
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
-        let current_task = per_cpu(&self.backend, cpuid)?
-            + (self.profile.fast_syms.current_task - self.profile.fast_syms.per_cpu_start);
-
+        let current_task = self.per_cpu(cpuid)? + self.profile.fast_syms.current_task;
         let addr = self.read_kernel_value(current_task)?;
         Ok(ibc::Thread(addr))
     }

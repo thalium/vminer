@@ -5,8 +5,8 @@ use core::marker::PhantomData;
 use ice::VirtualAddress;
 
 pub(crate) struct FastSymbols {
-    pub(crate) per_cpu_start: ice::VirtualAddress,
-    pub(crate) current_task: ice::VirtualAddress,
+    pub(crate) per_cpu_offset: VirtualAddress,
+    pub(crate) current_task: u64,
 
     pub(super) init_task: ice::VirtualAddress,
 }
@@ -214,8 +214,8 @@ pub struct Profile {
 
 impl Profile {
     pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
-        let per_cpu_start = syms.get_addr("__per_cpu_start")?;
-        let current_task = syms.get_addr("current_task")?;
+        let per_cpu_offset = syms.get_addr("__per_cpu_offset")?;
+        let current_task = syms.get_addr("current_task")?.0;
         let init_task = syms.get_addr("init_task")?;
 
         let layouts = Layouts::new(&syms)?;
@@ -223,7 +223,7 @@ impl Profile {
         Ok(Self {
             syms,
             fast_syms: FastSymbols {
-                per_cpu_start,
+                per_cpu_offset,
                 current_task,
                 init_task,
             },
