@@ -15,6 +15,23 @@ static LINUX: Lazy<Linux<DumbDump<ibc::File>>> = Lazy::new(|| {
     res.expect("Failed to initialize OS")
 });
 
+fn assert_match_expected<T>(name: &str, result: &T)
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + Eq + std::fmt::Debug,
+{
+    let result_path = format!("tests/results/linux-{name}.json");
+
+    if std::env::var_os("ICEBOX_BLESS_TESTS").is_some() {
+        let mut file = std::io::BufWriter::new(std::fs::File::create(&result_path).unwrap());
+        serde_json::to_writer_pretty(&mut file, &result).unwrap();
+    }
+
+    let mut file = std::io::BufReader::new(std::fs::File::open(result_path).unwrap());
+    let expected: T = serde_json::from_reader(&mut file).unwrap();
+
+    assert_eq!(result, &expected);
+}
+
 #[test]
 fn proc_tree() {
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -63,22 +80,12 @@ fn proc_tree() {
             threads,
         })
     }
-
     let linux = &*LINUX;
-    let result_path = "tests/results/linux-proc-tree.json";
 
     let init = linux.init_process().unwrap();
     let procs = collect_proc_tree(linux, init).unwrap();
 
-    // Code to generate the expected result
-    // let mut file = std::io::BufWriter::new(std::fs::File::create(result_path).unwrap());
-    // serde_json::to_writer_pretty(&mut file, &procs).unwrap();
-    // drop(file);
-
-    let mut file = std::io::BufReader::new(std::fs::File::open(result_path).unwrap());
-    let expected = serde_json::from_reader(&mut file).unwrap();
-
-    assert_eq!(procs, expected);
+    assert_match_expected("proc-tree", &procs);
 }
 
 #[test]
@@ -102,7 +109,6 @@ fn vmas() {
     }
 
     let linux = &*LINUX;
-    let result_path = "tests/results/linux-vmas.json";
 
     let proc = linux.find_process_by_name("callstack").unwrap().unwrap();
     assert_eq!(linux.process_pid(proc).unwrap(), 651);
@@ -121,15 +127,7 @@ fn vmas() {
         })
         .unwrap();
 
-    // Code to generate the expected result
-    // let mut file = std::io::BufWriter::new(std::fs::File::create(result_path).unwrap());
-    // serde_json::to_writer_pretty(&mut file, &vmas).unwrap();
-    // drop(file);
-
-    let mut file = std::io::BufReader::new(std::fs::File::open(result_path).unwrap());
-    let expected: Vec<Vma> = serde_json::from_reader(&mut file).unwrap();
-
-    assert_eq!(vmas, expected);
+    assert_match_expected("vmas", &vmas);
 }
 
 #[test]
@@ -143,7 +141,6 @@ fn callstack() {
     }
 
     let linux = &*LINUX;
-    let result_path = "tests/results/linux-callstack.json";
 
     let proc = linux.current_process(1).unwrap();
     assert_eq!(linux.process_pid(proc).unwrap(), 651);
@@ -169,13 +166,5 @@ fn callstack() {
         })
         .unwrap();
 
-    // Code to generate the expected result
-    // let mut file = std::io::BufWriter::new(std::fs::File::create(result_path).unwrap());
-    // serde_json::to_writer_pretty(&mut file, &frames).unwrap();
-    // drop(file);
-
-    let mut file = std::io::BufReader::new(std::fs::File::open(result_path).unwrap());
-    let expected: Vec<StackFrame> = serde_json::from_reader(&mut file).unwrap();
-
-    assert_eq!(frames, expected);
+    assert_match_expected("callstack", &frames);
 }
