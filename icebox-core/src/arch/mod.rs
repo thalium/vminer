@@ -29,15 +29,11 @@ pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu>
 
     fn get(&self, id: usize) -> <Self::Arch as Architecture<'a>>::Vcpu;
 
-    fn kernel_per_cpu(
-        &self,
-        cpuid: usize,
-        check: impl Fn(VirtualAddress) -> bool,
-    ) -> Option<VirtualAddress> {
-        self.get(cpuid).kernel_per_cpu(check)
+    fn kernel_per_cpu(&self, cpuid: usize) -> Option<VirtualAddress> {
+        self.get(cpuid).kernel_per_cpu()
     }
 
-    fn find_kernel_pgd(&self, test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress>;
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress>;
 
     fn into_runtime(self) -> runtime::Vcpus<'a>;
 }
@@ -53,7 +49,7 @@ pub trait Vcpu<'a> {
 
     fn stack_pointer(&self) -> VirtualAddress;
 
-    fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress>;
+    fn kernel_per_cpu(&self) -> Option<VirtualAddress>;
 
     fn into_runtime(self) -> runtime::Vcpu<'a>;
 }

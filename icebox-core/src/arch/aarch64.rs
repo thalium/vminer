@@ -41,7 +41,7 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     #[inline]
-    fn kernel_per_cpu(&self, _check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
+    fn kernel_per_cpu(&self) -> Option<VirtualAddress> {
         None
     }
 }
@@ -65,8 +65,15 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 
     #[inline]
-    fn find_kernel_pgd(&self, test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
-        super::try_all_addresses(test)
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, _memory: &M) -> Option<PhysicalAddress> {
+        for vcpu in *self {
+            if VirtualAddress(vcpu.registers.pc).is_kernel() {
+                let addr = PhysicalAddress(vcpu.special_registers.ttbr1_el1 & crate::mask(48));
+                return Some(addr);
+            }
+        }
+
+        None
     }
 
     #[inline]

@@ -99,15 +99,6 @@ pub struct Linux<B> {
     processes: OnceCell<HashMap<ibc::Process, ProcessData>>,
 }
 
-fn per_cpu<B: ice::Backend>(backend: &B, cpuid: usize) -> IceResult<VirtualAddress> {
-    backend.kernel_per_cpu(cpuid, is_kernel_addr)
-}
-
-fn find_kpgd<B: ice::Backend>(backend: &B) -> IceResult<PhysicalAddress> {
-    let valid_addr = per_cpu(backend, 0)?;
-    backend.find_kernel_pgd(valid_addr)
-}
-
 pub fn get_aslr<B: ice::Backend>(
     backend: &B,
     profile: &Profile,
@@ -126,7 +117,7 @@ pub const fn is_kernel_addr(addr: VirtualAddress) -> bool {
 
 impl<B: ice::Backend> Linux<B> {
     pub fn create(backend: B, profile: Profile) -> IceResult<Self> {
-        let kpgd = find_kpgd(&backend)?;
+        let kpgd = backend.find_kernel_pgd()?;
         let kaslr = get_aslr(&backend, &profile, kpgd)?;
 
         Ok(Linux {
@@ -324,7 +315,7 @@ fn get_banner_addr<B: ice::Backend>(
 
 impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {
     fn quick_check(backend: &B) -> IceResult<bool> {
-        let mmu_addr = find_kpgd(backend)?;
+        let mmu_addr = backend.find_kernel_pgd()?;
         Ok(get_banner_addr(backend, mmu_addr)?.is_some())
     }
 }

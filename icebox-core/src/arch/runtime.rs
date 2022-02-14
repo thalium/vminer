@@ -53,10 +53,10 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
     }
 
     #[inline]
-    fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
+    fn kernel_per_cpu(&self) -> Option<VirtualAddress> {
         match self {
-            Self::X86_64(vcpu) => vcpu.kernel_per_cpu(check),
-            Self::Aarch64(vcpu) => vcpu.kernel_per_cpu(check),
+            Self::X86_64(vcpu) => vcpu.kernel_per_cpu(),
+            Self::Aarch64(vcpu) => vcpu.kernel_per_cpu(),
         }
     }
 }
@@ -113,10 +113,10 @@ impl<'a> arch::Vcpus<'a> for Vcpus<'a> {
     }
 
     #[inline]
-    fn find_kernel_pgd(&self, test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress> {
         match self {
-            Self::X86_64(vcpus) => vcpus.find_kernel_pgd(test),
-            Self::Aarch64(vcpus) => vcpus.find_kernel_pgd(test),
+            Self::X86_64(vcpus) => vcpus.find_kernel_pgd(memory),
+            Self::Aarch64(vcpus) => vcpus.find_kernel_pgd(memory),
         }
     }
 

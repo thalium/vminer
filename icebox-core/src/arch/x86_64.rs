@@ -42,14 +42,14 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     #[inline]
-    fn kernel_per_cpu(&self, check: impl Fn(VirtualAddress) -> bool) -> Option<VirtualAddress> {
+    fn kernel_per_cpu(&self) -> Option<VirtualAddress> {
         let per_cpu = VirtualAddress(self.special_registers.gs.base);
-        if check(per_cpu) {
+        if per_cpu.is_kernel() {
             return Some(per_cpu);
         }
 
         let per_cpu = VirtualAddress(self.gs_kernel_base);
-        if check(per_cpu) {
+        if per_cpu.is_kernel() {
             return Some(per_cpu);
         }
 
@@ -75,9 +75,31 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
         &self[id]
     }
 
-    #[inline]
-    fn find_kernel_pgd(&self, test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
-        // First, try to find one in a cr3 register
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress> {
+        use super::{Architecture, Vcpu};
+
+        // Collect some valid kernel addresses
+        let test_addrs: alloc::vec::Vec<_> = self
+            .iter()
+            .filter_map(|vcpu| vcpu.kernel_per_cpu())
+            .collect();
+        let mem_size = memory.size();
+
+        if test_addrs.is_empty() {
+            return None;
+        }
+
+        // To check if a CR3 is valid, try to translate addresses with it
+        let test = |addr| {
+            test_addrs.iter().all(|test_addr| {
+                match X86_64.virtual_to_physical(memory, addr, *test_addr) {
+                    Ok(Some(addr)) => addr.0 < mem_size,
+                    _ => false,
+                }
+            })
+        };
+
+        // First, try cr3 registers
         for vcpu in *self {
             let addr = PhysicalAddress(vcpu.special_registers.cr3);
             if test(addr) {
@@ -85,7 +107,7 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
             }
         }
 
-        // If it didn't work, try them all !
+        // If it didn't work, try all addresses !
         super::try_all_addresses(test)
     }
 

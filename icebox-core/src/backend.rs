@@ -64,26 +64,20 @@ pub trait Backend {
     }
 
     #[inline]
-    fn kernel_per_cpu(
-        &self,
-        cpuid: usize,
-        check: impl Fn(VirtualAddress) -> bool,
-    ) -> IceResult<VirtualAddress> {
+    fn kernel_per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
         use arch::Vcpus;
 
         self.vcpus()
-            .kernel_per_cpu(cpuid, check)
+            .kernel_per_cpu(cpuid)
             .ok_or_else(|| "could not find per_cpu address".into())
     }
 
     #[inline]
-    fn find_kernel_pgd(&self, test_addr: VirtualAddress) -> IceResult<PhysicalAddress> {
+    fn find_kernel_pgd(&self) -> IceResult<PhysicalAddress> {
         use arch::Vcpus;
 
-        let test = |addr| matches!(self.virtual_to_physical(addr, test_addr), Ok(Some(_)));
-
         self.vcpus()
-            .find_kernel_pgd(test)
+            .find_kernel_pgd(self.memory())
             .ok_or_else(|| "could not find kernel page directory".into())
     }
 }
@@ -125,16 +119,12 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
         (**self).virtual_to_physical(mmu_addr, addr)
     }
 
-    fn kernel_per_cpu(
-        &self,
-        cpuid: usize,
-        check: impl Fn(VirtualAddress) -> bool,
-    ) -> IceResult<VirtualAddress> {
-        (**self).kernel_per_cpu(cpuid, check)
+    fn kernel_per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
+        (**self).kernel_per_cpu(cpuid)
     }
 
-    fn find_kernel_pgd(&self, test_addr: VirtualAddress) -> IceResult<PhysicalAddress> {
-        (**self).find_kernel_pgd(test_addr)
+    fn find_kernel_pgd(&self) -> IceResult<PhysicalAddress> {
+        (**self).find_kernel_pgd()
     }
 }
 
