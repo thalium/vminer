@@ -41,7 +41,10 @@ fn send_fds(vcpus: &[i32]) -> io::Result<()> {
     #[cfg(target_arch = "aarch64")]
     for &vcpu in vcpus {
         let regs = kvm::get_regs(vcpu)?;
+        let sregs = kvm::get_special_regs(vcpu)?;
+
         socket.write_all(bytemuck::bytes_of(&regs))?;
+        socket.write_all(bytemuck::bytes_of(&sregs))?;
     }
 
     Ok(())

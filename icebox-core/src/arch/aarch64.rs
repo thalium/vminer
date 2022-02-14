@@ -9,6 +9,7 @@ pub struct Aarch64;
 #[derive(Debug, Clone)]
 pub struct Vcpu {
     pub registers: Registers,
+    pub special_registers: SpecialRegisters,
 }
 
 impl<'a> super::Vcpu<'a> for &'a Vcpu {
@@ -123,4 +124,13 @@ pub struct Registers {
     pub sp: u64,
     pub pc: u64,
     pub pstate: u64,
+}
+
+/// A curated list of additionnal useful registers
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct SpecialRegisters {
+    pub sp_el1: u64,
+    pub ttbr0_el1: u64,
+    pub ttbr1_el1: u64,
 }

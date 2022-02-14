@@ -48,11 +48,18 @@ pub struct user_pt_regs {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct special_regs {
+    sp_el1: u64,
+    ttbr0_el1: u64,
+    ttbr1_el1: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct kvm_one_reg {
     id: u64,
     addr: u64,
 }
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct kvm_reg_list {
@@ -60,11 +67,19 @@ pub struct kvm_reg_list {
     pub reg: [u64; 512],
 }
 
-pub fn get_reg_list(vcpu_fd: i32) -> io::Result<kvm_reg_list> {
+#[allow(dead_code)]
+pub fn write_reg_list(vcpu_fd: i32) -> io::Result<kvm_reg_list> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(format!("/tmp/reg_list_{vcpu_fd}"))?;
     unsafe {
         let mut regs = kvm_reg_list::zeroed();
         regs.len = regs.reg.len() as _;
         check!(libc::ioctl(vcpu_fd, KVM_GET_REG_LIST, &mut regs))?;
+
+        for id in regs.reg.into_iter().take(regs.len as _) {
+            let reg = get_one_reg(vcpu_fd, id)?;
+            writeln!(f, "{id:x}\t{reg:x}")?;
+        }
 
         Ok(regs)
     }
@@ -80,6 +95,14 @@ pub fn get_regs(vcpu_fd: i32) -> io::Result<user_pt_regs> {
     }
 
     Ok(regs)
+}
+
+pub fn get_special_regs(vcpu_fd: i32) -> io::Result<special_regs> {
+    Ok(special_regs {
+        sp_el1: get_one_reg(vcpu_fd, 0x6030000000100044)?,
+        ttbr0_el1: get_one_reg(vcpu_fd, 0x603000000013c100)?,
+        ttbr1_el1: get_one_reg(vcpu_fd, 0x603000000013c101)?,
+    })
 }
 
 fn get_one_reg(vcpu_fd: i32, id: u64) -> io::Result<u64> {
