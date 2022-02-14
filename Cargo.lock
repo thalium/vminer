@@ -316,6 +316,7 @@ dependencies = [
  "gimli",
  "hashbrown",
  "log",
+ "memchr",
  "object",
  "pyo3",
  "serde",

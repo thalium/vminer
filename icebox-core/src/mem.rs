@@ -8,6 +8,43 @@ pub trait Memory {
 
     fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
+    /// Search in a memory page with a finder.
+    ///
+    /// A buffer is expected to avoid allocating a new one each time this
+    /// function is called.
+    ///
+    /// Returns the index of the needle within the page if found.
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<u64>> {
+        match buf.get_mut(..page_size as usize) {
+            // Nice case, all the page fits in the buffer
+            Some(buf) => {
+                self.read(addr, buf)?;
+                Ok(finder.find(&buf).map(|i| i as u64))
+            }
+            // This is a bit more complicated, as we need several reads.
+            None => {
+                assert!(buf.len() > finder.needle().len());
+
+                for offset in (0..page_size).step_by(buf.len() - finder.needle().len()) {
+                    let addr = addr + offset;
+                    let size = core::cmp::min(buf.len(), (page_size - offset) as usize);
+                    self.read(addr, &mut buf[..size])?;
+                    if let Some(index) = finder.find(&buf[..size]) {
+                        return Ok(Some(index as u64));
+                    }
+                }
+
+                Ok(None)
+            }
+        }
+    }
+
     #[cfg(feature = "std")]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
         let mut buffer = [0; 1 << 16];
@@ -39,6 +76,23 @@ impl Memory for [u8] {
         .ok_or(MemoryAccessError::OutOfBounds)
     }
 
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        _buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<u64>> {
+        let this = (|| {
+            let max = addr.0.checked_add(page_size)?.try_into().ok()?;
+            let offset = addr.0.try_into().ok()?;
+            self.get(offset..max)
+        })()
+        .ok_or(MemoryAccessError::OutOfBounds)?;
+
+        Ok(finder.find(this).map(|i| i as u64))
+    }
+
     #[cfg(feature = "std")]
     #[inline]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
@@ -55,6 +109,17 @@ impl Memory for alloc::vec::Vec<u8> {
     #[inline]
     fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
+    }
+
+    #[inline]
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<u64>> {
+        (**self).search(addr, page_size, finder, buf)
     }
 
     #[cfg(feature = "std")]
@@ -79,6 +144,17 @@ impl<M: Memory + ?Sized> Memory for &'_ M {
     #[inline]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
         (**self).dump(writer)
+    }
+
+    #[inline]
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<u64>> {
+        (**self).search(addr, page_size, finder, buf)
     }
 }
 
