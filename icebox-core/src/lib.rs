@@ -4,7 +4,7 @@
 extern crate alloc;
 
 mod addr;
-pub use addr::{MmPte, PhysicalAddress, VirtualAddress};
+pub use addr::{PhysicalAddress, VirtualAddress};
 
 pub mod arch;
 pub use arch::Architecture;
@@ -32,8 +32,14 @@ pub use os::{Os, Path, Process, StackFrame, Thread, Vma, VmaFlags};
 pub mod symbols;
 pub use symbols::SymbolsIndexer;
 
+#[inline]
 pub const fn mask(size: u32) -> u64 {
     !(!0 << size)
+}
+
+#[inline]
+pub const fn mask_range(from: u32, to: u32) -> u64 {
+    mask(to - from) << from
 }
 
 mod seal {

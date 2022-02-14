@@ -95,6 +95,20 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 }
 
+struct MmuDesc;
+
+impl super::MmuDesc for MmuDesc {
+    #[inline]
+    fn is_valid(mmu_entry: crate::addr::MmuEntry) -> bool {
+        mmu_entry.0 & 1 != 0
+    }
+
+    #[inline]
+    fn is_large(mmu_entry: crate::addr::MmuEntry) -> bool {
+        mmu_entry.0 & (1 << 7) != 0
+    }
+}
+
 impl<'a> super::Architecture<'a> for X86_64 {
     type Registers = Registers;
     type Vcpu = &'a Vcpu;
@@ -117,44 +131,7 @@ impl<'a> super::Architecture<'a> for X86_64 {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
     ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
-        let mut mmu_entry = crate::MmPte(0);
-
-        let pml4e_addr = PhysicalAddress(mmu_addr.0 & (crate::mask(40) << 12)) + 8 * addr.pml4e();
-        memory.read(pml4e_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
-        if !mmu_entry.is_valid() {
-            return Ok(None);
-        }
-
-        let pdpe_addr = mmu_entry.page_frame() + 8 * addr.pdpe();
-        memory.read(pdpe_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
-        if !mmu_entry.is_valid() {
-            return Ok(None);
-        }
-
-        if mmu_entry.is_large() {
-            let phys_addr = mmu_entry.huge_page_frame() + addr.huge_page_offset();
-            return Ok(Some(phys_addr));
-        }
-
-        let pde_addr = mmu_entry.page_frame() + 8 * addr.pde();
-        memory.read(pde_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
-        if !mmu_entry.is_valid() {
-            return Ok(None);
-        }
-
-        if mmu_entry.is_large() {
-            let phys_addr = mmu_entry.large_page_frame() + addr.large_page_offset();
-            return Ok(Some(phys_addr));
-        }
-
-        let pte_addr = mmu_entry.page_frame() + 8 * addr.pte();
-        memory.read(pte_addr, bytemuck::bytes_of_mut(&mut mmu_entry))?;
-        if !mmu_entry.is_valid() {
-            return Ok(None);
-        }
-
-        let phys_addr = mmu_entry.page_frame() + addr.page_offset();
-        Ok(Some(phys_addr))
+        super::virtual_to_physical::<MmuDesc, M>(memory, mmu_addr, addr)
     }
 }
 

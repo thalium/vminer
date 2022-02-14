@@ -1,3 +1,5 @@
+use crate::mask_range;
+
 use super::mask;
 use core::ops::Sub;
 use core::ops::SubAssign;
@@ -117,6 +119,7 @@ impl VirtualAddress {
 impl Add<u64> for VirtualAddress {
     type Output = VirtualAddress;
 
+    #[inline]
     fn add(self, rhs: u64) -> Self::Output {
         Self(self.0 + rhs)
     }
@@ -125,6 +128,7 @@ impl Add<u64> for VirtualAddress {
 impl Add<i64> for VirtualAddress {
     type Output = VirtualAddress;
 
+    #[inline]
     fn add(self, rhs: i64) -> Self::Output {
         let (res, o) = self.0.overflowing_add(rhs as u64);
 
@@ -139,6 +143,7 @@ impl Add<i64> for VirtualAddress {
 impl Sub<VirtualAddress> for VirtualAddress {
     type Output = i64;
 
+    #[inline]
     fn sub(self, rhs: VirtualAddress) -> i64 {
         self.0.overflowing_sub(rhs.0).0 as i64
     }
@@ -147,12 +152,14 @@ impl Sub<VirtualAddress> for VirtualAddress {
 impl Sub<u64> for VirtualAddress {
     type Output = Self;
 
+    #[inline]
     fn sub(self, rhs: u64) -> Self {
         Self(self.0 - rhs)
     }
 }
 
 impl SubAssign<u64> for VirtualAddress {
+    #[inline]
     fn sub_assign(&mut self, rhs: u64) {
         self.0 -= rhs;
     }
@@ -172,46 +179,18 @@ impl fmt::UpperHex for VirtualAddress {
 
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(transparent)]
-pub struct MmPte(pub u64);
+pub struct MmuEntry(pub u64);
 
-impl MmPte {
-    /// Normal pages (4Ko)
+impl MmuEntry {
     #[inline]
-    pub const fn page_frame(self) -> PhysicalAddress {
-        PhysicalAddress(self.0 & (mask(36) << 12))
-    }
-
-    /// Large pages (2Mo)
-    #[inline]
-    pub const fn large_page_frame(self) -> PhysicalAddress {
-        PhysicalAddress(self.0 & (mask(31) << 21))
-    }
-
-    /// Huge pages (1Go)
-    #[inline]
-    pub const fn huge_page_frame(self) -> PhysicalAddress {
-        PhysicalAddress(self.0 & (mask(22) << 30))
-    }
-
-    #[inline]
-    pub const fn is_valid(self) -> bool {
-        self.0 & 1 != 0
-    }
-
-    #[inline]
-    pub const fn is_large(self) -> bool {
-        self.0 & (1 << 7) != 0
+    pub const fn take_bits(self, from: u32, to: u32) -> PhysicalAddress {
+        PhysicalAddress(self.0 & mask_range(from, to))
     }
 }
 
-impl fmt::LowerHex for MmPte {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl fmt::UpperHex for MmPte {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.fmt(f)
+impl core::ops::SubAssign<u64> for MmuEntry {
+    #[inline]
+    fn sub_assign(&mut self, rhs: u64) {
+        self.0 -= rhs;
     }
 }

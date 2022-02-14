@@ -74,6 +74,22 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 }
 
+struct MmuDesc;
+
+impl super::MmuDesc for MmuDesc {
+    const MEM_OFFSET: u64 = 1 << 30;
+
+    #[inline]
+    fn is_valid(mmu_entry: crate::addr::MmuEntry) -> bool {
+        mmu_entry.0 & 1 != 0
+    }
+
+    #[inline]
+    fn is_large(mmu_entry: crate::addr::MmuEntry) -> bool {
+        mmu_entry.0 & 0b10 == 0
+    }
+}
+
 impl<'a> super::Architecture<'a> for Aarch64 {
     type Registers = Registers;
     type Vcpu = &'a Vcpu;
