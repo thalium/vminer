@@ -2,7 +2,7 @@ use bytemuck::Zeroable;
 
 use crate::core::{
     self as ice,
-    arch::{self, x86_64},
+    arch::{self, aarch64, x86_64, Vcpus as _},
     Backend, Memory, PhysicalAddress,
 };
 use std::{
@@ -11,19 +11,14 @@ use std::{
     path::Path,
 };
 
-pub struct DumbDump<Mem> {
-    vcpus: Vec<arch::x86_64::Vcpu>,
-    mem: Mem,
+enum Vcpus {
+    X86_64(Vec<arch::x86_64::Vcpu>),
+    Aarch64(Vec<arch::aarch64::Vcpu>),
 }
 
-impl DumbDump<ice::File> {
-    pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let mut file = io::BufReader::new(fs::File::open(path)?);
-
-        let mut n_vcpus = 0;
-        file.read_exact(bytemuck::bytes_of_mut(&mut n_vcpus))?;
-
-        let mut vcpus = Vec::with_capacity(n_vcpus);
+impl Vcpus {
+    fn read_x86_64<R: Read>(mut reader: R, n_vcpus: usize) -> io::Result<Self> {
+        let mut vcpus = Vec::with_capacity(n_vcpus as usize);
 
         for _ in 0..n_vcpus {
             let mut vcpu = x86_64::Vcpu {
@@ -32,12 +27,60 @@ impl DumbDump<ice::File> {
                 gs_kernel_base: 0,
             };
 
-            file.read_exact(bytemuck::bytes_of_mut(&mut vcpu.registers))?;
-            file.read_exact(bytemuck::bytes_of_mut(&mut vcpu.special_registers))?;
-            file.read_exact(bytemuck::bytes_of_mut(&mut vcpu.gs_kernel_base))?;
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.registers))?;
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.special_registers))?;
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.gs_kernel_base))?;
 
             vcpus.push(vcpu);
         }
+
+        Ok(Self::X86_64(vcpus))
+    }
+
+    fn read_aarch64<R: Read>(mut reader: R, n_vcpus: usize) -> io::Result<Self> {
+        let mut vcpus = Vec::with_capacity(n_vcpus as usize);
+
+        for _ in 0..n_vcpus {
+            let mut vcpu = aarch64::Vcpu {
+                registers: Zeroable::zeroed(),
+                special_registers: Zeroable::zeroed(),
+            };
+
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.registers))?;
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.special_registers))?;
+
+            vcpus.push(vcpu);
+        }
+
+        Ok(Self::Aarch64(vcpus))
+    }
+}
+
+pub struct DumbDump<Mem> {
+    vcpus: Vcpus,
+    mem: Mem,
+}
+
+impl DumbDump<ice::File> {
+    pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let mut file = io::BufReader::new(fs::File::open(path)?);
+
+        let mut arch = 0u32;
+        file.read_exact(bytemuck::bytes_of_mut(&mut arch))?;
+
+        let mut n_vcpus = 0u32;
+        file.read_exact(bytemuck::bytes_of_mut(&mut n_vcpus))?;
+
+        let vcpus = match arch {
+            0 => Vcpus::read_x86_64(&mut file, n_vcpus as _)?,
+            1 => Vcpus::read_aarch64(&mut file, n_vcpus as _)?,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unsupported architecture",
+                ))
+            }
+        };
 
         let start = file.stream_position()?;
         let mut file = file.into_inner();
@@ -54,13 +97,26 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
     pub fn write<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let mut out = io::BufWriter::new(fs::File::create(path)?);
 
-        let vcpus = &*self.vcpus;
-        out.write_all(bytemuck::bytes_of(&vcpus.len()))?;
+        match &self.vcpus {
+            Vcpus::X86_64(vcpus) => {
+                out.write_all(bytemuck::bytes_of(&0u32))?;
+                out.write_all(bytemuck::bytes_of(&vcpus.len()))?;
 
-        for vcpu in vcpus {
-            out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
-            out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
-            out.write_all(bytemuck::bytes_of(&vcpu.gs_kernel_base))?;
+                for vcpu in vcpus {
+                    out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.gs_kernel_base))?;
+                }
+            }
+            Vcpus::Aarch64(vcpus) => {
+                out.write_all(bytemuck::bytes_of(&1u32))?;
+                out.write_all(bytemuck::bytes_of(&vcpus.len()))?;
+
+                for vcpu in vcpus {
+                    out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
+                }
+            }
         }
 
         self.mem.dump(&mut out)?;
@@ -70,26 +126,31 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
 }
 
 impl DumbDump<Vec<u8>> {
-    pub fn dump_vm<B: Backend<Arch = arch::X86_64>>(backend: &B) -> io::Result<Self> {
+    pub fn dump_vm<B: Backend>(backend: &B) -> io::Result<Self> {
         let memory = backend.memory();
         let mut mem = vec![0; memory.size() as usize];
         memory.read(PhysicalAddress(0), &mut mem).unwrap();
 
-        let dump = DumbDump {
-            vcpus: backend.vcpus().to_vec(),
-            mem,
+        let vcpus = match backend.vcpus().into_runtime() {
+            arch::runtime::Vcpus::X86_64(vcpus) => Vcpus::X86_64(vcpus.to_vec()),
+            arch::runtime::Vcpus::Aarch64(vcpus) => Vcpus::Aarch64(vcpus.to_vec()),
         };
+
+        let dump = DumbDump { vcpus, mem };
         Ok(dump)
     }
 }
 
 impl<Mem: ice::Memory> Backend for DumbDump<Mem> {
-    type Arch = ice::arch::X86_64;
+    type Arch = arch::RuntimeArchitecture;
     type Memory = Mem;
 
     #[inline]
-    fn vcpus(&self) -> &[x86_64::Vcpu] {
-        &self.vcpus
+    fn vcpus(&self) -> arch::runtime::Vcpus {
+        match &self.vcpus {
+            Vcpus::X86_64(vcpus) => arch::runtime::Vcpus::X86_64(vcpus),
+            Vcpus::Aarch64(vcpus) => arch::runtime::Vcpus::Aarch64(vcpus),
+        }
     }
 
     #[inline]

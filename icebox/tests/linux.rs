@@ -4,11 +4,12 @@ use once_cell::sync::Lazy;
 
 static LINUX: Lazy<Linux<DumbDump<ibc::File>>> = Lazy::new(|| {
     let res = (|| {
-        let backend = DumbDump::read("../data/linux-5.10/dump")?;
+        let backend = DumbDump::read("../data/linux-5.10-x86_64/dump")?;
         let mut syms = ibc::SymbolsIndexer::new();
-        let kallsyms = std::io::BufReader::new(std::fs::File::open("../data/linux-5.10/kallsyms")?);
+        let kallsyms =
+            std::io::BufReader::new(std::fs::File::open("../data/linux-5.10-x86_64/kallsyms")?);
         icebox::os::linux::profile::parse_symbol_file(kallsyms, &mut syms)?;
-        syms.read_object_file("../data/linux-5.10/elf")?;
+        syms.read_object_file("../data/linux-5.10-x86_64/elf")?;
         let profile = icebox::os::linux::Profile::new(syms)?;
         Linux::create(backend, profile)
     })();
