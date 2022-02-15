@@ -193,6 +193,15 @@ impl MmuEntry {
     }
 }
 
+impl core::ops::Sub<u64> for MmuEntry {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, rhs: u64) -> Self {
+        Self(self.0 - rhs)
+    }
+}
+
 impl core::ops::SubAssign<u64> for MmuEntry {
     #[inline]
     fn sub_assign(&mut self, rhs: u64) {

@@ -70,6 +70,13 @@ pub trait Architecture<'a> {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
     ) -> MemoryAccessResult<Option<PhysicalAddress>>;
+
+    fn find_in_kernel_memory<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        needle: &[u8],
+    ) -> MemoryAccessResult<Option<VirtualAddress>>;
 }
 
 trait MmuDesc {
@@ -112,4 +119,77 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
 
     let phys_addr = mmu_entry.take_bits(12, Mmu::ADDR_BITS) + (addr.0 & mask(12));
     Ok(Some(phys_addr))
+}
+
+fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
+    memory: &M,
+    table_addr: PhysicalAddress,
+    base_addr: VirtualAddress,
+    finder: &memchr::memmem::Finder,
+    buf: &mut [u8],
+    levels: &[(u32, bool)],
+) -> MemoryAccessResult<Option<VirtualAddress>> {
+    let (shift, has_large, rest) = match levels {
+        [] => return Ok(None),
+        [(shift, has_large), rest @ ..] => (*shift, *has_large, rest),
+    };
+
+    let mut table = [MmuEntry(0u64); 512];
+    memory.read(table_addr, bytemuck::bytes_of_mut(&mut table))?;
+    let page_size = 1 << shift;
+
+    let skip = if levels.len() == Mmu::LEVELS.len() {
+        0x140
+    } else {
+        0
+    };
+
+    for (index, entry) in table
+        .into_iter()
+        .enumerate()
+        .skip(skip)
+        .filter(|(_, mmu_entry)| Mmu::is_valid(*mmu_entry))
+    {
+        let base_addr = base_addr + index as u64 * page_size;
+        let entry = entry - Mmu::MEM_OFFSET;
+
+        if rest.is_empty() || (has_large && Mmu::is_large(entry)) {
+            let addr = entry.take_bits(shift, Mmu::ADDR_BITS);
+            match memory.search(addr, page_size, finder, buf) {
+                Ok(Some(i)) => return Ok(Some(base_addr + i as u64)),
+                Ok(None) | Err(crate::MemoryAccessError::OutOfBounds) => (),
+                Err(err) => return Err(err),
+            }
+        } else {
+            let table_addr = entry.take_bits(12, Mmu::ADDR_BITS);
+            let result = find_in_kernel_memory_inner::<Mmu, M>(
+                memory, table_addr, base_addr, finder, buf, rest,
+            )?;
+            if let Some(addr) = result {
+                return Ok(Some(addr));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn find_in_kernel_memory<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
+    memory: &M,
+    mmu_addr: PhysicalAddress,
+    needle: &[u8],
+) -> MemoryAccessResult<Option<VirtualAddress>> {
+    let mut buf = alloc::vec![0; (1 << 21) + needle.len()];
+    let base_addr = VirtualAddress(crate::mask_range(Mmu::ADDR_BITS, 64));
+    let finder = memchr::memmem::Finder::new(needle);
+    let table_addr = MmuEntry(mmu_addr.0).take_bits(12, Mmu::ADDR_BITS);
+
+    find_in_kernel_memory_inner::<Mmu, M>(
+        memory,
+        table_addr,
+        base_addr,
+        &finder,
+        &mut buf,
+        Mmu::LEVELS,
+    )
 }

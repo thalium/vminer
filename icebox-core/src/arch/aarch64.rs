@@ -156,6 +156,15 @@ impl<'a> super::Architecture<'a> for Aarch64 {
     ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
         super::virtual_to_physical::<MmuDesc, M>(memory, mmu_addr, addr)
     }
+
+    fn find_in_kernel_memory<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        needle: &[u8],
+    ) -> crate::MemoryAccessResult<Option<VirtualAddress>> {
+        super::find_in_kernel_memory::<MmuDesc, M>(memory, mmu_addr, needle)
+    }
 }
 
 #[repr(C)]

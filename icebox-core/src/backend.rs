@@ -80,6 +80,16 @@ pub trait Backend {
             .find_kernel_pgd(self.memory())
             .ok_or_else(|| "could not find kernel page directory".into())
     }
+
+    #[inline]
+    fn find_in_kernel_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        needle: &[u8],
+    ) -> MemoryAccessResult<Option<VirtualAddress>> {
+        self.arch()
+            .find_in_kernel_memory(self.memory(), mmu_addr, needle)
+    }
 }
 
 impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {

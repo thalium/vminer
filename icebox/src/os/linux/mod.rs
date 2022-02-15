@@ -105,8 +105,7 @@ pub fn get_aslr<B: ice::Backend>(
     kpgd: PhysicalAddress,
 ) -> IceResult<i64> {
     let base_banner_addr = profile.syms.get_addr("linux_banner")?;
-    let (banner_addr, _) =
-        get_banner_addr(backend, kpgd)?.ok_or("could not find banner address")?;
+    let banner_addr = get_banner_addr(backend, kpgd)?.ok_or("could not find banner address")?;
 
     Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
 }
@@ -288,29 +287,8 @@ impl<B: ice::Backend> Linux<B> {
 fn get_banner_addr<B: ice::Backend>(
     backend: &B,
     mmu_addr: PhysicalAddress,
-) -> ice::MemoryAccessResult<Option<(VirtualAddress, PhysicalAddress)>> {
-    const OFFSET: usize = 0x1000;
-    const TARGET: &[u8] = b"Linux version";
-
-    const KERNEL_START: u64 = 0xffffffff80000000;
-    const KERNEL_END: u64 = 0xfffffffffff00000;
-
-    let mut buf = [0; OFFSET + TARGET.len()];
-    let finder = memchr::memmem::Finder::new(TARGET);
-
-    for addr in (KERNEL_START..KERNEL_END).step_by(OFFSET) {
-        let addr = VirtualAddress(addr);
-        if let Some(paddr) = backend.virtual_to_physical(mmu_addr, addr)? {
-            backend.read_memory(paddr, &mut buf)?;
-
-            if let Some(offset) = finder.find(&buf) {
-                let offset = offset as u64;
-                return Ok(Some((addr + offset, paddr + offset)));
-            }
-        }
-    }
-
-    Ok(None)
+) -> ice::MemoryAccessResult<Option<VirtualAddress>> {
+    backend.find_in_kernel_memory(mmu_addr, b"Linux version")
 }
 
 impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {

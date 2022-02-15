@@ -237,4 +237,16 @@ impl<'a> arch::Architecture<'a> for Architecture {
             Self::Aarch64(arch) => arch.virtual_to_physical(memory, mmu_addr, addr),
         }
     }
+
+    fn find_in_kernel_memory<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        needle: &[u8],
+    ) -> crate::MemoryAccessResult<Option<VirtualAddress>> {
+        match self {
+            Self::X86_64(arch) => arch.find_in_kernel_memory(memory, mmu_addr, needle),
+            Self::Aarch64(arch) => arch.find_in_kernel_memory(memory, mmu_addr, needle),
+        }
+    }
 }
