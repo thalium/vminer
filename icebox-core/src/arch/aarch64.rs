@@ -12,6 +12,14 @@ pub struct Vcpu {
     pub special_registers: SpecialRegisters,
 }
 
+impl Vcpu {
+    fn cleaned_ttbr1(&self) -> PhysicalAddress {
+        use super::MmuDesc as _;
+        PhysicalAddress(self.special_registers.ttbr1_el1 & crate::mask(MmuDesc::ADDR_BITS))
+            - MmuDesc::MEM_OFFSET
+    }
+}
+
 impl<'a> super::Vcpu<'a> for &'a Vcpu {
     type Arch = Aarch64;
 
@@ -65,15 +73,41 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 
     #[inline]
-    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, _memory: &M) -> Option<PhysicalAddress> {
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress> {
+        use super::{Architecture, Vcpu};
+
         for vcpu in *self {
-            if VirtualAddress(vcpu.registers.pc).is_kernel() {
-                let addr = PhysicalAddress(vcpu.special_registers.ttbr1_el1 & crate::mask(48));
-                return Some(addr);
+            if vcpu.instruction_pointer().is_kernel() {
+                return Some(vcpu.cleaned_ttbr1());
             }
         }
 
-        None
+        // To check if a TTBR is valid, try to translate valid kernel addresses with it
+        let mem_size = memory.size();
+        let test = |addr| {
+            self.iter().all(|vcpu| {
+                let test_addr = VirtualAddress(vcpu.special_registers.vbar_el1);
+                match Aarch64.virtual_to_physical(memory, addr, test_addr) {
+                    Ok(Some(addr)) => addr.0 < mem_size,
+                    _ => false,
+                }
+            })
+        };
+
+        // Try pages near a "wrong" TTBR1
+        if let Some(vcpu) = self
+            .iter()
+            .find(|vcpu| vcpu.instruction_pointer().is_kernel())
+        {
+            for i in -5..6 {
+                let ttbr1 = vcpu.cleaned_ttbr1() + i * 4096i64;
+                if test(ttbr1) {
+                    return Some(ttbr1);
+                }
+            }
+        }
+
+        super::try_all_addresses(test)
     }
 
     #[inline]
@@ -116,11 +150,11 @@ impl<'a> super::Architecture<'a> for Aarch64 {
 
     fn virtual_to_physical<M: crate::Memory + ?Sized>(
         &self,
-        _memory: &M,
-        _mmu_addr: PhysicalAddress,
-        _addr: VirtualAddress,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
     ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
-        todo!()
+        super::virtual_to_physical::<MmuDesc, M>(memory, mmu_addr, addr)
     }
 }
 
@@ -140,4 +174,5 @@ pub struct SpecialRegisters {
     pub sp_el1: u64,
     pub ttbr0_el1: u64,
     pub ttbr1_el1: u64,
+    pub vbar_el1: u64,
 }

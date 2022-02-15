@@ -52,6 +52,7 @@ pub struct special_regs {
     sp_el1: u64,
     ttbr0_el1: u64,
     ttbr1_el1: u64,
+    vbar_el1: u64,
 }
 
 #[repr(C)]
@@ -102,6 +103,7 @@ pub fn get_special_regs(vcpu_fd: i32) -> io::Result<special_regs> {
         sp_el1: get_one_reg(vcpu_fd, 0x6030000000100044)?,
         ttbr0_el1: get_one_reg(vcpu_fd, 0x603000000013c100)?,
         ttbr1_el1: get_one_reg(vcpu_fd, 0x603000000013c101)?,
+        vbar_el1: get_one_reg(vcpu_fd, 0x603000000013c600)?,
     })
 }
 
