@@ -55,8 +55,7 @@ impl core::ops::BitOrAssign for VmaFlags {
 
 #[derive(Debug, Clone)]
 pub struct StackFrame {
-    pub start: VirtualAddress,
-    pub size: u64,
+    pub range: Option<(VirtualAddress, u64)>,
     pub stack_pointer: VirtualAddress,
     pub instruction_pointer: VirtualAddress,
     pub vma: Vma,

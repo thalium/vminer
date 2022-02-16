@@ -266,8 +266,7 @@ pub fn iter<B: ibc::Backend>(
     let mut frame = ibc::StackFrame {
         instruction_pointer,
         stack_pointer,
-        size: 0,
-        start: VirtualAddress(0),
+        range: None,
         vma: ibc::Vma(VirtualAddress(0)),
         file: None,
     };
@@ -284,21 +283,30 @@ pub fn iter<B: ibc::Backend>(
         let data = ctx.get_unwind_data(vma.file, frame.instruction_pointer)?;
         let eh_frame = data.eh_frame();
 
-        let fde = eh_frame
-            .fde_for_address(
-                &data.bases,
-                frame.instruction_pointer.0,
-                |this, bases, offset| {
-                    cie_cache
-                        .entry(offset)
-                        .or_insert_with(|| this.cie_from_offset(bases, offset))
-                        .clone()
-                },
-            )
-            .unwrap();
+        let fde = eh_frame.fde_for_address(
+            &data.bases,
+            frame.instruction_pointer.0,
+            |this, bases, offset| {
+                cie_cache
+                    .entry(offset)
+                    .or_insert_with(|| this.cie_from_offset(bases, offset))
+                    .clone()
+            },
+        );
 
-        frame.start = VirtualAddress(fde.initial_address());
-        frame.size = fde.len();
+        let fde = match fde {
+            Ok(fde) => fde,
+            Err(err) => {
+                // Even without the FDE, we can still send the incomplete frame
+                // we got with the previous one
+                log::debug!("Cannot get FDE: {err:?}");
+                frame.range = None;
+                f(&frame)?;
+                return Ok(());
+            }
+        };
+
+        frame.range = Some((VirtualAddress(fde.initial_address()), fde.len()));
 
         f(&frame)?;
 

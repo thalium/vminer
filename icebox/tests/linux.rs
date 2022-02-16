@@ -135,8 +135,8 @@ fn vmas() {
 fn callstack() {
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct StackFrame {
-        start: VirtualAddress,
-        size: u64,
+        start: Option<VirtualAddress>,
+        size: Option<u64>,
         stack_pointer: VirtualAddress,
         instruction_pointer: VirtualAddress,
     }
@@ -150,12 +150,16 @@ fn callstack() {
     linux
         .process_callstack(proc, &mut |frame| {
             let &ibc::StackFrame {
-                start,
-                size,
+                range,
                 stack_pointer,
                 instruction_pointer,
                 ..
             } = frame;
+
+            let (start, size) = match range {
+                Some((start, end)) => (Some(start), Some(end)),
+                None => (None, None),
+            };
 
             frames.push(StackFrame {
                 start,
