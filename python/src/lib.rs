@@ -437,13 +437,13 @@ struct StackFrame {
 #[pymethods]
 impl StackFrame {
     #[getter]
-    fn start(&self) -> u64 {
-        self.frame.start.0
+    fn start(&self) -> Option<u64> {
+        self.frame.range.map(|(start, _)| start.0)
     }
 
     #[getter]
-    fn size(&self) -> u64 {
-        self.frame.size
+    fn size(&self) -> Option<u64> {
+        self.frame.range.map(|(_, size)| size)
     }
 
     #[getter]
