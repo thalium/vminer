@@ -13,6 +13,12 @@ pub struct Vcpu {
 }
 
 impl Vcpu {
+    fn cleaned_ttbr0(&self) -> PhysicalAddress {
+        use super::MmuDesc as _;
+        PhysicalAddress(self.special_registers.ttbr0_el1 & crate::mask(MmuDesc::ADDR_BITS))
+            - MmuDesc::MEM_OFFSET
+    }
+
     fn cleaned_ttbr1(&self) -> PhysicalAddress {
         use super::MmuDesc as _;
         PhysicalAddress(self.special_registers.ttbr1_el1 & crate::mask(MmuDesc::ADDR_BITS))
@@ -46,6 +52,14 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     #[inline]
     fn stack_pointer(&self) -> VirtualAddress {
         VirtualAddress(self.registers.sp)
+    }
+
+    fn pgd(&self) -> PhysicalAddress {
+        if (self.registers.pc as i64) < 0 {
+            self.cleaned_ttbr1()
+        } else {
+            self.cleaned_ttbr0()
+        }
     }
 
     #[inline]

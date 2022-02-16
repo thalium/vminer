@@ -176,9 +176,41 @@ impl<B: ice::Backend> Linux<B> {
     }
 
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
-        let current_task = self.per_cpu(cpuid)? + self.profile.fast_syms.current_task;
-        let addr = self.read_kernel_value(current_task)?;
-        Ok(ibc::Thread(addr))
+        match self.profile.fast_syms.current_task {
+            Some(current_task) => {
+                let current_task = self.per_cpu(cpuid)? + current_task;
+                let addr = self.read_kernel_value(current_task)?;
+                Ok(ibc::Thread(addr))
+            }
+            None => {
+                // The symbol `current_task` may not exist (eg on Aach64, where
+                // Linux gets it from register `sp_el0`, which I didn't manage
+                // to get from KVM).
+                // In this case we find it the poor man's way: we iterate the
+                // process list and find a matching PGD.
+                //
+                // FIXME: This will always yield the thread group leader instead
+                // of the current thread
+
+                use ibc::{
+                    arch::{Vcpu, Vcpus},
+                    Os,
+                };
+
+                let vcpu_pgd = self.backend.vcpus().get(cpuid).pgd();
+
+                let mut current_task = None;
+                self.for_each_process(&mut |proc| {
+                    let proc_pgd = self.process_pgd(proc)?;
+                    if proc_pgd == vcpu_pgd {
+                        current_task = Some(ibc::Thread(proc.0));
+                    }
+                    Ok(())
+                })?;
+
+                current_task.ok_or_else(|| ibc::IceError::new("cannot find current thread"))
+            }
+        }
     }
 
     fn iterate_list<T, O, F>(
@@ -346,8 +378,16 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn process_pgd(&self, proc: ice::Process) -> IceResult<PhysicalAddress> {
         let mm = self.process_mm(proc)?;
-        let pgd = self.read_struct_pointer(mm, |mms| mms.pgd)?;
-        self.kernel_to_physical(pgd)
+        if mm.is_null() {
+            if self.process_is_kernel(proc)? {
+                Ok(self.kpgd)
+            } else {
+                Err(ibc::IceError::new("process has NULL mm"))
+            }
+        } else {
+            let pgd = self.read_struct_pointer(mm, |mms| mms.pgd)?;
+            self.kernel_to_physical(pgd)
+        }
     }
 
     fn process_exe(&self, proc: ice::Process) -> IceResult<Option<ibc::Path>> {

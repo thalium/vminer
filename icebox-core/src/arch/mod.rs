@@ -49,6 +49,8 @@ pub trait Vcpu<'a> {
 
     fn stack_pointer(&self) -> VirtualAddress;
 
+    fn pgd(&self) -> PhysicalAddress;
+
     fn kernel_per_cpu(&self) -> Option<VirtualAddress>;
 
     fn into_runtime(self) -> runtime::Vcpu<'a>;

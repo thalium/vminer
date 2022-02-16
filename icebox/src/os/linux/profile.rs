@@ -6,7 +6,7 @@ use ice::VirtualAddress;
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_offset: VirtualAddress,
-    pub(crate) current_task: u64,
+    pub(crate) current_task: Option<u64>,
 
     pub(super) init_task: ice::VirtualAddress,
 }
@@ -215,7 +215,7 @@ pub struct Profile {
 impl Profile {
     pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
         let per_cpu_offset = syms.get_addr("__per_cpu_offset")?;
-        let current_task = syms.get_addr("current_task")?.0;
+        let current_task = syms.get_addr("current_task").ok().map(|sym| sym.0);
         let init_task = syms.get_addr("init_task")?;
 
         let layouts = Layouts::new(&syms)?;

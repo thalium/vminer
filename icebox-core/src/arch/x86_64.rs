@@ -41,6 +41,10 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
         VirtualAddress(self.registers.rsp)
     }
 
+    fn pgd(&self) -> PhysicalAddress {
+        PhysicalAddress(self.special_registers.cr3 & crate::mask_range(12, 48))
+    }
+
     #[inline]
     fn kernel_per_cpu(&self) -> Option<VirtualAddress> {
         let per_cpu = VirtualAddress(self.special_registers.gs.base);

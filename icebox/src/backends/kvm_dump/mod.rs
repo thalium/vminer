@@ -11,6 +11,7 @@ use std::{
     path::Path,
 };
 
+#[derive(Debug)]
 enum Vcpus {
     X86_64(Vec<arch::x86_64::Vcpu>),
     Aarch64(Vec<arch::aarch64::Vcpu>),
@@ -56,6 +57,7 @@ impl Vcpus {
     }
 }
 
+#[derive(Debug)]
 pub struct DumbDump<Mem> {
     vcpus: Vcpus,
     mem: Mem,
