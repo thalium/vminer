@@ -41,6 +41,10 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
         VirtualAddress(self.registers.rsp)
     }
 
+    fn base_pointer(&self) -> Option<VirtualAddress> {
+        Some(VirtualAddress(self.registers.rbp))
+    }
+
     fn pgd(&self) -> PhysicalAddress {
         PhysicalAddress(self.special_registers.cr3 & crate::mask_range(12, 48))
     }

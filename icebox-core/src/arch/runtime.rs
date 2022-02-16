@@ -52,6 +52,14 @@ impl<'a> arch::Vcpu<'a> for Vcpu<'a> {
         }
     }
 
+    #[inline]
+    fn base_pointer(&self) -> Option<VirtualAddress> {
+        match self {
+            Vcpu::X86_64(vcpu) => vcpu.base_pointer(),
+            Vcpu::Aarch64(vcpu) => vcpu.base_pointer(),
+        }
+    }
+
     fn pgd(&self) -> PhysicalAddress {
         match self {
             Vcpu::X86_64(vcpu) => vcpu.pgd(),

@@ -14,7 +14,6 @@ struct Vma {
     start: VirtualAddress,
     end: VirtualAddress,
     vma: ibc::Vma,
-    perms: ibc::VmaFlags,
     file: ibc::Path,
 }
 
@@ -55,7 +54,6 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                     start: linux.vma_start(vma)?,
                     end: linux.vma_end(vma)?,
                     vma,
-                    perms: ibc::VmaFlags(linux.vma_flags(vma)?.0 & 7),
                     file,
                 });
             }
@@ -157,7 +155,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         let mut vma_data = Vec::with_capacity(0x1000);
 
         for vma in &self.vmas {
-            if vma.perms.0 != ibc::VmaFlags::READ.0 || vma.file != exe_path {
+            if vma.file != exe_path {
                 continue;
             }
 
@@ -169,7 +167,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 continue;
             }
 
-            log::trace!("Trying VMA starting at {:x}", vma.start);
+            log::debug!("Trying VMA starting at {:x}", vma.start);
 
             for i in memchr::memmem::find_iter(&vma_data, b"\x01") {
                 let header = gimli::EhFrameHdr::new(&vma_data[i..], endian);
@@ -207,11 +205,12 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 let fde = eh_frame.fde_for_address(&bases, ip.0, |this, bases, offset| {
                     this.cie_from_offset(bases, offset)
                 });
-
                 if fde.is_err() {
                     log::trace!("Incomplete .eh_frame");
                     continue;
                 }
+
+                log::debug!("Found .eh_frame section at 0x{eh_frame_addr:x}");
 
                 return Ok(UnwindData {
                     bases,
@@ -238,14 +237,15 @@ pub fn iter<B: ibc::Backend>(
     let mut unwind_ctx = gimli::UnwindContext::new();
 
     let vcpus = linux.backend.vcpus();
-    let (rip, rsp, rbp) = 'res: loop {
+    let registers = dwarf_registers(vcpus.arch());
+    let (instruction_pointer, stack_pointer, mut base_pointer) = 'res: loop {
         for i in 0..vcpus.count() {
             if linux.current_process(i)? == proc {
                 let vcpu = vcpus.get(i);
                 break 'res (
                     vcpu.instruction_pointer(),
                     vcpu.stack_pointer(),
-                    vcpu.into_runtime().as_x86_64().unwrap().registers.rbp,
+                    vcpu.base_pointer(),
                 );
             }
         }
@@ -253,15 +253,24 @@ pub fn iter<B: ibc::Backend>(
         return Err(IceError::new("Not a running process"));
     };
 
+    let get_base_pointer = |bp: Option<VirtualAddress>| {
+        bp.ok_or_else(|| IceError::new("missing required register rpb"))
+    };
+
+    let unsupported_register = |gimli::Register(n), missing: &str| {
+        IceError::new(format!(
+            "getting {missing} requires unsupported register {n}"
+        ))
+    };
+
     let mut frame = ibc::StackFrame {
-        instruction_pointer: rip,
-        stack_pointer: rsp,
+        instruction_pointer,
+        stack_pointer,
         size: 0,
         start: VirtualAddress(0),
         vma: ibc::Vma(VirtualAddress(0)),
         file: None,
     };
-    let mut rbp = VirtualAddress(rbp);
 
     loop {
         let vma = ctx
@@ -303,54 +312,75 @@ pub fn iter<B: ibc::Backend>(
             .unwrap();
 
         let cfa = match row.cfa() {
-            gimli::CfaRule::RegisterAndOffset { register, offset } => match register {
-                gimli::Register(6) => rbp + *offset,
-                gimli::Register(7) => frame.stack_pointer + *offset,
-                gimli::Register(n) => {
-                    return Err(IceError::new(format!("unsupported register in CFA: {}", n)))
-                }
+            &gimli::CfaRule::RegisterAndOffset { register, offset } => match register {
+                reg if reg == registers.sp => frame.stack_pointer + offset,
+                reg if Some(reg) == registers.bp => get_base_pointer(base_pointer)? + offset,
+                reg => return Err(unsupported_register(reg, "CFA")),
             },
             gimli::CfaRule::Expression(_) => {
                 return Err(IceError::new("unsupported DWARF expression"))
             }
         };
 
-        let old_bp = rbp;
+        let old_bp = base_pointer;
         let old_sp = frame.stack_pointer;
         let old_ip = frame.instruction_pointer;
 
-        rbp = match row.register(gimli::Register(6)) {
-            gimli::RegisterRule::SameValue => rbp,
-            gimli::RegisterRule::Offset(offset) => ctx.read_value(cfa + offset).valid()?,
-            gimli::RegisterRule::ValOffset(offset) => cfa + offset,
-            gimli::RegisterRule::Register(register) => match register {
-                gimli::Register(6) => old_bp,
-                gimli::Register(7) => old_sp,
-                gimli::Register(16) => old_ip,
-                _ => return Err(IceError::new("unsupported register in CFA")),
-            },
-            _ => {
-                log::debug!("cannot retreive rbp");
-                rbp
-            }
+        base_pointer = match registers.bp {
+            None => None,
+            Some(bp_reg) => (|| {
+                Ok(Some(match row.register(bp_reg) {
+                    gimli::RegisterRule::SameValue => get_base_pointer(base_pointer)?,
+                    gimli::RegisterRule::Offset(offset) => ctx.read_value(cfa + offset).valid()?,
+                    gimli::RegisterRule::ValOffset(offset) => cfa + offset,
+                    gimli::RegisterRule::Register(register) => match register {
+                        reg if reg == registers.sp => old_sp,
+                        reg if reg == registers.ip => old_ip,
+                        reg if Some(reg) == registers.bp => get_base_pointer(old_bp)?,
+                        reg => return Err(unsupported_register(reg, "base pointer")),
+                    },
+                    _ => return Ok(None),
+                }))
+            })()?,
         };
 
-        frame.instruction_pointer = match row.register(gimli::Register(16)) {
+        frame.instruction_pointer = match row.register(registers.ip) {
             gimli::RegisterRule::Undefined => break,
             gimli::RegisterRule::SameValue => frame.instruction_pointer,
             gimli::RegisterRule::Offset(offset) => ctx.read_value(cfa + offset).valid()?,
             gimli::RegisterRule::ValOffset(offset) => cfa + offset,
             gimli::RegisterRule::Register(register) => match register {
-                gimli::Register(6) => old_bp,
-                gimli::Register(7) => old_sp,
-                gimli::Register(16) => old_ip,
-                _ => return Err(IceError::new("unsupported register in CFA")),
+                reg if reg == registers.sp => old_sp,
+                reg if reg == registers.ip => old_ip,
+                reg if Some(reg) == registers.bp => get_base_pointer(old_bp)?,
+                reg => return Err(unsupported_register(reg, "instruction pointer")),
             },
-            _ => return Err(IceError::new("cannot retreive instruction pointer")),
+            _ => return Err(IceError::new("cannot retrieve instruction pointer")),
         };
 
         frame.stack_pointer = cfa;
     }
 
     Ok(())
+}
+
+struct DwarfRegisters {
+    ip: gimli::Register,
+    sp: gimli::Register,
+    bp: Option<gimli::Register>,
+}
+
+fn dwarf_registers<A: for<'a> ibc::Architecture<'a>>(arch: A) -> DwarfRegisters {
+    match arch.into_runtime() {
+        ibc::arch::RuntimeArchitecture::X86_64(_) => DwarfRegisters {
+            ip: gimli::X86_64::RA,
+            sp: gimli::X86_64::RSP,
+            bp: Some(gimli::X86_64::RBP),
+        },
+        ibc::arch::RuntimeArchitecture::Aarch64(_) => DwarfRegisters {
+            ip: gimli::AArch64::X30,
+            sp: gimli::AArch64::SP,
+            bp: None,
+        },
+    }
 }

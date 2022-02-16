@@ -54,6 +54,10 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
         VirtualAddress(self.registers.sp)
     }
 
+    fn base_pointer(&self) -> Option<VirtualAddress> {
+        None
+    }
+
     fn pgd(&self) -> PhysicalAddress {
         if (self.registers.pc as i64) < 0 {
             self.cleaned_ttbr1()
