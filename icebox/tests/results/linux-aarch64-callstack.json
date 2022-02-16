@@ -1,0 +1,56 @@
+[
+  {
+    "start": 187650564129436,
+    "size": 172,
+    "stack_pointer": 281474793762240,
+    "instruction_pointer": 187650564129604
+  },
+  {
+    "start": 187650564130160,
+    "size": 28,
+    "stack_pointer": 281474793762400,
+    "instruction_pointer": 187650564130176
+  },
+  {
+    "start": 187650564129736,
+    "size": 64,
+    "stack_pointer": 281474793762432,
+    "instruction_pointer": 187650564129756
+  },
+  {
+    "start": 187650564130068,
+    "size": 48,
+    "stack_pointer": 281474793762480,
+    "instruction_pointer": 187650564130092
+  },
+  {
+    "start": 187650564355112,
+    "size": 260,
+    "stack_pointer": 281474793762512,
+    "instruction_pointer": 187650564355148
+  },
+  {
+    "start": 187650564129980,
+    "size": 88,
+    "stack_pointer": 281474793762560,
+    "instruction_pointer": 187650564130044
+  },
+  {
+    "start": 187650564129608,
+    "size": 48,
+    "stack_pointer": 281474793762640,
+    "instruction_pointer": 187650564129648
+  },
+  {
+    "start": 281473770844464,
+    "size": 476,
+    "stack_pointer": 281474793762656,
+    "instruction_pointer": 281473770844696
+  },
+  {
+    "start": null,
+    "size": null,
+    "stack_pointer": 281474793762992,
+    "instruction_pointer": 187650564129180
+  }
+]

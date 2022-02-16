@@ -1,26 +1,55 @@
+use std::fmt;
+
 use ibc::{IceResult, Os, VirtualAddress};
 use icebox::{backends::kvm_dump::DumbDump, os::Linux};
 use once_cell::sync::Lazy;
 
-static LINUX: Lazy<Linux<DumbDump<ibc::File>>> = Lazy::new(|| {
-    let res = (|| {
-        let backend = DumbDump::read("../data/linux-5.10-x86_64/dump")?;
-        let mut syms = ibc::SymbolsIndexer::new();
-        let kallsyms =
-            std::io::BufReader::new(std::fs::File::open("../data/linux-5.10-x86_64/kallsyms")?);
-        icebox::os::linux::profile::parse_symbol_file(kallsyms, &mut syms)?;
-        syms.read_object_file("../data/linux-5.10-x86_64/elf")?;
-        let profile = icebox::os::linux::Profile::new(syms)?;
-        Linux::create(backend, profile)
-    })();
-    res.expect("Failed to initialize OS")
-});
+#[derive(Clone, Copy)]
+enum Arch {
+    X86_64,
+    Aarch64,
+}
 
-fn assert_match_expected<T>(name: &str, result: &T)
+impl Arch {
+    fn linux(self) -> &'static Linux<impl ibc::Backend> {
+        match self {
+            Arch::X86_64 => &LINUX_X86_64,
+            Arch::Aarch64 => &LINUX_AARCH64,
+        }
+    }
+}
+
+impl fmt::Display for Arch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::X86_64 => f.write_str("x86_64"),
+            Self::Aarch64 => f.write_str("aarch64"),
+        }
+    }
+}
+
+fn read_linux(arch: Arch) -> IceResult<Linux<DumbDump<ibc::File>>> {
+    let backend = DumbDump::read(format!("../data/linux-5.10-{arch}/dump"))?;
+    let mut syms = ibc::SymbolsIndexer::new();
+    let kallsyms = std::io::BufReader::new(std::fs::File::open(format!(
+        "../data/linux-5.10-{arch}/kallsyms"
+    ))?);
+    icebox::os::linux::profile::parse_symbol_file(kallsyms, &mut syms)?;
+    syms.read_object_file(format!("../data/linux-5.10-{arch}/elf"))?;
+    let profile = icebox::os::linux::Profile::new(syms)?;
+    Linux::create(backend, profile)
+}
+
+static LINUX_X86_64: Lazy<Linux<DumbDump<ibc::File>>> =
+    Lazy::new(|| read_linux(Arch::X86_64).expect("Failed to initialize OS"));
+static LINUX_AARCH64: Lazy<Linux<DumbDump<ibc::File>>> =
+    Lazy::new(|| read_linux(Arch::Aarch64).expect("Failed to initialize OS"));
+
+fn assert_match_expected<T>(arch: Arch, name: &str, result: &T)
 where
     T: serde::Serialize + serde::de::DeserializeOwned + Eq + std::fmt::Debug,
 {
-    let result_path = format!("tests/results/linux-{name}.json");
+    let result_path = format!("tests/results/linux-{arch}-{name}.json");
 
     if std::env::var_os("ICEBOX_BLESS_TESTS").is_some() {
         let mut file = std::io::BufWriter::new(std::fs::File::create(&result_path).unwrap());
@@ -33,8 +62,7 @@ where
     assert_eq!(result, &expected);
 }
 
-#[test]
-fn proc_tree() {
+fn proc_tree(arch: Arch) {
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct Thread {
         tid: u32,
@@ -81,17 +109,27 @@ fn proc_tree() {
             threads,
         })
     }
-    let linux = &*LINUX;
 
+    let linux = arch.linux();
     let init = linux.init_process().unwrap();
     let procs = collect_proc_tree(linux, init).unwrap();
 
-    assert_match_expected("proc-tree", &procs);
+    assert_match_expected(arch, "proc-tree", &procs);
 }
 
 #[test]
-fn current_process() {
-    let linux = &*LINUX;
+fn proc_tree_x86_64() {
+    proc_tree(Arch::X86_64)
+}
+
+#[test]
+fn proc_tree_aarch64() {
+    proc_tree(Arch::Aarch64)
+}
+
+#[test]
+fn current_process_x86_64() {
+    let linux = Arch::X86_64.linux();
 
     let proc = linux.current_process(0).unwrap();
     assert_eq!(linux.process_pid(proc).unwrap(), 0);
@@ -101,7 +139,14 @@ fn current_process() {
 }
 
 #[test]
-fn vmas() {
+fn current_process_aarch64() {
+    let linux = Arch::Aarch64.linux();
+
+    let proc = linux.current_process(0).unwrap();
+    assert_eq!(linux.process_pid(proc).unwrap(), 420);
+}
+
+fn vmas(arch: Arch) {
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct Vma {
         start: VirtualAddress,
@@ -109,10 +154,9 @@ fn vmas() {
         path: Option<String>,
     }
 
-    let linux = &*LINUX;
+    let linux = arch.linux();
 
     let proc = linux.find_process_by_name("callstack").unwrap().unwrap();
-    assert_eq!(linux.process_pid(proc).unwrap(), 651);
 
     let mut vmas = Vec::new();
     linux
@@ -128,11 +172,20 @@ fn vmas() {
         })
         .unwrap();
 
-    assert_match_expected("vmas", &vmas);
+    assert_match_expected(arch, "vmas", &vmas);
 }
 
 #[test]
-fn callstack() {
+fn vmas_x86_64() {
+    vmas(Arch::X86_64)
+}
+
+#[test]
+fn vmas_aarch64() {
+    vmas(Arch::Aarch64)
+}
+
+fn callstack(arch: Arch) {
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct StackFrame {
         start: Option<VirtualAddress>,
@@ -141,10 +194,12 @@ fn callstack() {
         instruction_pointer: VirtualAddress,
     }
 
-    let linux = &*LINUX;
-
-    let proc = linux.current_process(1).unwrap();
-    assert_eq!(linux.process_pid(proc).unwrap(), 651);
+    let linux = arch.linux();
+    let mut proc = linux.current_process(0).unwrap();
+    if linux.process_is_kernel(proc).unwrap() {
+        proc = linux.current_process(1).unwrap();
+        assert!(!linux.process_is_kernel(proc).unwrap());
+    }
 
     let mut frames = Vec::new();
     linux
@@ -171,5 +226,15 @@ fn callstack() {
         })
         .unwrap();
 
-    assert_match_expected("callstack", &frames);
+    assert_match_expected(arch, "callstack", &frames);
+}
+
+#[test]
+fn callstack_x86_64() {
+    callstack(Arch::X86_64)
+}
+
+#[test]
+fn callstack_aarch64() {
+    callstack(Arch::Aarch64)
 }

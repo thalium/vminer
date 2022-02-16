@@ -80,8 +80,11 @@ jobs:
           path: data
           ssh-key: ${{ secrets.DUMPS_DEPLOY_KEY }}
 
-      - name: Decompress dump
-        run: zstd -d data/linux-5.10/dump.zst -o data/linux-5.10/dump
+      - name: Decompress x86_64 dump
+        run: zstd -d data/linux-5.10-x86_64/dump.zst -o data/linux-5.10-x86_64/dump
+
+      - name: Decompress aarch64 dump
+        run: zstd -d data/linux-5.10-aarch64/dump.zst -o data/linux-5.10-aarch64/dump
 
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
