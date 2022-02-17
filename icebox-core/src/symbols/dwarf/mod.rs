@@ -1,134 +1,13 @@
 #![allow(dead_code)]
 
-use alloc::{boxed::Box, collections::VecDeque, rc::Rc, string::String, vec::Vec};
+use alloc::{collections::VecDeque, rc::Rc, string::String, vec::Vec};
 use core::{cell::Cell, fmt};
 
 use gimli::{DebugStr, UnitOffset};
-use hashbrown::HashMap;
 
 use crate as ice;
 
 mod read;
-
-// pub struct AllLinuxStructs {
-//     task_struct: TaskStructRepr,
-//     thread_info: ThreadInfoRepr,
-// }
-
-trait LinuxValue: 'static {
-    fn get_field(&self, name: &str) -> Option<&dyn LinuxValue>;
-    fn get_field_mut(&mut self, name: &str) -> Option<&mut dyn LinuxValue>;
-}
-
-struct ThreadInfo {}
-
-impl LinuxValue for ThreadInfo {
-    fn get_field(&self, _name: &str) -> Option<&dyn LinuxValue> {
-        None
-    }
-
-    fn get_field_mut(&mut self, _name: &str) -> Option<&mut dyn LinuxValue> {
-        None
-    }
-}
-struct TaskStruct {
-    thread_info: ThreadInfo,
-}
-
-impl LinuxValue for TaskStruct {
-    fn get_field(&self, name: &str) -> Option<&dyn LinuxValue> {
-        match name {
-            "thread_info" => Some(&self.thread_info),
-            _ => None,
-        }
-    }
-
-    fn get_field_mut(&mut self, name: &str) -> Option<&mut dyn LinuxValue> {
-        match name {
-            "thread_info" => Some(&mut self.thread_info),
-            _ => None,
-        }
-    }
-}
-
-trait ValueBuilder {
-    fn name(&self) -> &str;
-    fn size(&self) -> u64;
-    fn build(&self, mem: &[u8]) -> Box<dyn LinuxValue>;
-}
-
-#[derive(Debug)]
-pub struct StructRepr {
-    name: String,
-    size: u64,
-    offsets: Vec<(String, u64)>,
-    //offsets: Vec<(usize, Rc<dyn ValueBuilder>)>,
-}
-
-impl ValueBuilder for StructRepr {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn size(&self) -> u64 {
-        self.size
-    }
-
-    fn build(&self, _mem: &[u8]) -> Box<dyn LinuxValue> {
-        todo!()
-
-        // let mut members = HashMap::with_capacity(self.offsets.len());
-
-        // for (offset, builder) in &self.offsets {
-        //     let value = builder.build(&mem[*offset..]);
-        //     members.insert(builder.name().to_owned(), value);
-        // }
-
-        // Box::new(DynValue { members })
-    }
-}
-
-impl LinuxValue for u64 {
-    fn get_field(&self, _: &str) -> Option<&dyn LinuxValue> {
-        None
-    }
-
-    fn get_field_mut(&mut self, _: &str) -> Option<&mut dyn LinuxValue> {
-        None
-    }
-}
-
-struct U64Builder;
-impl ValueBuilder for U64Builder {
-    fn name(&self) -> &str {
-        "u64"
-    }
-
-    fn size(&self) -> u64 {
-        core::mem::size_of::<Self>() as u64
-    }
-
-    fn build(&self, mem: &[u8]) -> Box<dyn LinuxValue> {
-        let mut bytes = [0; 8];
-        bytes.copy_from_slice(&mem[..8]);
-        let val = u64::from_ne_bytes(bytes);
-        Box::new(val)
-    }
-}
-
-struct DynValue {
-    members: HashMap<String, Box<dyn LinuxValue>>,
-}
-
-impl LinuxValue for DynValue {
-    fn get_field(&self, name: &str) -> Option<&dyn LinuxValue> {
-        self.members.get(name).map(|v| v.as_ref())
-    }
-
-    fn get_field_mut(&mut self, name: &str) -> Option<&mut dyn LinuxValue> {
-        self.members.get_mut(name).map(|v| v.as_mut())
-    }
-}
 
 trait GimliReader: gimli::Reader<Offset = usize> {}
 impl<R: gimli::Reader<Offset = usize>> GimliReader for R {}
