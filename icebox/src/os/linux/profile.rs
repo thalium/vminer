@@ -237,7 +237,6 @@ trait BufRead {
 }
 
 #[cfg(feature = "std")]
-// #[cfg(not(feature = "std"))]
 impl<R: std::io::BufRead> BufRead for R {
     fn read_one_line(&mut self, buf: &mut String) -> IceResult<usize> {
         Ok(self.read_line(buf)?)
@@ -277,10 +276,14 @@ fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ice::SymbolsIndexer)
             break;
         }
 
+        // Each line has this format:
+        // ffffffffba000200 D linux_banner
+
         let sym = (|| {
             let (start, rest) = line.split_at(19);
             let addr = u64::from_str_radix(&start[0..16], 16).ok()?;
 
+            // Filter interesting symbols kinds
             match start.as_bytes()[17] {
                 b'T' | b't' | b'A' | b'D' => (),
                 _ => return None,

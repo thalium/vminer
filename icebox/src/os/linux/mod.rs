@@ -11,6 +11,7 @@ pub use profile::Profile;
 
 use self::profile::{Pointer, StructOffset};
 
+/// Values that we can read from guest memory
 trait Readable: Sized {
     fn read<B: ice::Backend>(linux: &Linux<B>, addr: VirtualAddress) -> IceResult<Self>;
 }
@@ -32,6 +33,8 @@ impl<T> Readable for Pointer<T> {
 trait HasStruct<Layout> {
     fn get_struct_layout(&self) -> &Layout;
 }
+
+// Conversions between core types and kernel pointeurs
 
 impl From<ice::Path> for Pointer<profile::Path> {
     fn from(path: ice::Path) -> Self {
@@ -81,6 +84,9 @@ impl From<Pointer<profile::VmAreaStruct>> for ice::Vma {
     }
 }
 
+/// Cached data for a process
+///
+/// FIXME: should we really keep this ? Maybe only for "complex" fields ?
 #[derive(Default)]
 struct ProcessData {
     name: OnceCell<String>,
@@ -110,10 +116,6 @@ pub fn get_aslr<B: ice::Backend>(
     Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
 }
 
-pub const fn is_kernel_addr(addr: VirtualAddress) -> bool {
-    (addr.0 as i64) < 0
-}
-
 impl<B: ice::Backend> Linux<B> {
     pub fn create(backend: B, profile: Profile) -> IceResult<Self> {
         let kpgd = backend.find_kernel_pgd()?;
@@ -129,10 +131,6 @@ impl<B: ice::Backend> Linux<B> {
         })
     }
 
-    fn kernel_to_physical(&self, addr: VirtualAddress) -> IceResult<PhysicalAddress> {
-        self.backend.virtual_to_physical(self.kpgd, addr).valid()
-    }
-
     fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
         self.backend.read_value_virtual(self.kpgd, addr)
     }
@@ -141,6 +139,9 @@ impl<B: ice::Backend> Linux<B> {
         self.backend.read_virtual_memory(self.kpgd, addr, buf)
     }
 
+    /// Converts a pointer to a struct to a pointer to a field
+    ///
+    /// Generic parameters ensure that the conversion is valid.
     fn read_struct<L, T>(
         &self,
         pointer: Pointer<L>,
@@ -153,6 +154,7 @@ impl<B: ice::Backend> Linux<B> {
         Pointer::new(pointer.addr + offset.offset)
     }
 
+    /// Reads a field from a struct pointer
     fn read_struct_pointer<L, T: Readable>(
         &self,
         pointer: Pointer<L>,
@@ -165,6 +167,7 @@ impl<B: ice::Backend> Linux<B> {
         T::read(self, pointer.addr + offset.offset)
     }
 
+    /// Reads a value behind a pointer
     #[allow(dead_code)]
     fn read_pointer<T: Readable>(&self, pointer: Pointer<T>) -> IceResult<T> {
         T::read(self, pointer.addr)
@@ -213,6 +216,7 @@ impl<B: ice::Backend> Linux<B> {
         }
     }
 
+    /// Iterate a kernel linked list, yielding elements of type `T`
     fn iterate_list<T, O, F>(
         &self,
         head: Pointer<profile::ListHead>,
@@ -279,6 +283,10 @@ impl<B: ice::Backend> Linux<B> {
     }
 
     fn build_path(&self, dentry: Pointer<profile::Dentry>, buf: &mut Vec<u8>) -> IceResult<()> {
+        // Paths start with the last components in the kernel but we want them
+        // to start by the root, so we call ourselves recursively to build the
+        // beginning first
+
         let parent = self.read_struct_pointer(dentry, |d| d.d_parent)?;
         if parent != dentry {
             self.build_path(parent, buf)?;
@@ -308,6 +316,7 @@ impl<B: ice::Backend> Linux<B> {
         let proc = proc.into();
         let mut mm = self.read_struct_pointer(proc, |ts| ts.mm)?;
 
+        // Kernel processes use this instead. This is NULL too on aarch64 though
         if mm.is_null() {
             mm = self.read_struct_pointer(proc, |ts| ts.active_mm)?;
         }
@@ -386,7 +395,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             }
         } else {
             let pgd = self.read_struct_pointer(mm, |mms| mms.pgd)?;
-            self.kernel_to_physical(pgd)
+            self.backend.virtual_to_physical(self.kpgd, pgd).valid()
         }
     }
 

@@ -9,6 +9,8 @@ pub use std::error::Error;
 
 use crate::seal;
 
+// Unfortunately `Error` trait does not exist in `core` (yet ?) so we have to
+// define it ourselves
 #[cfg(not(feature = "std"))]
 pub trait Error: fmt::Display + fmt::Debug {
     #[inline]
@@ -16,6 +18,8 @@ pub trait Error: fmt::Display + fmt::Debug {
         None
     }
 }
+
+// Add a few common conversions for convenience
 
 #[cfg(not(feature = "std"))]
 impl<E> From<E> for Box<dyn Error + Send + Sync>

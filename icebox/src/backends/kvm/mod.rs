@@ -10,6 +10,8 @@ use crate::core::{self as ice, Backend};
 
 mod ptrace;
 
+// Architecture-dependant code goes in these module
+
 #[cfg(target_arch = "x86_64")]
 #[path = "x86_64.rs"]
 mod arch;
@@ -22,6 +24,7 @@ const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
 const FUN_NAME: &[u8] = b"payload\0";
 const TOTAL_LEN: usize = LIB_PATH.len() + FUN_NAME.len();
 
+/// Finds the loading address of a library's text in a process' address space
 fn find_lib(pid: libc::pid_t, name: &str) -> IceResult<u64> {
     let path = format!("/proc/{}/maps", pid);
     let file = fs::File::open(&path)?;
@@ -42,6 +45,9 @@ fn find_lib(pid: libc::pid_t, name: &str) -> IceResult<u64> {
     )))
 }
 
+/// Calls `dlerror` in a traced process
+///
+/// This is quite useful for debugging, but hopefully should never get called
 #[cold]
 fn get_dlerror(tracee: &ptrace::Tracee, dlerror: u64) -> IceError {
     let error: IceResult<_> = (|| {
@@ -69,6 +75,9 @@ fn get_dlerror(tracee: &ptrace::Tracee, dlerror: u64) -> IceError {
     }
 }
 
+/// Gets `errno` from a traced process
+///
+/// This is quite useful for debugging, but hopefully should never get called
 #[cold]
 fn get_errno(tracee: &ptrace::Tracee, errno: u64) -> IceError {
     let errno: IceResult<_> = (|| {
@@ -85,8 +94,12 @@ fn get_errno(tracee: &ptrace::Tracee, errno: u64) -> IceError {
     }
 }
 
+/// Attach to a process, and make it execute our payload
 #[allow(clippy::fn_to_numeric_cast)]
 fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
+    // Find remote function addresses so we can call them.
+    // Use our own functions to get the offset within the lib, and read /proc
+    // to bypass the ASLR.
     let our_libdl = find_lib(std::process::id() as _, "libdl-2")?;
     let their_libdl = find_lib(pid, "libdl-2")?;
     let their_dlopen = their_libdl + (libc::dlopen as u64 - our_libdl);
@@ -152,6 +165,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
     Ok(())
 }
 
+/// Guess KVM vCPU file descriptors from their names in `/proc`
 fn get_vcpus_fds(pid: libc::pid_t) -> IceResult<Vec<i32>> {
     fn read_one(entry: io::Result<fs::DirEntry>) -> Option<i32> {
         let (path, fd_name) = entry
@@ -189,6 +203,7 @@ fn start_listener(
 
     let _ = fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path).context("failed to bind listener socket")?;
+    // FIXME: is 777 mode really required ?
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
 
     Ok(thread::spawn(move || {
@@ -246,6 +261,8 @@ pub struct Kvm {
 impl Kvm {
     pub fn connect(pid: libc::pid_t) -> IceResult<Kvm> {
         // Parse /proc/pid/maps file to find the adress of the VM memory
+        //
+        // This is pretty sure to be the largest mapping
         let (mem_offset, mem_size) = {
             let mut maps = io::BufReader::new(fs::File::open(format!("/proc/{}/maps", pid))?);
             let mut line = String::with_capacity(200);
@@ -284,11 +301,7 @@ impl Kvm {
                 return Err(IceError::new("failed to find VM memory"));
             }
 
-            log::debug!(
-                "Found KVM memory at of size 0x{:x} at address 0x{:x}",
-                map_size,
-                map_guess
-            );
+            log::debug!("Found KVM memory of size 0x{map_size:x} at address 0x{map_guess:x}",);
             (map_guess, map_size)
         };
 

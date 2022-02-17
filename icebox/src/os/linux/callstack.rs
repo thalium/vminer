@@ -38,8 +38,13 @@ impl UnwindData {
 
 struct Context<'a, B: ibc::Backend> {
     linux: &'a super::Linux<B>,
-    eh_frames: HashMap<ibc::Path, OnceCell<UnwindData>>,
     pgd: PhysicalAddress,
+
+    /// Finding `.eh_frame` sections is generally costly, so we definitly want
+    /// to cache this information
+    eh_frames: HashMap<ibc::Path, OnceCell<UnwindData>>,
+
+    /// This is sorted by growing address so we can do binary searches
     vmas: Vec<Vma>,
 }
 
@@ -82,7 +87,8 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         Ok(self.virtual_to_physical(addr)?.is_some())
     }
 
-    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> MemoryAccessResult<Option<()>> {
+    // TODO: this should probably move to core
+    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         let mut offset = 0;
 
         while offset < buf.len() {
@@ -102,7 +108,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             offset += 0x1000;
         }
 
-        Ok(Some(()))
+        Ok(())
     }
 
     fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> MemoryAccessResult<Option<T>> {
@@ -112,12 +118,13 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         })
     }
 
+    /// Read a whole mapping
     fn read_range(
         &self,
         start: VirtualAddress,
         end: VirtualAddress,
         buf: &mut Vec<u8>,
-    ) -> MemoryAccessResult<Option<()>> {
+    ) -> MemoryAccessResult<()> {
         assert!(start <= end);
         let vma_size = (end - start) as usize;
         buf.resize(vma_size, 0);
@@ -142,6 +149,20 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         cell.get_or_try_init(|| self.discover_sections(exe_path, ip))
     }
 
+    /// This is where things get difficult
+    ///
+    /// Unwind data is stored in the `.eh_frame` section. However, when an ELF
+    /// gets mapped in memory, its section table is ignored. We can only find
+    /// segments, which is not enough by itself.
+    ///
+    /// To circumvent this, we search the `.eh_frame_hdr` section, which is
+    /// useful to us for two reasons:
+    /// - It contains a pointer to `.eh_frame`
+    /// - It always starts with a `\x01` byte. This is few, but better than
+    ///   nothing.
+    ///
+    /// So to get `eh_frame`, we iterate over all the mappings of the file, look
+    /// for `\x01` bytes and try to parse `.eh_frame_hdr` from there.
     fn discover_sections(&self, exe_path: ibc::Path, ip: VirtualAddress) -> IceResult<UnwindData> {
         if log::log_enabled!(log::Level::Debug) {
             let path = self.linux.path_to_string(exe_path)?;
@@ -159,20 +180,15 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 continue;
             }
 
-            if self
-                .read_range(vma.start, vma.end, &mut vma_data)?
-                .is_none()
-            {
-                log::debug!("Encountered unmapped page: 0x{:x}", vma.start);
-                continue;
-            }
-
             log::debug!("Trying VMA starting at {:x}", vma.start);
+            self.read_range(vma.start, vma.end, &mut vma_data)?;
 
             for i in memchr::memmem::find_iter(&vma_data, b"\x01") {
                 let header = gimli::EhFrameHdr::new(&vma_data[i..], endian);
                 let eh_frame_hdr = vma.start + i as u64;
                 let mut bases = gimli::BaseAddresses::default().set_eh_frame_hdr(eh_frame_hdr.0);
+
+                // We found a `\x01` ! If parsing from there gives an error, it was not ths good one
 
                 let eh_frame_addr = match header.parse(&bases, 8) {
                     Ok(hdr) => match hdr.eh_frame_ptr() {
@@ -198,17 +214,22 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                     continue;
                 }
 
+                // Hopefully `.eh_frame` and `.eh_frame_hdr` are in the same segment
                 let eh_frame_offset = (eh_frame_addr - vma.start) as usize;
                 bases = bases.set_eh_frame(eh_frame_addr.0);
 
+                // Ok we managed to get a pointer for `.eh_frame`. Make sure
+                // that it actually means something and was not not pure luck.
+
                 let eh_frame = gimli::EhFrame::new(&vma_data[eh_frame_offset..], endian);
-                let fde = eh_frame.fde_for_address(&bases, ip.0, |this, bases, offset| {
-                    this.cie_from_offset(bases, offset)
-                });
+                let fde =
+                    eh_frame.fde_for_address(&bases, ip.0, gimli::UnwindSection::cie_from_offset);
                 if fde.is_err() {
                     log::trace!("Incomplete .eh_frame");
                     continue;
                 }
+
+                // At this point we can be pretty confident this was the good one
 
                 log::debug!("Found .eh_frame section at 0x{eh_frame_addr:x}");
 
@@ -238,6 +259,8 @@ pub fn iter<B: ibc::Backend>(
 
     let vcpus = linux.backend.vcpus();
     let registers = dwarf_registers(vcpus.arch());
+
+    // Get pointers from the current CPU
     let (instruction_pointer, stack_pointer, mut base_pointer) = 'res: loop {
         for i in 0..vcpus.count() {
             if linux.current_process(i)? == proc {
@@ -263,6 +286,7 @@ pub fn iter<B: ibc::Backend>(
         ))
     };
 
+    // Start building the frame with the data we have
     let mut frame = ibc::StackFrame {
         instruction_pointer,
         stack_pointer,
@@ -272,6 +296,7 @@ pub fn iter<B: ibc::Backend>(
     };
 
     loop {
+        // Where are we ?
         let vma = ctx
             .find_vma_by_address(frame.instruction_pointer)
             .ok_or("encountered anonymous page")?;
@@ -280,9 +305,11 @@ pub fn iter<B: ibc::Backend>(
 
         let cie_cache = cie_cache.entry(vma.file).or_insert_with(HashMap::new);
 
+        // Find unwind data of the binary we're in
         let data = ctx.get_unwind_data(vma.file, frame.instruction_pointer)?;
         let eh_frame = data.eh_frame();
 
+        // At this point the only missing data is the function start and its size.
         let fde = eh_frame.fde_for_address(
             &data.bases,
             frame.instruction_pointer.0,
@@ -306,8 +333,11 @@ pub fn iter<B: ibc::Backend>(
             }
         };
 
+        // Warning: `gimli::UnwindTableRow` gives similar infos but slightly
+        // different
         frame.range = Some((VirtualAddress(fde.initial_address()), fde.len()));
 
+        // Now the frame is complete, we can "send" it before starting again
         f(&frame)?;
 
         let row = fde
@@ -319,6 +349,8 @@ pub fn iter<B: ibc::Backend>(
             )
             .unwrap();
 
+        // Other registers are generally defined with an offset to the Canonical
+        // Frame Address so we get that first.
         let cfa = match row.cfa() {
             &gimli::CfaRule::RegisterAndOffset { register, offset } => match register {
                 reg if reg == registers.sp => frame.stack_pointer + offset,
@@ -329,6 +361,8 @@ pub fn iter<B: ibc::Backend>(
                 return Err(IceError::new("unsupported DWARF expression"))
             }
         };
+
+        // Now let's get registers values for the next frame
 
         let old_bp = base_pointer;
         let old_sp = frame.stack_pointer;

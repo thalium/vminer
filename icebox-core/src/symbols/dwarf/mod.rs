@@ -20,7 +20,7 @@ enum ResolveTypeError {
 }
 
 impl From<gimli::Error> for ResolveTypeError {
-    #[track_caller]
+    #[inline]
     fn from(error: gimli::Error) -> Self {
         ResolveTypeError::Gimli(error)
     }
@@ -52,6 +52,9 @@ impl fmt::Display for ResolveTypeError {
 
 type ResolveTypeResult<T> = Result<T, ResolveTypeError>;
 
+/// Strongly-types DWARF attributes
+///
+/// Each type defines the kind of attribute it expects and how to get its value
 trait DwarfAttribute {
     const DW_AT: gimli::DwAt;
     type Target;
@@ -118,6 +121,7 @@ impl DwarfAttribute for DwAtDeclaration {
     }
 }
 
+/// A DWARF node has an entry and children
 struct DwarfNode<'a, 'u, 't, R: GimliReader>(gimli::EntriesTreeNode<'a, 'u, 't, R>);
 
 impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
@@ -125,14 +129,19 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
         DwarfEntry(self.0.entry())
     }
 
+    /// Reads the node as a struct
     fn read_struct(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<Option<LazyStruct>> {
         let entry = self.entry();
-        let size = entry.try_read::<DwAtByteSize>()?.unwrap_or(0);
 
+        // Ignore anonymous types
         if entry.try_read::<DwAtDeclaration>()? == Some(true) {
             return Ok(None);
         }
 
+        // Zero-sized types may not have their size declared
+        let size = entry.try_read::<DwAtByteSize>()?.unwrap_or(0);
+
+        // Collect fields
         let mut fields = Vec::new();
 
         let mut children = self.0.children();
@@ -147,10 +156,14 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
         }))
     }
 
+    /// Reads the node as an union
     fn read_union(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<LazyStruct> {
         let entry = self.entry();
+
+        // Zero-sized types may not have their size declared
         let size = entry.try_read::<DwAtByteSize>()?.unwrap_or(0);
 
+        // Collect fields
         let mut fields = Vec::new();
 
         let mut children = self.0.children();
@@ -222,11 +235,17 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
         Ok(self.0.attr_value(name)?)
     }
 
+    /// Reads an attribute of the entry according to the type paramater
+    ///
+    /// Returns an error if the type is missing
     fn read<A: DwarfAttribute>(self) -> ResolveTypeResult<A::Target> {
         let value = self.read_attr(A::DW_AT)?;
         A::convert(value).ok_or(ResolveTypeError::WrongAttrType)
     }
 
+    /// Reads an attribute of the entry according to the type paramater
+    ///
+    /// Returns an `Ok(None)` if the type is missing
     fn try_read<A: DwarfAttribute>(self) -> ResolveTypeResult<Option<A::Target>> {
         match self.try_read_attr(A::DW_AT)? {
             Some(value) => match A::convert(value) {
@@ -237,6 +256,9 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
         }
     }
 
+    /// Reads the name attribute
+    ///
+    /// This is a separated method as it requires the DWARF string map
     fn try_read_name(self, debug_str: &gimli::DebugStr<R>) -> ResolveTypeResult<Option<String>> {
         Ok(match self.try_read_attr(gimli::DW_AT_name)? {
             Some(value) => {
@@ -249,6 +271,7 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
         })
     }
 
+    /// Reads a basic (integer) type
     fn read_base_type(self) -> ResolveTypeResult<BaseType> {
         let len = self.read::<DwAtByteSize>()?;
         let ate = self.read::<DwAtEncoding>()?;
@@ -285,6 +308,7 @@ struct BaseType {
     signed: bool,
 }
 
+/// A
 #[derive(Debug, Clone)]
 struct LazyStruct {
     size: u64,
@@ -323,6 +347,8 @@ impl Default for LazyTypeInner {
     }
 }
 
+///  A DWARF type that is either resolved (we know its name, its fields, etc) or
+/// not. In the latter case we only know its offset within the DWARF unit.
 struct LazyType(Cell<LazyTypeInner>);
 
 impl LazyType {
@@ -373,6 +399,7 @@ impl LazyType {
         }
     }
 
+    /// Try to resolve the current type or visit it
     fn resolve(
         &self,
         f: impl FnOnce(UnitOffset) -> Option<DwarfType>,
@@ -448,13 +475,14 @@ impl MidData {
     }
 }
 
+/// Fills `symbols` with types found in the given DWARF unit
 fn fill<R: GimliReader>(
     unit: &gimli::UnitHeader<R>,
     abbrs: &gimli::Abbreviations,
     debug_str: &gimli::DebugStr<R>,
     symbols: &mut ice::SymbolsIndexer,
 ) -> gimli::Result<()> {
-    // First pass
+    // First pass: iterate all DWARF entries and store all types
     let mut types = Vec::new();
 
     let mut tree = unit.entries_tree(abbrs, None)?;
@@ -489,20 +517,31 @@ fn fill<R: GimliReader>(
     }
     */
 
+    // Flatten anonymous types , eg:
+    //
+    // struct int_or_float {
+    //     int kind;
+    //     union { int x; float f; };
+    // };
     for entry in &types {
         entry.typ.resolve(
             |_| None,
             |typ| {
                 if let DwarfType::Struct(LazyStruct { fields, .. }) = typ {
+                    // Quick case: there is no anynomous field
                     if fields.iter().all(|(_, name, _)| name.is_some()) {
                         return;
                     }
 
+                    // Let's build a new field list
                     let mut new_fields = Vec::with_capacity(fields.len());
                     for (offset, name, ty) in fields.iter() {
                         match name {
+                            // Named fields are easy
                             Some(_) => new_fields.push((*offset, name.clone(), ty.clone())),
                             None => {
+                                // First, resolve inner types. This is necessary
+                                // because types are lazily constructed
                                 ty.resolve(
                                     |unit_offset| {
                                         let index = types
@@ -515,10 +554,11 @@ fn fill<R: GimliReader>(
                                     },
                                     |_| (),
                                 );
+                                // Then add the (hopefully) resolved type to our list of fields
                                 ty.with_inner(|inner| match inner {
                                     LazyTypeInner::Unresolved(_) => {
                                         log::warn!(
-                                            "Could not resolve anymous field of struct {}",
+                                            "Could not resolve anonymous field of struct {}",
                                             entry.name.as_deref().unwrap_or("<anonymous>")
                                         );
                                     }
@@ -543,6 +583,7 @@ fn fill<R: GimliReader>(
         );
     }
 
+    // Finally we can add resolved types to debug infos
     symbols.extend(
         types
             .into_iter()
@@ -568,6 +609,7 @@ fn fill<R: GimliReader>(
     Ok(())
 }
 
+/// Find an object's debug infos and load types to `symbols`
 pub fn load_types(
     obj: &object::File,
     symbols: &mut ice::SymbolsIndexer,
@@ -576,6 +618,7 @@ pub fn load_types(
     Ok(load_types_from_dwarf(&dwarf, symbols)?)
 }
 
+/// Add types found in the DWARF to `symbols`
 pub fn load_types_from_dwarf<R>(
     dwarf: &gimli::Dwarf<R>,
     symbols: &mut ice::SymbolsIndexer,

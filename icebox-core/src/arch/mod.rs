@@ -20,6 +20,7 @@ fn try_all_addresses(test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalA
     None
 }
 
+/// Architecture-independant operations for vCPUs lists
 pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu> {
     type Arch: Architecture<'a>;
 
@@ -38,6 +39,7 @@ pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu>
     fn into_runtime(self) -> runtime::Vcpus<'a>;
 }
 
+/// Architecture-independant operations for vCPUs
 pub trait Vcpu<'a> {
     type Arch: Architecture<'a>;
 
@@ -58,6 +60,9 @@ pub trait Vcpu<'a> {
     fn into_runtime(self) -> runtime::Vcpu<'a>;
 }
 
+/// A hardware architecture
+///
+/// This trait has a lifetime, which will be removed when GAT are stable
 pub trait Architecture<'a> {
     type Vcpu: Vcpu<'a, Arch = Self>;
     type Vcpus: Vcpus<'a, Arch = Self>;

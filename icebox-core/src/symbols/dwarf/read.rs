@@ -1,3 +1,5 @@
+//! This module contains helpers to read DWARF data from ELF files
+
 extern crate alloc;
 
 use alloc::{borrow::Cow, fmt, rc::Rc};
@@ -7,6 +9,9 @@ use object::{Object, ObjectSection, ObjectSymbol};
 
 type RelocationMap = HashMap<usize, object::Relocation>;
 
+/// Adds support for ELF relocations
+///
+/// Shamelessly stolen from `gimli` examples
 #[derive(Clone)]
 struct Relocate<R> {
     relocations: Rc<HashMap<usize, object::Relocation>>,
@@ -190,6 +195,7 @@ fn add_relocations(
     }
 }
 
+/// An error that happens when reading DWARF data from an object file
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -232,6 +238,7 @@ impl From<object::Error> for Error {
     }
 }
 
+/// Reads a object file section to a `gimli::Reader`
 fn load_file_section<'input, Endian: gimli::Endianity>(
     id: gimli::SectionId,
     file: &object::File<'input>,
@@ -259,6 +266,9 @@ fn load_file_section<'input, Endian: gimli::Endianity>(
     })
 }
 
+/// Loads DWARF data from a object file
+///
+/// This does not support ELF compression
 pub fn load_dwarf<'a>(
     obj: &'a object::File,
 ) -> object::Result<gimli::Dwarf<impl gimli::Reader<Offset = usize> + 'a>> {

@@ -3,6 +3,9 @@ use super::{MemoryAccessError, MemoryAccessResult, PhysicalAddress};
 #[cfg(feature = "std")]
 use std::{fs, io, path::Path};
 
+/// A trait to specify how to read physical memory from a guest
+///
+/// This trait defines additional optional methods for specialisation
 pub trait Memory {
     fn size(&self) -> u64;
 
@@ -140,12 +143,6 @@ impl<M: Memory + ?Sized> Memory for &'_ M {
         (**self).read(addr, buf)
     }
 
-    #[cfg(feature = "std")]
-    #[inline]
-    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
-        (**self).dump(writer)
-    }
-
     #[inline]
     fn search(
         &self,
@@ -155,6 +152,12 @@ impl<M: Memory + ?Sized> Memory for &'_ M {
         buf: &mut [u8],
     ) -> MemoryAccessResult<Option<u64>> {
         (**self).search(addr, page_size, finder, buf)
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        (**self).dump(writer)
     }
 }
 
@@ -173,6 +176,17 @@ impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
     #[inline]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
         (**self).dump(writer)
+    }
+
+    #[inline]
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<u64>> {
+        (**self).search(addr, page_size, finder, buf)
     }
 }
 
