@@ -1,3 +1,5 @@
+use std::collections::{hash_map, HashMap};
+
 use icebox::backends::kvm_dump;
 use icebox::core::{self as ice, Backend, Os};
 use icebox::os;
@@ -18,14 +20,7 @@ fn main() {
     //let _ = dbg!(os::Linux::quick_check());
     //println!("0x{:x}", addr);
 
-    let mut syms = ice::SymbolsIndexer::new();
-    let kallsyms = std::io::BufReader::new(
-        std::fs::File::open(format!("data/linux-5.10-{arch}/kallsyms")).unwrap(),
-    );
-    os::linux::profile::parse_symbol_file(kallsyms, &mut syms).unwrap();
-    syms.read_object_file(format!("data/linux-5.10-{arch}/elf"))
-        .unwrap();
-    let profile = os::linux::Profile::new(syms).unwrap();
+    let profile = os::linux::Profile::read_from_dir(format!("data/linux-5.10-{arch}")).unwrap();
 
     let linux = os::Linux::create(vm, profile).unwrap();
 
@@ -40,16 +35,47 @@ fn main() {
         panic!("No proc found");
     };
 
+    let mut libs = HashMap::new();
+    linux
+        .process_for_each_vma(proc, &mut |vma| {
+            if let Some(path) = linux.vma_file(vma)? {
+                let file = linux.path_to_string(path)?;
+                if file.rsplit_once('/').is_some() {
+                    match libs.entry(path) {
+                        hash_map::Entry::Occupied(_) => (),
+                        hash_map::Entry::Vacant(entry) => {
+                            let vma_start = linux.vma_start(vma)?;
+                            entry.insert(vma_start);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+
     linux
         .process_callstack(proc, &mut |frame| {
             let file = linux.path_to_string(frame.file.unwrap())?;
-            let range = match &frame.range {
-                Some((start, size)) => format!("(0x{start:x} [+0x{size:x}])"),
-                None => format!("<unknown>"),
+            let addr = match frame.range {
+                Some((start, _)) => {
+                    let diff = frame.instruction_pointer - start;
+                    let symbol = (|| {
+                        let (_, lib) = file.rsplit_once('/')?;
+                        let lib_start = *libs.get(&frame.file?)?;
+                        let addr = ice::VirtualAddress((start - lib_start) as u64);
+                        linux.find_symbol(lib, addr)
+                    })();
+                    match symbol {
+                        Some(sym) => format!("<{sym}+0x{diff:x}>"),
+                        None => format!("<0x{start:x}+0x{diff:x}>"),
+                    }
+                }
+                None => String::from("<unknown>"),
             };
             println!(
-                "Frame: 0x{:x} [0x{:x}] (in {file}) {range}",
-                frame.instruction_pointer, frame.stack_pointer
+                "Frame: 0x{:x} | 0x{:x} ({addr} in {file})",
+                frame.stack_pointer, frame.instruction_pointer
             );
             Ok(())
         })

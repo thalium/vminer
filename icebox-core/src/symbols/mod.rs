@@ -1,6 +1,7 @@
 pub mod dwarf;
 
-use alloc::{borrow::ToOwned, string::String, vec::Vec};
+use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc, vec::Vec};
+use core::fmt;
 use hashbrown::HashMap;
 
 use crate::{IceError, IceResult};
@@ -65,17 +66,79 @@ impl<'a> Struct<'a> {
     }
 }
 
+#[derive(Default)]
+pub struct ModuleSymbols {
+    // TODO: Try to store all string in a single buffer
+    /// A map to translate addresses to names
+    names: HashMap<VirtualAddress, Arc<str>>,
+
+    /// A map to translate names to addresses
+    addresses: HashMap<Arc<str>, VirtualAddress>,
+}
+
+impl ModuleSymbols {
+    fn new() -> Self {
+        Self {
+            names: HashMap::new(),
+            addresses: HashMap::new(),
+        }
+    }
+
+    pub fn get_name(&self, addr: VirtualAddress) -> Option<&str> {
+        Some(&**self.names.get(&addr)?)
+    }
+
+    pub fn get_address(&self, name: &str) -> IceResult<VirtualAddress> {
+        match self.addresses.get(name) {
+            Some(addr) => Ok(*addr),
+            None => Err(IceError::missing_symbol(name)),
+        }
+    }
+
+    pub fn push(&mut self, addr: VirtualAddress, symbol: &str) {
+        let symbol = Arc::<str>::from(symbol);
+        self.names.insert(addr, symbol.clone());
+        self.addresses.insert(symbol, addr);
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (VirtualAddress, &str)> {
+        self.names.iter().map(|(&addr, name)| (addr, &**name))
+    }
+}
+
+impl<S: AsRef<str>> Extend<(VirtualAddress, S)> for ModuleSymbols {
+    fn extend<I: IntoIterator<Item = (VirtualAddress, S)>>(&mut self, iter: I) {
+        for (addr, symbol) in iter {
+            self.push(addr, symbol.as_ref());
+        }
+    }
+}
+
+impl<S: AsRef<str>> Extend<(S, VirtualAddress)> for ModuleSymbols {
+    fn extend<I: IntoIterator<Item = (S, VirtualAddress)>>(&mut self, iter: I) {
+        for (symbol, addr) in iter {
+            self.push(addr, symbol.as_ref());
+        }
+    }
+}
+
+impl fmt::Debug for ModuleSymbols {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SymbolsIndexer {
     structs: HashMap<String, OwnedStruct>,
-    addresses: HashMap<String, VirtualAddress>,
+    symbols: HashMap<Box<str>, ModuleSymbols>,
 }
 
 impl SymbolsIndexer {
     pub fn new() -> Self {
         Self {
             structs: HashMap::new(),
-            addresses: HashMap::new(),
+            symbols: HashMap::new(),
         }
     }
 
@@ -90,15 +153,23 @@ impl SymbolsIndexer {
         self.structs.insert(structure.name.clone(), structure);
     }
 
-    pub fn get_addr(&self, name: &str) -> IceResult<VirtualAddress> {
-        match self.addresses.get(name) {
-            Some(addr) => Ok(*addr),
-            None => Err(IceError::missing_symbol(name)),
+    pub fn get_addr(&self, lib: &str, name: &str) -> IceResult<VirtualAddress> {
+        self.get_lib(lib)?.get_address(name)
+    }
+
+    pub fn insert_addr(&mut self, lib: Box<str>, symbol: &str, addr: VirtualAddress) {
+        self.get_lib_mut(lib).push(addr, symbol);
+    }
+
+    pub fn get_lib(&self, name: &str) -> IceResult<&ModuleSymbols> {
+        match self.symbols.get(name) {
+            Some(lib) => Ok(lib),
+            None => Err(IceError::missing_module(name)),
         }
     }
 
-    pub fn insert_addr(&mut self, name: String, addr: VirtualAddress) {
-        self.addresses.insert(name, addr);
+    pub fn get_lib_mut(&mut self, name: Box<str>) -> &mut ModuleSymbols {
+        self.symbols.entry(name).or_insert_with(ModuleSymbols::new)
     }
 
     #[cfg(all(feature = "object", feature = "std"))]
@@ -127,11 +198,5 @@ impl Extend<OwnedStruct> for SymbolsIndexer {
     fn extend<I: IntoIterator<Item = OwnedStruct>>(&mut self, iter: I) {
         self.structs
             .extend(iter.into_iter().map(|s| (s.name.clone(), s)))
-    }
-}
-
-impl Extend<(String, VirtualAddress)> for SymbolsIndexer {
-    fn extend<I: IntoIterator<Item = (String, VirtualAddress)>>(&mut self, iter: I) {
-        self.addresses.extend(iter)
     }
 }

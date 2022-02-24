@@ -30,13 +30,7 @@ impl fmt::Display for Arch {
 
 fn read_linux(arch: Arch) -> IceResult<Linux<DumbDump<ibc::File>>> {
     let backend = DumbDump::read(format!("../data/linux-5.10-{arch}/dump"))?;
-    let mut syms = ibc::SymbolsIndexer::new();
-    let kallsyms = std::io::BufReader::new(std::fs::File::open(format!(
-        "../data/linux-5.10-{arch}/kallsyms"
-    ))?);
-    icebox::os::linux::profile::parse_symbol_file(kallsyms, &mut syms)?;
-    syms.read_object_file(format!("../data/linux-5.10-{arch}/elf"))?;
-    let profile = icebox::os::linux::Profile::new(syms)?;
+    let profile = icebox::os::linux::Profile::read_from_dir(format!("../data/linux-5.10-{arch}"))?;
     Linux::create(backend, profile)
 }
 

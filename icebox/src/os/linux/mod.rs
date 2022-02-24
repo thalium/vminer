@@ -325,6 +325,11 @@ impl<B: ice::Backend> Linux<B> {
         Ok(())
     }
 
+    pub fn find_symbol(&self, lib: &str, addr: VirtualAddress) -> Option<&str> {
+        let lib = self.profile.syms.get_lib(lib).ok()?;
+        lib.get_name(addr)
+    }
+
     fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct>> {
         let proc = proc.into();
         let mut mm = self.read_struct_pointer(proc, |ts| ts.mm)?;
