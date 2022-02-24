@@ -180,7 +180,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 continue;
             }
 
-            log::debug!("Trying VMA starting at {:x}", vma.start);
+            log::trace!("Trying VMA starting at {:x}", vma.start);
             self.read_range(vma.start, vma.end, &mut vma_data)?;
 
             for i in memchr::memmem::find_iter(&vma_data, b"\x01") {
@@ -196,21 +196,14 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                         gimli::Pointer::Indirect(addr) => {
                             match self.read_value(VirtualAddress(addr))? {
                                 Some(addr) => addr,
-                                None => {
-                                    log::trace!("Unvalid indirect pointer");
-                                    continue;
-                                }
+                                None => continue,
                             }
                         }
                     },
-                    Err(err) => {
-                        log::trace!("Rejected .eh_frame_hdr: {:?}", err);
-                        continue;
-                    }
+                    Err(_) => continue,
                 };
 
                 if !vma.contains(eh_frame_addr) {
-                    log::trace!("Unvalid pointer");
                     continue;
                 }
 
@@ -225,7 +218,6 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 let fde =
                     eh_frame.fde_for_address(&bases, ip.0, gimli::UnwindSection::cie_from_offset);
                 if fde.is_err() {
-                    log::trace!("Incomplete .eh_frame");
                     continue;
                 }
 
