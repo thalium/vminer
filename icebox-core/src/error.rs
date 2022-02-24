@@ -313,6 +313,20 @@ where
     }
 }
 
+impl<T> ResultExt<T> for Option<T> {
+    fn context(self, msg: impl ToString) -> IceResult<T> {
+        self.ok_or_else(|| IceError::new(msg.to_string()))
+    }
+
+    fn with_context<F, S>(self, msg: F) -> IceResult<T>
+    where
+        F: FnOnce() -> S,
+        S: ToString,
+    {
+        self.ok_or_else(|| IceError::new(msg().to_string()))
+    }
+}
+
 #[cfg(feature = "python")]
 pyo3::create_exception!(icebox, IceboxError, pyo3::exceptions::PyException);
 
