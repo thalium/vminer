@@ -51,7 +51,11 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
 
     #[inline]
     fn stack_pointer(&self) -> VirtualAddress {
-        VirtualAddress(self.registers.sp)
+        if self.instruction_pointer().is_kernel() {
+            VirtualAddress(self.special_registers.sp_el1)
+        } else {
+            VirtualAddress(self.registers.sp)
+        }
     }
 
     fn base_pointer(&self) -> Option<VirtualAddress> {
@@ -59,7 +63,7 @@ impl<'a> super::Vcpu<'a> for &'a Vcpu {
     }
 
     fn pgd(&self) -> PhysicalAddress {
-        if (self.registers.pc as i64) < 0 {
+        if self.instruction_pointer().is_kernel() {
             self.cleaned_ttbr1()
         } else {
             self.cleaned_ttbr0()

@@ -144,6 +144,9 @@ fn current_process_aarch64() {
 
     let proc = linux.current_process(0).unwrap();
     assert_eq!(linux.process_pid(proc).unwrap(), 420);
+
+    let proc = linux.current_process(1).unwrap();
+    assert_eq!(linux.process_pid(proc).unwrap(), 0);
 }
 
 fn vmas(arch: Arch) {

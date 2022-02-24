@@ -187,8 +187,8 @@ impl<B: ice::Backend> Linux<B> {
             }
             None => {
                 // The symbol `current_task` may not exist (eg on Aach64, where
-                // Linux gets it from register `sp_el0`, which I didn't manage
-                // to get from KVM).
+                // Linux gets it from register `sp_el0`, which is not valid for
+                // this if the current process is a userspace one.
                 // In this case we find it the poor man's way: we iterate the
                 // process list and find a matching PGD.
                 //
@@ -200,7 +200,20 @@ impl<B: ice::Backend> Linux<B> {
                     Os,
                 };
 
-                let vcpu_pgd = self.backend.vcpus().get(cpuid).pgd();
+                let vcpu = self.backend.vcpus().get(cpuid);
+                let vcpu_pgd = vcpu.pgd();
+
+                match vcpu.into_runtime() {
+                    ice::arch::runtime::Vcpu::Aarch64(vcpu) => {
+                        if vcpu.instruction_pointer().is_kernel() {
+                            let current_task = VirtualAddress(vcpu.registers.sp);
+                            return Ok(ibc::Thread(current_task));
+                        }
+                    }
+                    _ => (),
+                };
+
+                log::debug!("Using fallback to get current task");
 
                 let mut current_task = None;
                 self.for_each_process(&mut |proc| {
