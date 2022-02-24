@@ -9,6 +9,7 @@ pub(crate) struct FastSymbols {
     pub(crate) current_task: Option<u64>,
 
     pub(super) init_task: ice::VirtualAddress,
+    pub linux_banner: ice::VirtualAddress,
 }
 
 pub struct StructOffset<T> {
@@ -206,6 +207,7 @@ define_kernel_structs! {
 }
 
 pub struct Profile {
+    #[allow(unused)]
     pub(crate) syms: ice::SymbolsIndexer,
     pub(crate) fast_syms: FastSymbols,
 
@@ -217,6 +219,7 @@ impl Profile {
         let per_cpu_offset = syms.get_addr("__per_cpu_offset")?;
         let current_task = syms.get_addr("current_task").ok().map(|sym| sym.0);
         let init_task = syms.get_addr("init_task")?;
+        let linux_banner = syms.get_addr("linux_banner")?;
 
         let layouts = Layouts::new(&syms)?;
 
@@ -226,6 +229,7 @@ impl Profile {
                 per_cpu_offset,
                 current_task,
                 init_task,
+                linux_banner,
             },
             layouts,
         })

@@ -110,7 +110,7 @@ pub fn get_aslr<B: ice::Backend>(
     profile: &Profile,
     kpgd: PhysicalAddress,
 ) -> IceResult<i64> {
-    let base_banner_addr = profile.syms.get_addr("linux_banner")?;
+    let base_banner_addr = profile.fast_syms.linux_banner;
     let banner_addr = get_banner_addr(backend, kpgd)?.ok_or("could not find banner address")?;
 
     Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
