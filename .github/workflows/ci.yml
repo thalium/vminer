@@ -60,8 +60,10 @@ jobs:
       - name: cargo fmt -- --check
         run: cargo fmt -- --check
 
+  # TODO: Re-enable this when the issue with git LFS is fixed
   test:
     name: Run tests
+    if: false
     strategy:
       matrix:
         runner:
