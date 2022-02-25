@@ -131,6 +131,7 @@ enum Repr {
 
     UnsupportedArchitecture,
 
+    MissingModule(Box<str>),
     MissingSymbol(Box<str>),
     MissingField(Box<str>, Box<str>),
 
@@ -154,6 +155,11 @@ impl IceError {
         Self {
             repr: Box::new(repr),
         }
+    }
+
+    #[cold]
+    pub fn missing_module(sym: &str) -> Self {
+        Self::from_repr(Repr::MissingModule(sym.into()))
     }
 
     #[cold]
@@ -195,6 +201,9 @@ impl fmt::Display for Repr {
             Repr::InvalidPage => f.write_str("failed to translate virtual address"),
             Repr::UnsupportedArchitecture => {
                 f.write_str("operation unsupported by the architecture")
+            }
+            Repr::MissingModule(name) => {
+                f.write_fmt(format_args!("missing required module \"{name}\""))
             }
             Repr::MissingSymbol(sym) => {
                 f.write_fmt(format_args!("missing required symbol \"{}\"", sym))

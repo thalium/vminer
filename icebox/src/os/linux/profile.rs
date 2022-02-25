@@ -1,8 +1,8 @@
-use alloc::{borrow::ToOwned, string::String};
-
-use crate::core::{self as ice, IceResult};
+use crate::core::{self as ice, IceResult, VirtualAddress};
+use alloc::string::String;
 use core::marker::PhantomData;
-use ice::VirtualAddress;
+#[cfg(feature = "std")]
+use std::{fs, io, path};
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_offset: VirtualAddress,
@@ -203,6 +203,7 @@ define_kernel_structs! {
         vm_flags: u64,
         vm_next: Pointer<VmAreaStruct>,
         vm_start: VirtualAddress,
+        vm_pgoff: u64,
     }
 }
 
@@ -216,10 +217,11 @@ pub struct Profile {
 
 impl Profile {
     pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
-        let per_cpu_offset = syms.get_addr("__per_cpu_offset")?;
-        let current_task = syms.get_addr("current_task").ok().map(|sym| sym.0);
-        let init_task = syms.get_addr("init_task")?;
-        let linux_banner = syms.get_addr("linux_banner")?;
+        let kernel = syms.get_lib("System.map")?;
+        let per_cpu_offset = kernel.get_address("__per_cpu_offset")?;
+        let current_task = kernel.get_address("current_task").ok().map(|sym| sym.0);
+        let init_task = kernel.get_address("init_task")?;
+        let linux_banner = kernel.get_address("linux_banner")?;
 
         let layouts = Layouts::new(&syms)?;
 
@@ -234,6 +236,54 @@ impl Profile {
             layouts,
         })
     }
+
+    #[cfg(feature = "std")]
+    fn _read_from_dir(path: &path::Path) -> IceResult<Self> {
+        use ice::ResultExt;
+
+        /// Reads a single directory entry
+        fn read_entry(syms: &mut ice::SymbolsIndexer, path: &path::Path) -> IceResult<()> {
+            let name = path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .context("non-utf8 file name")?;
+
+            if name == "module.ko" {
+                syms.read_object_file(path)
+            } else {
+                let file = io::BufReader::new(fs::File::open(path)?);
+                log::trace!("Reading symbol file \"{name}\"");
+                let lib = syms.get_lib_mut(name.into());
+                parse_symbol_file(file, lib)
+            }
+        }
+
+        let mut syms = ibc::SymbolsIndexer::new();
+
+        for entry in fs::read_dir(path)? {
+            match entry {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if let Err(err) = read_entry(&mut syms, &path) {
+                        log::warn!("Error reading {}: {err}", path.display());
+                    }
+                }
+                Err(err) => {
+                    log::warn!("Failed to read directory entry: {err}")
+                }
+            };
+        }
+
+        Self::new(syms)
+    }
+
+    /// Reads profile data from the given directory.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn read_from_dir<P: AsRef<path::Path>>(path: P) -> IceResult<Self> {
+        Self::_read_from_dir(path.as_ref())
+    }
 }
 
 trait BufRead {
@@ -241,7 +291,7 @@ trait BufRead {
 }
 
 #[cfg(feature = "std")]
-impl<R: std::io::BufRead> BufRead for R {
+impl<R: io::BufRead> BufRead for R {
     fn read_one_line(&mut self, buf: &mut String) -> IceResult<usize> {
         Ok(self.read_line(buf)?)
     }
@@ -250,10 +300,11 @@ impl<R: std::io::BufRead> BufRead for R {
 #[cfg(not(feature = "std"))]
 impl BufRead for &[u8] {
     fn read_one_line(&mut self, buf: &mut String) -> IceResult<usize> {
-        let line = match memchr::memchr(b'\n', self) {
-            Some(i) => &self[..i],
-            None => self,
+        let (line, rest) = match memchr::memchr(b'\n', self) {
+            Some(i) => self.split_at(i),
+            None => (&**self, &[][..]),
         };
+        *self = rest;
 
         buf.push_str(core::str::from_utf8(line).map_err(ibc::IceError::new)?);
         Ok(line.len())
@@ -261,18 +312,15 @@ impl BufRead for &[u8] {
 }
 
 #[cfg(feature = "std")]
-pub fn parse_symbol_file<R: std::io::BufRead>(
-    r: R,
-    syms: &mut ice::SymbolsIndexer,
-) -> IceResult<()> {
+pub fn parse_symbol_file<R: io::BufRead>(r: R, syms: &mut ice::ModuleSymbols) -> IceResult<()> {
     parse_symbol_file_inner(r, syms)
 }
 
-pub fn parse_symbol_file_from_bytes(bytes: &[u8], syms: &mut ice::SymbolsIndexer) -> IceResult<()> {
+pub fn parse_symbol_file_from_bytes(bytes: &[u8], syms: &mut ice::ModuleSymbols) -> IceResult<()> {
     parse_symbol_file_inner(bytes, syms)
 }
 
-fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ice::SymbolsIndexer) -> IceResult<()> {
+fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ice::ModuleSymbols) -> IceResult<()> {
     let mut line = String::with_capacity(200);
 
     loop {
@@ -296,14 +344,13 @@ fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ice::SymbolsIndexer)
             let name = match rest.find(&['\t', '\n'][..]) {
                 Some(i) => &rest[..i],
                 None => rest,
-            }
-            .to_owned();
+            };
 
             Some((name, addr))
         })();
 
         if let Some((name, addr)) = sym {
-            syms.insert_addr(name, ice::VirtualAddress(addr));
+            syms.push(ice::VirtualAddress(addr), name);
         }
 
         line.clear();

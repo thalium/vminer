@@ -2,231 +2,277 @@
   {
     "start": 93983404867584,
     "end": 93983404908544,
+    "offset": 0,
     "path": "/home/a/callstack"
   },
   {
     "start": 93983404908544,
     "end": 93983405305856,
+    "offset": 40960,
     "path": "/home/a/callstack"
   },
   {
     "start": 93983405305856,
     "end": 93983405404160,
+    "offset": 438272,
     "path": "/home/a/callstack"
   },
   {
     "start": 93983405408256,
     "end": 93983405428736,
+    "offset": 536576,
     "path": "/home/a/callstack"
   },
   {
     "start": 93983405428736,
     "end": 93983405432832,
+    "offset": 557056,
     "path": "/home/a/callstack"
   },
   {
     "start": 93983418728448,
     "end": 93983418863616,
+    "offset": 93983418728448,
     "path": null
   },
   {
     "start": 140254238257152,
     "end": 140254238265344,
+    "offset": 140254238257152,
     "path": null
   },
   {
     "start": 140254238265344,
     "end": 140254238269440,
+    "offset": 0,
     "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 140254238269440,
     "end": 140254238277632,
+    "offset": 4096,
     "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 140254238277632,
     "end": 140254238281728,
+    "offset": 12288,
     "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 140254238281728,
     "end": 140254238285824,
+    "offset": 12288,
     "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 140254238285824,
     "end": 140254238289920,
+    "offset": 16384,
     "path": "/usr/lib/x86_64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 140254238289920,
     "end": 140254238302208,
+    "offset": 0,
     "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 140254238302208,
     "end": 140254238371840,
+    "offset": 12288,
     "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 140254238371840,
     "end": 140254238388224,
+    "offset": 81920,
     "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 140254238388224,
     "end": 140254238392320,
+    "offset": 94208,
     "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 140254238392320,
     "end": 140254238396416,
+    "offset": 98304,
     "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 140254238396416,
     "end": 140254238425088,
+    "offset": 0,
     "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 140254238425088,
     "end": 140254238490624,
+    "offset": 28672,
     "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 140254238490624,
     "end": 140254238511104,
+    "offset": 94208,
     "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 140254238511104,
     "end": 140254238515200,
+    "offset": 110592,
     "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 140254238515200,
     "end": 140254238519296,
+    "offset": 114688,
     "path": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 140254238519296,
     "end": 140254238535680,
+    "offset": 140254238519296,
     "path": null
   },
   {
     "start": 140254238535680,
     "end": 140254238597120,
+    "offset": 0,
     "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
   },
   {
     "start": 140254238597120,
     "end": 140254239227904,
+    "offset": 61440,
     "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
   },
   {
     "start": 140254239227904,
     "end": 140254239854592,
+    "offset": 692224,
     "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
   },
   {
     "start": 140254239854592,
     "end": 140254239858688,
+    "offset": 1314816,
     "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
   },
   {
     "start": 140254239858688,
     "end": 140254239862784,
+    "offset": 1318912,
     "path": "/usr/lib/x86_64-linux-gnu/libm-2.31.so"
   },
   {
     "start": 140254239862784,
     "end": 140254240014336,
+    "offset": 0,
     "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 140254240014336,
     "end": 140254241370112,
+    "offset": 151552,
     "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 140254241370112,
     "end": 140254241673216,
+    "offset": 1507328,
     "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 140254241673216,
     "end": 140254241677312,
+    "offset": 1810432,
     "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 140254241677312,
     "end": 140254241689600,
+    "offset": 1810432,
     "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 140254241689600,
     "end": 140254241701888,
+    "offset": 1822720,
     "path": "/usr/lib/x86_64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 140254241701888,
     "end": 140254241726464,
+    "offset": 140254241701888,
     "path": null
   },
   {
     "start": 140254241734656,
     "end": 140254241738752,
+    "offset": 140254241734656,
     "path": null
   },
   {
     "start": 140254241738752,
     "end": 140254241746944,
+    "offset": 140254241738752,
     "path": null
   },
   {
     "start": 140254241746944,
     "end": 140254241751040,
+    "offset": 0,
     "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 140254241751040,
     "end": 140254241882112,
+    "offset": 4096,
     "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 140254241882112,
     "end": 140254241914880,
+    "offset": 135168,
     "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 140254241918976,
     "end": 140254241923072,
+    "offset": 167936,
     "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 140254241923072,
     "end": 140254241927168,
+    "offset": 172032,
     "path": "/usr/lib/x86_64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 140254241927168,
     "end": 140254241931264,
+    "offset": 140254241927168,
     "path": null
   },
   {
     "start": 140729961029632,
     "end": 140729961164800,
+    "offset": 140737488216064,
     "path": null
   },
   {
     "start": 140729961381888,
     "end": 140729961398272,
+    "offset": 0,
     "path": null
   },
   {
     "start": 140729961398272,
     "end": 140729961406464,
+    "offset": 0,
     "path": null
   }
 ]

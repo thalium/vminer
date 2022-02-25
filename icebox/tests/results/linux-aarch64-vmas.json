@@ -2,151 +2,181 @@
   {
     "start": 187650564096000,
     "end": 187650564546560,
+    "offset": 0,
     "path": "/home/a/callstack"
   },
   {
     "start": 187650564608000,
     "end": 187650564624384,
+    "offset": 446464,
     "path": "/home/a/callstack"
   },
   {
     "start": 187650564624384,
     "end": 187650564628480,
+    "offset": 462848,
     "path": "/home/a/callstack"
   },
   {
     "start": 187651546681344,
     "end": 187651546816512,
+    "offset": 187651546681344,
     "path": null
   },
   {
     "start": 281473770266624,
     "end": 281473770278912,
+    "offset": 0,
     "path": "/usr/lib/aarch64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 281473770278912,
     "end": 281473770340352,
+    "offset": 12288,
     "path": "/usr/lib/aarch64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 281473770340352,
     "end": 281473770344448,
+    "offset": 8192,
     "path": "/usr/lib/aarch64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 281473770344448,
     "end": 281473770348544,
+    "offset": 12288,
     "path": "/usr/lib/aarch64-linux-gnu/libdl-2.31.so"
   },
   {
     "start": 281473770348544,
     "end": 281473770426368,
+    "offset": 0,
     "path": "/usr/lib/aarch64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 281473770426368,
     "end": 281473770487808,
+    "offset": 77824,
     "path": "/usr/lib/aarch64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 281473770487808,
     "end": 281473770491904,
+    "offset": 73728,
     "path": "/usr/lib/aarch64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 281473770491904,
     "end": 281473770496000,
+    "offset": 77824,
     "path": "/usr/lib/aarch64-linux-gnu/libgcc_s.so.1"
   },
   {
     "start": 281473770496000,
     "end": 281473770610688,
+    "offset": 0,
     "path": "/usr/lib/aarch64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 281473770610688,
     "end": 281473770672128,
+    "offset": 114688,
     "path": "/usr/lib/aarch64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 281473770672128,
     "end": 281473770676224,
+    "offset": 110592,
     "path": "/usr/lib/aarch64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 281473770676224,
     "end": 281473770680320,
+    "offset": 114688,
     "path": "/usr/lib/aarch64-linux-gnu/libpthread-2.31.so"
   },
   {
     "start": 281473770680320,
     "end": 281473770696704,
+    "offset": 281473770680320,
     "path": null
   },
   {
     "start": 281473770696704,
     "end": 281473772126208,
+    "offset": 0,
     "path": "/usr/lib/aarch64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 281473772126208,
     "end": 281473772191744,
+    "offset": 1429504,
     "path": "/usr/lib/aarch64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 281473772191744,
     "end": 281473772204032,
+    "offset": 1429504,
     "path": "/usr/lib/aarch64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 281473772204032,
     "end": 281473772216320,
+    "offset": 1441792,
     "path": "/usr/lib/aarch64-linux-gnu/libc-2.31.so"
   },
   {
     "start": 281473772216320,
     "end": 281473772228608,
+    "offset": 281473772216320,
     "path": null
   },
   {
     "start": 281473772228608,
     "end": 281473772363776,
+    "offset": 0,
     "path": "/usr/lib/aarch64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 281473772363776,
     "end": 281473772367872,
+    "offset": 281473772363776,
     "path": null
   },
   {
     "start": 281473772367872,
     "end": 281473772400640,
+    "offset": 281473772367872,
     "path": null
   },
   {
     "start": 281473772417024,
     "end": 281473772425216,
+    "offset": 0,
     "path": null
   },
   {
     "start": 281473772425216,
     "end": 281473772429312,
+    "offset": 0,
     "path": null
   },
   {
     "start": 281473772429312,
     "end": 281473772433408,
+    "offset": 135168,
     "path": "/usr/lib/aarch64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 281473772433408,
     "end": 281473772441600,
+    "offset": 139264,
     "path": "/usr/lib/aarch64-linux-gnu/ld-2.31.so"
   },
   {
     "start": 281474793631744,
     "end": 281474793766912,
+    "offset": 281474976575488,
     "path": null
   }
 ]

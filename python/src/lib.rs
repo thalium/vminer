@@ -119,14 +119,10 @@ impl Dump {
 struct RawOs(Box<dyn ibc::Os + Send + Sync>);
 
 impl RawOs {
-    fn new(backend: Backend) -> IceResult<Self> {
+    fn new(backend: Backend, path: &str) -> IceResult<Self> {
         match icebox::os::Linux::quick_check(&backend.0) {
             Ok(true) => {
-                let mut syms = ibc::SymbolsIndexer::new();
-                let kallsyms = std::io::BufReader::new(std::fs::File::open("../kallsyms")?);
-                icebox::os::linux::profile::parse_symbol_file(kallsyms, &mut syms)?;
-                syms.read_object_file("../elf").unwrap();
-                let profile = icebox::os::linux::Profile::new(syms)?;
+                let profile = icebox::os::linux::Profile::read_from_dir(path)?;
                 let linux = icebox::os::Linux::create(backend.0, profile)?;
                 return Ok(RawOs(Box::new(linux)));
             }
@@ -150,8 +146,8 @@ impl Os {
 #[pymethods]
 impl Os {
     #[new]
-    fn new(py: Python, backend: Backend) -> PyResult<Self> {
-        let raw = RawOs::new(backend)?;
+    fn new(py: Python, backend: Backend, path: &str) -> PyResult<Self> {
+        let raw = RawOs::new(backend, path)?;
         Ok(Os(PyOwned::new(py, raw)?))
     }
 

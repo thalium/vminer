@@ -5,7 +5,7 @@ use icebox::os;
 fn main() {
     env_logger::init();
 
-    let arch = "aarch64";
+    let arch = "x86_64";
 
     // let mut args = std::env::args();
     // let pid = args.nth(1).expect("missing pid");
@@ -18,14 +18,7 @@ fn main() {
     //let _ = dbg!(os::Linux::quick_check());
     //println!("0x{:x}", addr);
 
-    let mut syms = ice::SymbolsIndexer::new();
-    let kallsyms = std::io::BufReader::new(
-        std::fs::File::open(format!("data/linux-5.10-{arch}/kallsyms")).unwrap(),
-    );
-    os::linux::profile::parse_symbol_file(kallsyms, &mut syms).unwrap();
-    syms.read_object_file(format!("data/linux-5.10-{arch}/elf"))
-        .unwrap();
-    let profile = os::linux::Profile::new(syms).unwrap();
+    let profile = os::linux::Profile::read_from_dir(format!("data/linux-5.10-{arch}")).unwrap();
 
     let linux = os::Linux::create(vm, profile).unwrap();
 
@@ -43,13 +36,19 @@ fn main() {
     linux
         .process_callstack(proc, &mut |frame| {
             let file = linux.path_to_string(frame.file.unwrap())?;
-            let range = match &frame.range {
-                Some((start, size)) => format!("(0x{start:x} [+0x{size:x}])"),
-                None => format!("<unknown>"),
+            let addr = match frame.range {
+                Some((start, _)) => {
+                    let diff = frame.instruction_pointer - start;
+                    match linux.resolve_symbol(start, frame.vma)? {
+                        Some(sym) => format!("<{sym}+0x{diff:x}>"),
+                        None => format!("<0x{start:x}+0x{diff:x}>"),
+                    }
+                }
+                None => String::from("<unknown>"),
             };
             println!(
-                "Frame: 0x{:x} [0x{:x}] (in {file}) {range}",
-                frame.instruction_pointer, frame.stack_pointer
+                "Frame: 0x{:x} | 0x{:x} ({addr} in {file})",
+                frame.stack_pointer, frame.instruction_pointer
             );
             Ok(())
         })

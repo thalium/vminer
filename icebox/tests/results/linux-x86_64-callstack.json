@@ -3,54 +3,63 @@
     "start": 93983404918784,
     "size": 228,
     "stack_pointer": 140729961158704,
-    "instruction_pointer": 93983404919010
+    "instruction_pointer": 93983404919010,
+    "symbol": "_ZN9callstack4main17h7b3ad5cff1a24cbfE"
   },
   {
     "start": 93983404918304,
     "size": 16,
     "stack_pointer": 140729961158880,
-    "instruction_pointer": 93983404918315
+    "instruction_pointer": 93983404918315,
+    "symbol": "_ZN4core3ops8function6FnOnce9call_once17h185561b57d38e2b8E"
   },
   {
     "start": 93983404918624,
     "size": 60,
     "stack_pointer": 140729961158912,
-    "instruction_pointer": 93983404918638
+    "instruction_pointer": 93983404918638,
+    "symbol": "_ZN3std10sys_common9backtrace28__rust_begin_short_backtrace17h429768978cdd3ed2E"
   },
   {
     "start": 93983404918576,
     "size": 35,
     "stack_pointer": 140729961158960,
-    "instruction_pointer": 93983404918593
+    "instruction_pointer": 93983404918593,
+    "symbol": "_ZN3std2rt10lang_start28_$u7b$$u7b$closure$u7d$$u7d$17hee5af0cc43abb9cdE"
   },
   {
     "start": 93983405180720,
     "size": 221,
     "stack_pointer": 140729961158992,
-    "instruction_pointer": 93983405180747
+    "instruction_pointer": 93983405180747,
+    "symbol": "_ZN3std2rt19lang_start_internal17hd15a47be08101c28E"
   },
   {
     "start": 93983404918496,
     "size": 68,
     "stack_pointer": 140729961159040,
-    "instruction_pointer": 93983404918544
+    "instruction_pointer": 93983404918544,
+    "symbol": "_ZN3std2rt10lang_start17h85ad8675606a1a3aE"
   },
   {
     "start": 93983404919024,
     "size": 30,
     "stack_pointer": 140729961159104,
-    "instruction_pointer": 93983404919052
+    "instruction_pointer": 93983404919052,
+    "symbol": "main"
   },
   {
     "start": 140254240021536,
     "size": 476,
     "stack_pointer": 140729961159120,
-    "instruction_pointer": 140254240021770
+    "instruction_pointer": 140254240021770,
+    "symbol": "__libc_start_main@@GLIBC_2.2.5"
   },
   {
     "start": 93983404918032,
     "size": 43,
     "stack_pointer": 140729961159328,
-    "instruction_pointer": 93983404918074
+    "instruction_pointer": 93983404918074,
+    "symbol": "_start"
   }
 ]

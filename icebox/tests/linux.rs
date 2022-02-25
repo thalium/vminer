@@ -30,13 +30,7 @@ impl fmt::Display for Arch {
 
 fn read_linux(arch: Arch) -> IceResult<Linux<DumbDump<ibc::File>>> {
     let backend = DumbDump::read(format!("../data/linux-5.10-{arch}/dump"))?;
-    let mut syms = ibc::SymbolsIndexer::new();
-    let kallsyms = std::io::BufReader::new(std::fs::File::open(format!(
-        "../data/linux-5.10-{arch}/kallsyms"
-    ))?);
-    icebox::os::linux::profile::parse_symbol_file(kallsyms, &mut syms)?;
-    syms.read_object_file(format!("../data/linux-5.10-{arch}/elf"))?;
-    let profile = icebox::os::linux::Profile::new(syms)?;
+    let profile = icebox::os::linux::Profile::read_from_dir(format!("../data/linux-5.10-{arch}"))?;
     Linux::create(backend, profile)
 }
 
@@ -154,6 +148,7 @@ fn vmas(arch: Arch) {
     struct Vma {
         start: VirtualAddress,
         end: VirtualAddress,
+        offset: u64,
         path: Option<String>,
     }
 
@@ -166,11 +161,17 @@ fn vmas(arch: Arch) {
         .process_for_each_vma(proc, &mut |vma| {
             let start = linux.vma_start(vma)?;
             let end = linux.vma_end(vma)?;
+            let offset = linux.vma_offset(vma)?;
             let path = linux
                 .vma_file(vma)?
                 .map(|path| linux.path_to_string(path).unwrap());
 
-            vmas.push(Vma { start, end, path });
+            vmas.push(Vma {
+                start,
+                end,
+                offset,
+                path,
+            });
             Ok(())
         })
         .unwrap();
@@ -195,6 +196,8 @@ fn callstack(arch: Arch) {
         size: Option<u64>,
         stack_pointer: VirtualAddress,
         instruction_pointer: VirtualAddress,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        symbol: Option<String>,
     }
 
     let linux = arch.linux();
@@ -214,9 +217,14 @@ fn callstack(arch: Arch) {
                 ..
             } = frame;
 
-            let (start, size) = match range {
-                Some((start, end)) => (Some(start), Some(end)),
-                None => (None, None),
+            let (start, size, symbol) = match range {
+                Some((start, end)) => {
+                    let symbol = linux
+                        .resolve_symbol(start, frame.vma)?
+                        .map(|s| s.to_owned());
+                    (Some(start), Some(end), symbol)
+                }
+                None => (None, None, None),
             };
 
             frames.push(StackFrame {
@@ -224,6 +232,7 @@ fn callstack(arch: Arch) {
                 size,
                 stack_pointer,
                 instruction_pointer,
+                symbol,
             });
             Ok(())
         })

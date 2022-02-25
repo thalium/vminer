@@ -30,7 +30,7 @@ mod os;
 pub use os::{Os, Path, Process, StackFrame, Thread, Vma, VmaFlags};
 
 pub mod symbols;
-pub use symbols::SymbolsIndexer;
+pub use symbols::{ModuleSymbols, SymbolsIndexer};
 
 #[inline]
 pub const fn mask(size: u32) -> u64 {
