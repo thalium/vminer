@@ -221,7 +221,7 @@ fn callstack(arch: Arch) {
                 Some((start, end)) => {
                     let symbol = linux
                         .resolve_symbol(start, frame.vma)?
-                        .map(|s| s.to_owned());
+                        .map(|sym| ibc::symbols::demangle(sym).into_owned());
                     (Some(start), Some(end), symbol)
                 }
                 None => (None, None, None),

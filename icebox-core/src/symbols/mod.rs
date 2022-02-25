@@ -1,12 +1,56 @@
 pub mod dwarf;
 
-use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    borrow::{Cow, ToOwned},
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt;
 use hashbrown::HashMap;
 
 use crate::{IceError, IceResult};
 
 use super::VirtualAddress;
+
+/// Demangles a symbol to a string.
+///
+/// If the symbol was not mangled or if the mangling scheme is unknown, the
+/// symbol is returned as-is.
+pub fn demangle(sym: &str) -> Cow<str> {
+    #[cfg(feature = "cpp_demangle")]
+    if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
+        return Cow::Owned(sym.to_string());
+    }
+
+    #[cfg(feature = "rustc-demangle")]
+    if let Ok(sym) = rustc_demangle::try_demangle(sym) {
+        return Cow::Owned(sym.to_string());
+    }
+
+    Cow::Borrowed(sym)
+}
+
+/// Demangles a symbol to a writer.
+///
+/// If the symbol was not mangled or if the mangling scheme is unknown, the
+/// symbol is written as-is.
+pub fn demangle_to<W: fmt::Write>(sym: &str, mut writer: W) -> fmt::Result {
+    #[cfg(feature = "cpp_demangle")]
+    if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
+        writer.write_fmt(format_args!("{sym}"))?;
+        return Ok(());
+    }
+
+    #[cfg(feature = "rustc-demangle")]
+    if let Ok(sym) = rustc_demangle::try_demangle(sym) {
+        writer.write_fmt(format_args!("{sym}"))?;
+        return Ok(());
+    }
+
+    writer.write_str(sym)
+}
 
 #[derive(Debug, Clone)]
 pub struct StructField {

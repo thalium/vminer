@@ -4,42 +4,42 @@
     "size": 172,
     "stack_pointer": 281474793762240,
     "instruction_pointer": 187650564129604,
-    "symbol": "_ZN9callstack4main17hc69dc7f5237682e6E"
+    "symbol": "callstack::main::hc69dc7f5237682e6"
   },
   {
     "start": 187650564130160,
     "size": 28,
     "stack_pointer": 281474793762400,
     "instruction_pointer": 187650564130176,
-    "symbol": "_ZN4core3ops8function6FnOnce9call_once17h3c7e67eb5f8bcb52E"
+    "symbol": "core::ops::function::FnOnce::call_once::h3c7e67eb5f8bcb52"
   },
   {
     "start": 187650564129736,
     "size": 64,
     "stack_pointer": 281474793762432,
     "instruction_pointer": 187650564129756,
-    "symbol": "_ZN3std10sys_common9backtrace28__rust_begin_short_backtrace17hf7ab79e9c4e46844E"
+    "symbol": "std::sys_common::backtrace::__rust_begin_short_backtrace::hf7ab79e9c4e46844"
   },
   {
     "start": 187650564130068,
     "size": 48,
     "stack_pointer": 281474793762480,
     "instruction_pointer": 187650564130092,
-    "symbol": "_ZN3std2rt10lang_start28_$u7b$$u7b$closure$u7d$$u7d$17h59124aa315fcdd5cE"
+    "symbol": "std::rt::lang_start::{{closure}}::h59124aa315fcdd5c"
   },
   {
     "start": 187650564355112,
     "size": 260,
     "stack_pointer": 281474793762512,
     "instruction_pointer": 187650564355148,
-    "symbol": "_ZN3std2rt19lang_start_internal17h138bb80b119e8ba0E"
+    "symbol": "std::rt::lang_start_internal::h138bb80b119e8ba0"
   },
   {
     "start": 187650564129980,
     "size": 88,
     "stack_pointer": 281474793762560,
     "instruction_pointer": 187650564130044,
-    "symbol": "_ZN3std2rt10lang_start17h5ee800002a672c1cE"
+    "symbol": "std::rt::lang_start::h5ee800002a672c1c"
   },
   {
     "start": 187650564129608,
