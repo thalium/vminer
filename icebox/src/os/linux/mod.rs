@@ -1,7 +1,9 @@
 pub mod callstack;
 pub mod profile;
 
-use crate::core::{self as ice, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
+use crate::core::{
+    self as ice, IceError, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress,
+};
 use crate::utils::OnceCell;
 use alloc::{string::String, vec::Vec};
 use core::fmt;
@@ -546,6 +548,26 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn vma_offset(&self, vma: ice::Vma) -> IceResult<u64> {
         self.read_struct_pointer(vma.into(), |vma| vma.vm_pgoff)
             .map(|offset| offset * 4096)
+    }
+
+    fn resolve_symbol(&self, addr: VirtualAddress, vma: ice::Vma) -> IceResult<Option<&str>> {
+        if !self.vma_contains(vma, addr)? {
+            return Err(IceError::new("the address does not belong to the VMA"));
+        }
+
+        let offset = addr - (self.vma_start(vma)? - self.vma_offset(vma)?);
+        let addr = VirtualAddress(offset as u64);
+
+        let module = match self.vma_file(vma)? {
+            Some(path) => self.path_to_string(path)?,
+            None => return Ok(None),
+        };
+        let module = match module.rsplit_once('/') {
+            Some((_, module)) => module,
+            None => return Ok(None),
+        };
+
+        Ok(self.find_symbol(&module, addr))
     }
 }
 

@@ -3,49 +3,57 @@
     "start": 187650564129436,
     "size": 172,
     "stack_pointer": 281474793762240,
-    "instruction_pointer": 187650564129604
+    "instruction_pointer": 187650564129604,
+    "symbol": "_ZN9callstack4main17hc69dc7f5237682e6E"
   },
   {
     "start": 187650564130160,
     "size": 28,
     "stack_pointer": 281474793762400,
-    "instruction_pointer": 187650564130176
+    "instruction_pointer": 187650564130176,
+    "symbol": "_ZN4core3ops8function6FnOnce9call_once17h3c7e67eb5f8bcb52E"
   },
   {
     "start": 187650564129736,
     "size": 64,
     "stack_pointer": 281474793762432,
-    "instruction_pointer": 187650564129756
+    "instruction_pointer": 187650564129756,
+    "symbol": "_ZN3std10sys_common9backtrace28__rust_begin_short_backtrace17hf7ab79e9c4e46844E"
   },
   {
     "start": 187650564130068,
     "size": 48,
     "stack_pointer": 281474793762480,
-    "instruction_pointer": 187650564130092
+    "instruction_pointer": 187650564130092,
+    "symbol": "_ZN3std2rt10lang_start28_$u7b$$u7b$closure$u7d$$u7d$17h59124aa315fcdd5cE"
   },
   {
     "start": 187650564355112,
     "size": 260,
     "stack_pointer": 281474793762512,
-    "instruction_pointer": 187650564355148
+    "instruction_pointer": 187650564355148,
+    "symbol": "_ZN3std2rt19lang_start_internal17h138bb80b119e8ba0E"
   },
   {
     "start": 187650564129980,
     "size": 88,
     "stack_pointer": 281474793762560,
-    "instruction_pointer": 187650564130044
+    "instruction_pointer": 187650564130044,
+    "symbol": "_ZN3std2rt10lang_start17h5ee800002a672c1cE"
   },
   {
     "start": 187650564129608,
     "size": 48,
     "stack_pointer": 281474793762640,
-    "instruction_pointer": 187650564129648
+    "instruction_pointer": 187650564129648,
+    "symbol": "main"
   },
   {
     "start": 281473770844464,
     "size": 476,
     "stack_pointer": 281474793762656,
-    "instruction_pointer": 281473770844696
+    "instruction_pointer": 281473770844696,
+    "symbol": "__libc_start_main@@GLIBC_2.17"
   },
   {
     "start": null,

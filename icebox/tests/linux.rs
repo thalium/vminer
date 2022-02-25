@@ -196,6 +196,8 @@ fn callstack(arch: Arch) {
         size: Option<u64>,
         stack_pointer: VirtualAddress,
         instruction_pointer: VirtualAddress,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        symbol: Option<String>,
     }
 
     let linux = arch.linux();
@@ -215,9 +217,14 @@ fn callstack(arch: Arch) {
                 ..
             } = frame;
 
-            let (start, size) = match range {
-                Some((start, end)) => (Some(start), Some(end)),
-                None => (None, None),
+            let (start, size, symbol) = match range {
+                Some((start, end)) => {
+                    let symbol = linux
+                        .resolve_symbol(start, frame.vma)?
+                        .map(|s| s.to_owned());
+                    (Some(start), Some(end), symbol)
+                }
+                None => (None, None, None),
             };
 
             frames.push(StackFrame {
@@ -225,6 +232,7 @@ fn callstack(arch: Arch) {
                 size,
                 stack_pointer,
                 instruction_pointer,
+                symbol,
             });
             Ok(())
         })

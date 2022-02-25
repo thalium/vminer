@@ -1,5 +1,3 @@
-use std::collections::{hash_map, HashMap};
-
 use icebox::backends::kvm_dump;
 use icebox::core::{self as ice, Backend, Os};
 use icebox::os;
@@ -7,7 +5,7 @@ use icebox::os;
 fn main() {
     env_logger::init();
 
-    let arch = "aarch64";
+    let arch = "x86_64";
 
     // let mut args = std::env::args();
     // let pid = args.nth(1).expect("missing pid");
@@ -35,38 +33,13 @@ fn main() {
         panic!("No proc found");
     };
 
-    let mut libs = HashMap::new();
-    linux
-        .process_for_each_vma(proc, &mut |vma| {
-            if let Some(path) = linux.vma_file(vma)? {
-                let file = linux.path_to_string(path)?;
-                if file.rsplit_once('/').is_some() {
-                    match libs.entry(path) {
-                        hash_map::Entry::Occupied(_) => (),
-                        hash_map::Entry::Vacant(entry) => {
-                            let vma_start = linux.vma_start(vma)?;
-                            entry.insert(vma_start);
-                        }
-                    }
-                }
-            }
-            Ok(())
-        })
-        .unwrap();
-
     linux
         .process_callstack(proc, &mut |frame| {
             let file = linux.path_to_string(frame.file.unwrap())?;
             let addr = match frame.range {
                 Some((start, _)) => {
                     let diff = frame.instruction_pointer - start;
-                    let symbol = (|| {
-                        let (_, lib) = file.rsplit_once('/')?;
-                        let lib_start = *libs.get(&frame.file?)?;
-                        let addr = ice::VirtualAddress((start - lib_start) as u64);
-                        linux.find_symbol(lib, addr)
-                    })();
-                    match symbol {
+                    match linux.resolve_symbol(start, frame.vma)? {
                         Some(sym) => format!("<{sym}+0x{diff:x}>"),
                         None => format!("<0x{start:x}+0x{diff:x}>"),
                     }
