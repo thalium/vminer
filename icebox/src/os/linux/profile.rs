@@ -203,6 +203,7 @@ define_kernel_structs! {
         vm_flags: u64,
         vm_next: Pointer<VmAreaStruct>,
         vm_start: VirtualAddress,
+        vm_pgoff: u64,
     }
 }
 

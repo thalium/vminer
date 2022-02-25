@@ -542,6 +542,11 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         let flags: u64 = self.read_struct_pointer(vma.into(), |vma| vma.vm_flags)?;
         Ok(ibc::VmaFlags(flags))
     }
+
+    fn vma_offset(&self, vma: ice::Vma) -> IceResult<u64> {
+        self.read_struct_pointer(vma.into(), |vma| vma.vm_pgoff)
+            .map(|offset| offset * 4096)
+    }
 }
 
 impl<B> fmt::Debug for Linux<B> {

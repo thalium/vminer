@@ -148,6 +148,7 @@ fn vmas(arch: Arch) {
     struct Vma {
         start: VirtualAddress,
         end: VirtualAddress,
+        offset: u64,
         path: Option<String>,
     }
 
@@ -160,11 +161,17 @@ fn vmas(arch: Arch) {
         .process_for_each_vma(proc, &mut |vma| {
             let start = linux.vma_start(vma)?;
             let end = linux.vma_end(vma)?;
+            let offset = linux.vma_offset(vma)?;
             let path = linux
                 .vma_file(vma)?
                 .map(|path| linux.path_to_string(path).unwrap());
 
-            vmas.push(Vma { start, end, path });
+            vmas.push(Vma {
+                start,
+                end,
+                offset,
+                path,
+            });
             Ok(())
         })
         .unwrap();
