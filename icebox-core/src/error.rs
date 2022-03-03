@@ -130,6 +130,7 @@ enum Repr {
     InvalidPage,
 
     UnsupportedArchitecture,
+    Unimplemented,
 
     MissingModule(Box<str>),
     MissingSymbol(Box<str>),
@@ -194,6 +195,11 @@ impl IceError {
         Self::from_repr(Repr::UnsupportedArchitecture)
     }
 
+    #[cold]
+    pub fn unimplemented() -> Self {
+        Self::from_repr(Repr::Unimplemented)
+    }
+
     pub fn print_backtrace(&self) -> String {
         let mut trace = String::new();
         fmt::write(&mut trace, format_args!("{:#}", self)).unwrap();
@@ -209,6 +215,7 @@ impl fmt::Display for Repr {
             Repr::UnsupportedArchitecture => {
                 f.write_str("operation unsupported by the architecture")
             }
+            Repr::Unimplemented => f.write_str("unimplemented"),
             Repr::MissingModule(name) => {
                 f.write_fmt(format_args!("missing required module \"{name}\""))
             }

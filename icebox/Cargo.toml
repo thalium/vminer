@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["all_os", "object"]
+default = ["std", "all_os", "object"]
 std = ["ibc/std", "once_cell/std"]
 serde1 = ["serde", "ibc/serde"]
 
@@ -12,8 +12,9 @@ no_std_sync = ["spin"]
 
 object = ["ibc/object"]
 
-all_os = ["linux"]
+all_os = ["linux", "windows"]
 linux = []
+windows = ["std"]
 
 all_backends = ["kvm", "dump"]
 kvm = ["std", "libc"]
