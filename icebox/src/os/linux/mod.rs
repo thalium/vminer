@@ -148,12 +148,15 @@ impl<B: ice::Backend> Linux<B> {
         &self,
         pointer: Pointer<L>,
         get_offset: impl FnOnce(&L) -> StructOffset<T>,
-    ) -> Pointer<T>
+    ) -> IceResult<Pointer<T>>
     where
         Self: HasStruct<L>,
     {
+        if pointer.is_null() {
+            return Err(IceError::deref_null_ptr());
+        }
         let offset = get_offset(self.get_struct_layout());
-        Pointer::new(pointer.addr + offset.offset)
+        Ok(Pointer::new(pointer.addr + offset.offset))
     }
 
     /// Reads a field from a struct pointer
@@ -165,6 +168,9 @@ impl<B: ice::Backend> Linux<B> {
     where
         Self: HasStruct<L>,
     {
+        if pointer.is_null() {
+            return Err(IceError::deref_null_ptr());
+        }
         let offset = get_offset(self.get_struct_layout());
         T::read(self, pointer.addr + offset.offset)
     }
@@ -172,6 +178,9 @@ impl<B: ice::Backend> Linux<B> {
     /// Reads a value behind a pointer
     #[allow(dead_code)]
     fn read_pointer<T: Readable>(&self, pointer: Pointer<T>) -> IceResult<T> {
+        if pointer.is_null() {
+            return Err(IceError::deref_null_ptr());
+        }
         T::read(self, pointer.addr)
     }
 
@@ -268,7 +277,7 @@ impl<B: ice::Backend> Linux<B> {
             processes.insert(init, ProcessData::default());
 
             self.iterate_list::<profile::TaskStruct, _, _>(
-                self.read_struct(init.into(), |ts| ts.tasks),
+                self.read_struct(init.into(), |ts| ts.tasks)?,
                 |ts| ts.tasks,
                 |proc| {
                     processes.insert(proc.into(), ProcessData::default());
@@ -289,7 +298,7 @@ impl<B: ice::Backend> Linux<B> {
     where
         F: FnMut(ibc::Process) -> IceResult<()>,
     {
-        let children = self.read_struct(proc.into(), |ts| ts.children);
+        let children = self.read_struct(proc.into(), |ts| ts.children)?;
         self.iterate_list::<profile::TaskStruct, _, _>(
             children,
             |ts| ts.sibling,
@@ -307,7 +316,7 @@ impl<B: ice::Backend> Linux<B> {
             self.build_path(parent, buf)?;
         }
 
-        let qstr = self.read_struct(dentry, |d| d.d_name);
+        let qstr = self.read_struct(dentry, |d| d.d_name)?;
         let name = self.read_struct_pointer(qstr, |qstr| qstr.name)?;
 
         // TODO: use qstr.len here
@@ -426,7 +435,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         if file.is_null() {
             return Ok(None);
         }
-        let path = self.read_struct(file, |file| file.f_path);
+        let path = self.read_struct(file, |file| file.f_path)?;
         Ok(Some(path.into()))
     }
 
@@ -469,7 +478,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ice::Process,
         f: &mut dyn FnMut(ice::Thread) -> IceResult<()>,
     ) -> IceResult<()> {
-        let thread_group = self.read_struct(proc.into(), |ts| ts.thread_group);
+        let thread_group = self.read_struct(proc.into(), |ts| ts.thread_group)?;
         self.iterate_list::<profile::TaskStruct, _, _>(
             thread_group,
             |ts| ts.thread_group,
@@ -528,7 +537,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         if file.is_null() {
             return Ok(None);
         }
-        let path = self.read_struct(file, |file| file.f_path);
+        let path = self.read_struct(file, |file| file.f_path)?;
         Ok(Some(path.into()))
     }
 

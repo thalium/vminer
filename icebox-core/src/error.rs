@@ -135,6 +135,8 @@ enum Repr {
     MissingSymbol(Box<str>),
     MissingField(Box<str>, Box<str>),
 
+    NullPtr,
+
     #[cfg(feature = "std")]
     Io(std::io::Error),
     Other(Box<dyn Error + Send + Sync>),
@@ -170,6 +172,11 @@ impl IceError {
     #[cold]
     pub fn missing_field(field: &str, typ: &str) -> Self {
         Self::from_repr(Repr::MissingField(field.into(), typ.into()))
+    }
+
+    #[cold]
+    pub fn deref_null_ptr() -> Self {
+        Self::from_repr(Repr::NullPtr)
     }
 
     #[cold]
@@ -212,7 +219,7 @@ impl fmt::Display for Repr {
                 "missing required field \"{}\" in type \"{}\"",
                 field, typ
             )),
-
+            Repr::NullPtr => f.write_str("attempted to deref NULL pointer"),
             #[cfg(feature = "std")]
             Repr::Io(_) => f.write_str("I/O error"),
             Repr::Context(msg, _) => f.write_str(msg),
