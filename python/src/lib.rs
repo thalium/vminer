@@ -1,10 +1,46 @@
 use std::sync::Arc;
 
-use ibc::{IceError, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress};
+use ibc::{IceError, IceResult, MemoryAccessResultExt};
 use icebox::os::OsBuilder;
 use pyo3::{exceptions, gc::PyGCProtocol, prelude::*, types::PyBytes};
 
 use icebox_core::{self as ibc, Backend as _};
+
+pyo3::create_exception!(icebox, IceboxError, pyo3::exceptions::PyException);
+
+trait ToPyResult<T> {
+    fn convert_err(self) -> PyResult<T>;
+}
+
+impl<T> ToPyResult<T> for IceResult<T> {
+    fn convert_err(self) -> PyResult<T> {
+        self.map_err(|err| IceboxError::new_err(err.print_backtrace()))
+    }
+}
+
+impl<T> ToPyResult<T> for ibc::MemoryAccessResult<T> {
+    fn convert_err(self) -> PyResult<T> {
+        self.map_err(|err| IceboxError::new_err(err.to_string()))
+    }
+}
+
+#[derive(pyo3::FromPyObject)]
+struct VirtualAddress(u64);
+
+impl From<VirtualAddress> for ibc::VirtualAddress {
+    fn from(addr: VirtualAddress) -> Self {
+        Self(addr.0)
+    }
+}
+
+#[derive(pyo3::FromPyObject)]
+struct PhysicalAddress(u64);
+
+impl From<PhysicalAddress> for ibc::PhysicalAddress {
+    fn from(addr: PhysicalAddress) -> Self {
+        Self(addr.0)
+    }
+}
 
 struct PyOwned<T>(Option<Py<T>>);
 
@@ -44,8 +80,8 @@ struct Backend(Arc<dyn ibc::RuntimeBackend + Send + Sync>);
 
 #[pymethods]
 impl Backend {
-    fn read_u64(&self, addr: u64) -> PyResult<u64> {
-        Ok(self.0.read_value(PhysicalAddress(addr))?)
+    fn read_u64(&self, addr: PhysicalAddress) -> PyResult<u64> {
+        self.0.read_value(addr.into()).convert_err()
     }
 
     fn virtual_to_physical(
@@ -53,7 +89,11 @@ impl Backend {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
     ) -> PyResult<u64> {
-        let addr = self.0.virtual_to_physical(mmu_addr, addr).valid()?;
+        let addr = self
+            .0
+            .virtual_to_physical(mmu_addr.into(), addr.into())
+            .valid()
+            .convert_err()?;
         Ok(addr.0)
     }
 
@@ -64,7 +104,7 @@ impl Backend {
         len: usize,
     ) -> PyResult<&'py PyBytes> {
         PyBytes::new_with(py, len, |buf| {
-            self.0.read_memory(addr, buf).map_err(Into::into)
+            self.0.read_memory(addr.into(), buf).convert_err()
         })
     }
 
@@ -77,8 +117,8 @@ impl Backend {
     ) -> PyResult<&'py PyBytes> {
         PyBytes::new_with(py, len, |buf| {
             self.0
-                .read_virtual_memory(mmu_addr, addr, buf)
-                .map_err(Into::into)
+                .read_virtual_memory(mmu_addr.into(), addr.into(), buf)
+                .convert_err()
         })
     }
 }
@@ -92,7 +132,7 @@ impl Kvm {
     fn new(pid: i32) -> PyResult<(Self, Backend)> {
         #[cfg(target_os = "linux")]
         {
-            let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
+            let kvm = icebox::backends::kvm::Kvm::connect(pid).convert_err()?;
             Ok((Kvm, Backend(Arc::new(kvm))))
         }
 
@@ -147,28 +187,28 @@ impl Os {
 impl Os {
     #[new]
     fn new(py: Python, backend: Backend, path: &str) -> PyResult<Self> {
-        let raw = RawOs::new(backend, path)?;
+        let raw = RawOs::new(backend, path).convert_err()?;
         Ok(Os(PyOwned::new(py, raw)?))
     }
 
     fn init_process(&self, py: Python) -> PyResult<Process> {
-        let init = self.0.borrow(py)?.0.init_process()?;
+        let init = self.0.borrow(py)?.0.init_process().convert_err()?;
         Ok(self.make_proc(py, init))
     }
 
     fn current_thread(&self, py: Python, cpuid: usize) -> PyResult<Thread> {
-        let thread = self.0.borrow(py)?.0.current_thread(cpuid)?;
+        let thread = self.0.borrow(py)?.0.current_thread(cpuid).convert_err()?;
         Ok(Thread::new(py, thread, &self.0))
     }
 
     fn current_process(&self, py: Python, cpuid: usize) -> PyResult<Process> {
-        let proc = self.0.borrow(py)?.0.current_process(cpuid)?;
+        let proc = self.0.borrow(py)?.0.current_process(cpuid).convert_err()?;
         Ok(self.make_proc(py, proc))
     }
 
     fn procs(&self, py: Python) -> PyResult<ProcessIter> {
         let os = self.0.borrow(py)?;
-        let procs = os.0.collect_processes()?.into_iter();
+        let procs = os.0.collect_processes().convert_err()?.into_iter();
 
         Ok(ProcessIter {
             procs,
@@ -178,13 +218,13 @@ impl Os {
 
     fn find_process_by_name(&self, py: Python, name: &str) -> PyResult<Option<Process>> {
         let os = self.0.borrow(py)?;
-        let proc = os.0.find_process_by_name(name)?;
+        let proc = os.0.find_process_by_name(name).convert_err()?;
         Ok(proc.map(|p| self.make_proc(py, p)))
     }
 
     fn find_process_by_pid(&self, py: Python, pid: u32) -> PyResult<Option<Process>> {
         let os = self.0.borrow(py)?;
-        let proc = os.0.find_process_by_pid(pid)?;
+        let proc = os.0.find_process_by_pid(pid).convert_err()?;
         Ok(proc.map(|p| self.make_proc(py, p)))
     }
 }
@@ -220,41 +260,44 @@ impl Process {
     #[getter]
     fn pid(&self, py: Python) -> PyResult<u32> {
         let os = self.os.borrow(py)?;
-        let pid = os.0.process_pid(self.proc)?;
+        let pid = os.0.process_pid(self.proc).convert_err()?;
         Ok(pid)
     }
 
     #[getter]
     fn name(&self, py: Python) -> PyResult<String> {
         let os = self.os.borrow(py)?;
-        let name = os.0.process_name(self.proc)?;
+        let name = os.0.process_name(self.proc).convert_err()?;
         Ok(name)
     }
 
     #[getter]
     fn is_kernel(&self, py: Python) -> PyResult<bool> {
         let os = self.os.borrow(py)?;
-        let flags = os.0.process_is_kernel(self.proc)?;
+        let flags = os.0.process_is_kernel(self.proc).convert_err()?;
         Ok(flags)
     }
 
     #[getter]
     fn pgd(&self, py: Python) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
-        let pgd = os.0.process_pgd(self.proc)?;
+        let pgd = os.0.process_pgd(self.proc).convert_err()?;
         Ok(pgd.0)
     }
 
     #[getter]
     fn exe(&self, py: Python) -> PyResult<Option<String>> {
         let os = self.os.borrow(py)?;
-        let path = os.0.process_exe(self.proc)?;
-        Ok(path.map(|path| os.0.path_to_string(path)).transpose()?)
+        let path = os.0.process_exe(self.proc).convert_err()?;
+        Ok(path
+            .map(|path| os.0.path_to_string(path))
+            .transpose()
+            .convert_err()?)
     }
 
     fn parent(&self, py: Python) -> PyResult<Process> {
         let os = self.os.borrow(py)?;
-        let parent = os.0.process_parent(self.proc)?;
+        let parent = os.0.process_parent(self.proc).convert_err()?;
         Ok(Process {
             proc: parent,
             os: self.os.clone_ref(py),
@@ -263,7 +306,10 @@ impl Process {
 
     fn children(&self, py: Python) -> PyResult<ProcessIter> {
         let os = self.os.borrow(py)?;
-        let procs = os.0.process_collect_children(self.proc)?.into_iter();
+        let procs =
+            os.0.process_collect_children(self.proc)
+                .convert_err()?
+                .into_iter();
 
         Ok(ProcessIter {
             procs,
@@ -273,7 +319,10 @@ impl Process {
 
     fn threads(&self, py: Python) -> PyResult<ThreadIter> {
         let os = self.os.borrow(py)?;
-        let threads = os.0.process_collect_threads(self.proc)?.into_iter();
+        let threads =
+            os.0.process_collect_threads(self.proc)
+                .convert_err()?
+                .into_iter();
 
         Ok(ThreadIter {
             threads,
@@ -283,7 +332,10 @@ impl Process {
 
     fn vmas(&self, py: Python) -> PyResult<VmaIter> {
         let os = self.os.borrow(py)?;
-        let vmas = os.0.process_collect_vmas(self.proc)?.into_iter();
+        let vmas =
+            os.0.process_collect_vmas(self.proc)
+                .convert_err()?
+                .into_iter();
 
         Ok(VmaIter {
             vmas,
@@ -306,7 +358,8 @@ impl Process {
                 file,
             });
             Ok(())
-        })?;
+        })
+        .convert_err()?;
 
         Ok(CallStackIter {
             frames: frames.into_iter(),
@@ -345,20 +398,20 @@ impl Thread {
     #[getter]
     fn tid(&self, py: Python) -> PyResult<u32> {
         let os = self.os.borrow(py)?;
-        let pid = os.0.thread_id(self.thread)?;
+        let pid = os.0.thread_id(self.thread).convert_err()?;
         Ok(pid)
     }
 
     #[getter]
     fn name(&self, py: Python) -> PyResult<String> {
         let os = self.os.borrow(py)?;
-        let name = os.0.thread_name(self.thread)?;
+        let name = os.0.thread_name(self.thread).convert_err()?;
         Ok(name)
     }
 
     fn process(&self, py: Python) -> PyResult<Process> {
         let os = self.os.borrow(py)?;
-        let proc = os.0.thread_process(self.thread)?;
+        let proc = os.0.thread_process(self.thread).convert_err()?;
         Ok(Process::new(py, proc, &self.os))
     }
 }
@@ -394,22 +447,25 @@ impl Vma {
     #[getter]
     fn start(&self, py: Python) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
-        let start = os.0.vma_start(self.vma)?;
+        let start = os.0.vma_start(self.vma).convert_err()?;
         Ok(start.0)
     }
 
     #[getter]
     fn end(&self, py: Python) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
-        let end = os.0.vma_end(self.vma)?;
+        let end = os.0.vma_end(self.vma).convert_err()?;
         Ok(end.0)
     }
 
     #[getter]
     fn file(&self, py: Python) -> PyResult<Option<String>> {
         let os = self.os.borrow(py)?;
-        let path = os.0.vma_file(self.vma)?;
-        Ok(path.map(|path| os.0.path_to_string(path)).transpose()?)
+        let path = os.0.vma_file(self.vma).convert_err()?;
+        Ok(path
+            .map(|path| os.0.path_to_string(path))
+            .transpose()
+            .convert_err()?)
     }
 }
 

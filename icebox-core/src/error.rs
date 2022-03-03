@@ -335,20 +335,3 @@ impl<T> ResultExt<T> for Option<T> {
         self.ok_or_else(|| IceError::new(msg().to_string()))
     }
 }
-
-#[cfg(feature = "python")]
-pyo3::create_exception!(icebox, IceboxError, pyo3::exceptions::PyException);
-
-#[cfg(feature = "python")]
-impl From<IceError> for pyo3::PyErr {
-    fn from(err: IceError) -> Self {
-        IceboxError::new_err(err.print_backtrace())
-    }
-}
-
-#[cfg(feature = "python")]
-impl From<MemoryAccessError> for pyo3::PyErr {
-    fn from(err: MemoryAccessError) -> Self {
-        IceError::from(err).into()
-    }
-}

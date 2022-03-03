@@ -8,7 +8,6 @@ edition = "2021"
 default = ["rustc-demangle"]
 std = ["gimli/std", "object/std", "sync_file"]
 demangle = ["cpp_demangle", "rustc-demangle"]
-python = ["std", "pyo3"]
 
 [dependencies]
 bytemuck = {version = "1.7", features = ["derive"]}
@@ -25,5 +24,3 @@ sync_file = {version = "0.2", optional = true}
 
 cpp_demangle = {version = "0.3.5", optional = true}
 rustc-demangle = {version = "0.1.21", optional = true}
-
-pyo3 = {version = "0.15", optional = true}

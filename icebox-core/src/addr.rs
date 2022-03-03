@@ -7,7 +7,6 @@ use core::{fmt, ops::Add};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
 pub struct PhysicalAddress(pub u64);
 
@@ -67,7 +66,6 @@ impl Sub<u64> for PhysicalAddress {
     bytemuck::Zeroable,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "python", derive(pyo3::FromPyObject))]
 #[repr(transparent)]
 pub struct VirtualAddress(pub u64);
 
