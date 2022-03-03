@@ -88,14 +88,34 @@ pub trait Architecture<'a> {
     ) -> MemoryAccessResult<Option<VirtualAddress>>;
 }
 
+/// The description of how a MMU works
+///
+/// All architechtures have similar MMU with multiple tables, so this trait
+/// tries to abstract that, giving configurations capabities to adapt to each
+/// architecture.
+///
+/// Using a trait here enable many compile-time optimisations.
 trait MmuDesc {
+    /// Assume that all physical addresses have this offset. For some reason
+    /// this is required on aarch64.
     const MEM_OFFSET: u64 = 0;
 
+    /// The number of significant bits in an address.
     const ADDR_BITS: u32 = 48;
+
+    /// The bits at which each an index can be found for each table entry.
+    ///
+    /// The boolean should be `true` if a large page can be encountered at this
+    /// level.
     const LEVELS: &'static [(u32, bool)] = &[(39, false), (30, true), (21, true), (12, false)];
 
+    /// Returns true if an entry is valid
     fn is_valid(mmu_entry: MmuEntry) -> bool;
 
+    /// Returns true if an entry is a "large" one.
+    ///
+    /// This is required to support 2M pages for example. If a large page is
+    /// encountered, address translation stops here.
     fn is_large(mmu_entry: MmuEntry) -> bool;
 }
 
@@ -106,10 +126,14 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
 ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
     let mut mmu_entry = MmuEntry(mmu_addr.0);
 
+    // This loop is generally unrolled and values are calculated at compile time
     for &(shift, has_huge) in Mmu::LEVELS {
+        // First, retreive the index in the table
         let table_addr = mmu_entry.take_bits(12, Mmu::ADDR_BITS);
         let index = (addr.0 >> shift) & mask(9);
 
+        // Each entry is 64 bits (8 bytes) large. This should probably be
+        // changed to support 32 bits.
         memory.read(
             table_addr + 8 * index,
             bytemuck::bytes_of_mut(&mut mmu_entry),
@@ -119,6 +143,7 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
         }
         mmu_entry -= Mmu::MEM_OFFSET;
 
+        // If we encounter a huge page, we are done
         if has_huge && Mmu::is_large(mmu_entry) {
             let base = mmu_entry.take_bits(shift, Mmu::ADDR_BITS);
             let phys_addr = base + (addr.0 & mask(shift));
@@ -130,6 +155,9 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     Ok(Some(phys_addr))
 }
 
+/// This is a recursive function to walk the translation table.
+///
+/// The buffer is used to avoid allocating a new one for each entry.
 fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     memory: &M,
     table_addr: PhysicalAddress,
@@ -147,12 +175,14 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     memory.read(table_addr, bytemuck::bytes_of_mut(&mut table))?;
     let page_size = 1 << shift;
 
+    // Skip the beginning of the table, as Linux maps all physical memory here.
     let skip = if levels.len() == Mmu::LEVELS.len() {
         0x140
     } else {
         0
     };
 
+    // Iterate over the valid entries
     for (index, entry) in table
         .into_iter()
         .enumerate()
@@ -163,6 +193,8 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
         let entry = entry - Mmu::MEM_OFFSET;
 
         if rest.is_empty() || (has_large && Mmu::is_large(entry)) {
+            // If this is the last level or if we encountered a large page, look
+            // for the pattern in memory
             let addr = entry.take_bits(shift, Mmu::ADDR_BITS);
             match memory.search(addr, page_size, finder, buf) {
                 Ok(Some(i)) => return Ok(Some(base_addr + i as u64)),
@@ -170,6 +202,7 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
                 Err(err) => return Err(err),
             }
         } else {
+            // Else call ourselves recursively
             let table_addr = entry.take_bits(12, Mmu::ADDR_BITS);
             let result = find_in_kernel_memory_inner::<Mmu, M>(
                 memory, table_addr, base_addr, finder, buf, rest,
@@ -183,6 +216,9 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     Ok(None)
 }
 
+/// Find a pattern in kernel memory by walking the translation table.
+///
+/// This will probably fail if the pattern overlaps multiple pages.
 fn find_in_kernel_memory<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     memory: &M,
     mmu_addr: PhysicalAddress,
