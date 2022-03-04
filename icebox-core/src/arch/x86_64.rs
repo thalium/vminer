@@ -10,6 +10,7 @@ pub struct X86_64;
 pub struct Vcpu {
     pub registers: Registers,
     pub special_registers: SpecialRegisters,
+    pub lstar: u64,
     pub gs_kernel_base: u64,
 }
 

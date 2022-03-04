@@ -210,7 +210,7 @@ fn start_listener(
         let mut registers = bytemuck::Zeroable::zeroed();
         let mut special_registers = bytemuck::Zeroable::zeroed();
         #[cfg(target_arch = "x86_64")]
-        let mut gs_kernel_base = 0;
+        let mut msrs = [0; 2];
 
         let (mut socket, _) = listener.accept()?;
 
@@ -220,11 +220,12 @@ fn start_listener(
                 {
                     socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
                     socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
-                    socket.read_exact(bytemuck::bytes_of_mut(&mut gs_kernel_base))?;
+                    socket.read_exact(bytemuck::bytes_of_mut(&mut msrs))?;
                     Ok(arch::Vcpu {
                         registers,
                         special_registers,
-                        gs_kernel_base,
+                        lstar: msrs[0],
+                        gs_kernel_base: msrs[1],
                     })
                 }
                 #[cfg(target_arch = "aarch64")]

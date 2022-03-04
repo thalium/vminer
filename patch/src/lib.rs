@@ -31,11 +31,11 @@ fn send_fds(vcpus: &[i32]) -> io::Result<()> {
     for &vcpu in vcpus {
         let regs = kvm::get_regs(vcpu)?;
         let sregs = kvm::get_sregs(vcpu)?;
-        let gs_kernel_base = kvm::get_kernel_gs_base(vcpu)?;
+        let msrs = kvm::get_msrs(vcpu)?;
 
         socket.write_all(bytemuck::bytes_of(&regs))?;
         socket.write_all(bytemuck::bytes_of(&sregs))?;
-        socket.write_all(bytemuck::bytes_of(&gs_kernel_base))?;
+        socket.write_all(bytemuck::bytes_of(&msrs))?;
     }
 
     #[cfg(target_arch = "aarch64")]

@@ -25,11 +25,13 @@ impl Vcpus {
             let mut vcpu = x86_64::Vcpu {
                 registers: Zeroable::zeroed(),
                 special_registers: Zeroable::zeroed(),
+                lstar: 0,
                 gs_kernel_base: 0,
             };
 
             reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.registers))?;
             reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.special_registers))?;
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.lstar))?;
             reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.gs_kernel_base))?;
 
             vcpus.push(vcpu);
@@ -107,6 +109,7 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
                 for vcpu in vcpus {
                     out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
                     out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.lstar))?;
                     out.write_all(bytemuck::bytes_of(&vcpu.gs_kernel_base))?;
                 }
             }

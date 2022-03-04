@@ -110,7 +110,7 @@ struct kvm_msrs {
     nmsrs: u32,
     pad: u32,
 
-    entries: [kvm_msr_entry; 1],
+    entries: [kvm_msr_entry; 2],
 }
 
 #[repr(C)]
@@ -121,14 +121,25 @@ struct kvm_msr_entry {
     data: u64,
 }
 
-pub fn get_kernel_gs_base(vcpu_fd: i32) -> io::Result<u64> {
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+pub struct msrs {
+    lstar: u64,
+    kernel_gs_base: u64,
+}
+
+pub fn get_msrs(vcpu_fd: i32) -> io::Result<msrs> {
     let mut msrs = kvm_msrs::zeroed();
-    msrs.nmsrs = 1;
-    msrs.entries[0].index = 0xC0000102;
+    msrs.nmsrs = 2;
+    msrs.entries[0].index = 0xc0000082; // lstar
+    msrs.entries[1].index = 0xc0000102; // kernel_gs_base
 
     unsafe {
         check!(libc::ioctl(vcpu_fd, KVM_GET_MSRS, &mut msrs))?;
     }
 
-    Ok(msrs.entries[0].data)
+    Ok(msrs {
+        lstar: msrs.entries[0].data,
+        kernel_gs_base: msrs.entries[1].data,
+    })
 }
