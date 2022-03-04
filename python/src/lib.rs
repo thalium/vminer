@@ -138,7 +138,10 @@ impl Kvm {
 
         #[cfg(not(target_os = "linux"))]
         {
-            Err(IceError::from("This backend is not available on your platform").into())
+            Err(IceError::from(
+                "This backend is not available on your platform",
+            ))
+            .convert_err()
         }
     }
 }
