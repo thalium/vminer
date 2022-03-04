@@ -91,6 +91,7 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
         let test_addrs: alloc::vec::Vec<_> = self
             .iter()
             .filter_map(|vcpu| vcpu.kernel_per_cpu())
+            .chain([VirtualAddress(self[0].lstar)])
             .collect();
         let mem_size = memory.size();
 
