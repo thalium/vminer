@@ -193,7 +193,7 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
 fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     memory: &M,
     table_addr: PhysicalAddress,
-    base_addr: VirtualAddress,
+    base_search_addr: VirtualAddress,
     finder: &memchr::memmem::Finder,
     buf: &mut [u8],
     levels: &[(u32, bool)],
@@ -207,21 +207,20 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     memory.read(table_addr, bytemuck::bytes_of_mut(&mut table))?;
     let page_size = 1 << shift;
 
-    // Skip the beginning of the table, as Linux maps all physical memory here.
-    let skip = if levels.len() == Mmu::LEVELS.len() {
-        0x140
-    } else {
-        0
-    };
+    // The base virtual address from which we calculate other addresses
+    let true_base_addr = VirtualAddress(base_search_addr.0 & !mask(shift + 9));
 
     // Iterate over the valid entries
     for (index, entry) in table
         .into_iter()
         .enumerate()
-        .skip(skip)
         .filter(|(_, mmu_entry)| Mmu::is_valid(*mmu_entry))
     {
-        let base_addr = base_addr + index as u64 * page_size;
+        // Skip entries that are too low
+        let base_addr = true_base_addr + index as u64 * page_size;
+        if base_addr < base_search_addr {
+            continue;
+        }
         let entry = entry - Mmu::MEM_OFFSET;
 
         if rest.is_empty() || (has_large && Mmu::is_large(entry)) {
@@ -255,16 +254,16 @@ fn find_in_kernel_memory<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     memory: &M,
     mmu_addr: PhysicalAddress,
     needle: &[u8],
+    base_search_addr: VirtualAddress,
 ) -> MemoryAccessResult<Option<VirtualAddress>> {
     let mut buf = alloc::vec![0; (1 << 21) + needle.len()];
-    let base_addr = VirtualAddress(crate::mask_range(Mmu::ADDR_BITS, 64));
     let finder = memchr::memmem::Finder::new(needle);
     let table_addr = MmuEntry(mmu_addr.0).take_bits(12, Mmu::ADDR_BITS);
 
     find_in_kernel_memory_inner::<Mmu, M>(
         memory,
         table_addr,
-        base_addr,
+        base_search_addr,
         &finder,
         &mut buf,
         Mmu::LEVELS,
