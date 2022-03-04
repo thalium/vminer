@@ -128,10 +128,15 @@ impl<'a> arch::Vcpus<'a> for Vcpus<'a> {
     }
 
     #[inline]
-    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress> {
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        use_per_cpu: bool,
+        additionnal: &[VirtualAddress],
+    ) -> Option<PhysicalAddress> {
         match self {
-            Self::X86_64(vcpus) => vcpus.find_kernel_pgd(memory),
-            Self::Aarch64(vcpus) => vcpus.find_kernel_pgd(memory),
+            Self::X86_64(vcpus) => vcpus.find_kernel_pgd(memory, use_per_cpu, additionnal),
+            Self::Aarch64(vcpus) => vcpus.find_kernel_pgd(memory, use_per_cpu, additionnal),
         }
     }
 

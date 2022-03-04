@@ -120,7 +120,7 @@ pub fn get_aslr<B: ice::Backend>(
 
 impl<B: ice::Backend> Linux<B> {
     pub fn create(backend: B, profile: Profile) -> IceResult<Self> {
-        let kpgd = backend.find_kernel_pgd()?;
+        let kpgd = backend.find_kernel_pgd(true, &[])?;
         let kaslr = get_aslr(&backend, &profile, kpgd)?;
 
         Ok(Linux {
@@ -363,7 +363,7 @@ fn get_banner_addr<B: ice::Backend>(
 
 impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {
     fn quick_check(backend: &B) -> IceResult<bool> {
-        let mmu_addr = backend.find_kernel_pgd()?;
+        let mmu_addr = backend.find_kernel_pgd(true, &[])?;
         Ok(get_banner_addr(backend, mmu_addr)?.is_some())
     }
 }

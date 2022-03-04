@@ -95,8 +95,13 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
     }
 
     #[inline]
-    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress> {
-        use super::{Architecture, Vcpu};
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        use_per_cpu: bool,
+        additionnal: &[VirtualAddress],
+    ) -> Option<PhysicalAddress> {
+        use super::Vcpu;
 
         for vcpu in *self {
             if vcpu.instruction_pointer().is_kernel() {
@@ -105,16 +110,8 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
         }
 
         // To check if a TTBR is valid, try to translate valid kernel addresses with it
-        let mem_size = memory.size();
-        let test = |addr| {
-            self.iter().all(|vcpu| {
-                let test_addr = VirtualAddress(vcpu.special_registers.vbar_el1);
-                match Aarch64.virtual_to_physical(memory, addr, test_addr) {
-                    Ok(Some(addr)) => addr.0 < mem_size,
-                    _ => false,
-                }
-            })
-        };
+        let addresses = &[additionnal];
+        let test = super::make_address_test(self, memory, use_per_cpu, addresses);
 
         // Try pages near a "wrong" TTBR1
         if let Some(vcpu) = self

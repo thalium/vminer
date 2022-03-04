@@ -84,30 +84,15 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
         &self[id]
     }
 
-    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress> {
-        use super::{Architecture, Vcpu};
-
-        // Collect some valid kernel addresses
-        let test_addrs: alloc::vec::Vec<_> = self
-            .iter()
-            .filter_map(|vcpu| vcpu.kernel_per_cpu())
-            .chain([VirtualAddress(self[0].lstar)])
-            .collect();
-        let mem_size = memory.size();
-
-        if test_addrs.is_empty() {
-            return None;
-        }
-
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        use_per_cpu: bool,
+        additionnal: &[VirtualAddress],
+    ) -> Option<PhysicalAddress> {
         // To check if a CR3 is valid, try to translate addresses with it
-        let test = |addr| {
-            test_addrs.iter().all(|test_addr| {
-                match X86_64.virtual_to_physical(memory, addr, *test_addr) {
-                    Ok(Some(addr)) => addr.0 < mem_size,
-                    _ => false,
-                }
-            })
-        };
+        let addresses = &[additionnal, &[VirtualAddress(self[0].lstar)]];
+        let test = super::make_address_test(self, memory, use_per_cpu, addresses);
 
         // First, try cr3 registers
         for vcpu in *self {

@@ -20,6 +20,33 @@ fn try_all_addresses(test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalA
     None
 }
 
+fn make_address_test<'a>(
+    vcpus: &'a (impl Vcpus<'a> + Copy),
+    memory: &'a (impl crate::Memory + ?Sized),
+    use_per_cpu: bool,
+    additionnal: &'a [&[VirtualAddress]],
+) -> impl Fn(PhysicalAddress) -> bool + 'a {
+    let mem_size = memory.size();
+    move |addr| {
+        let test_one = |test_addr| match vcpus.arch().virtual_to_physical(memory, addr, test_addr) {
+            Ok(Some(addr)) => addr.0 < mem_size,
+            _ => false,
+        };
+
+        let valid = additionnal.iter().copied().flatten().copied().all(test_one);
+
+        if use_per_cpu {
+            valid
+                && vcpus
+                    .into_iter()
+                    .filter_map(|vcpu| vcpu.kernel_per_cpu())
+                    .all(test_one)
+        } else {
+            valid
+        }
+    }
+}
+
 /// Architecture-independant operations for vCPUs lists
 pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu> {
     type Arch: Architecture<'a>;
@@ -34,7 +61,12 @@ pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu>
         self.get(cpuid).kernel_per_cpu()
     }
 
-    fn find_kernel_pgd<M: crate::Memory + ?Sized>(&self, memory: &M) -> Option<PhysicalAddress>;
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        use_per_cpu: bool,
+        additionnal: &[VirtualAddress],
+    ) -> Option<PhysicalAddress>;
 
     fn into_runtime(self) -> runtime::Vcpus<'a>;
 }
