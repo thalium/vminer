@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ibc::{IceError, IceResult, MemoryAccessResultExt};
 use icebox::os::OsBuilder;
-use pyo3::{exceptions, gc::PyGCProtocol, prelude::*, types::PyBytes};
+use pyo3::{exceptions, prelude::*, types::PyBytes};
 
 use icebox_core::{self as ibc, Backend as _};
 
@@ -177,7 +177,7 @@ impl RawOs {
     }
 }
 
-#[pyclass(gc)]
+#[pyclass]
 struct Os(PyOwned<RawOs>);
 
 impl Os {
@@ -188,6 +188,14 @@ impl Os {
 
 #[pymethods]
 impl Os {
+    fn __traverse__(&self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
+        self.0.traverse(visit)
+    }
+
+    fn __clear__(&mut self) {
+        self.0.clear()
+    }
+
     #[new]
     fn new(py: Python, backend: Backend, path: &str) -> PyResult<Self> {
         let raw = RawOs::new(backend, path).convert_err()?;
@@ -232,18 +240,7 @@ impl Os {
     }
 }
 
-#[pyproto]
-impl<'p> PyGCProtocol<'p> for Os {
-    fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
-        self.0.traverse(visit)
-    }
-
-    fn __clear__(&'p mut self) {
-        self.0.clear()
-    }
-}
-
-#[pyclass(gc)]
+#[pyclass]
 struct Process {
     proc: ibc::Process,
     os: PyOwned<RawOs>,
@@ -260,6 +257,14 @@ impl Process {
 
 #[pymethods]
 impl Process {
+    fn __traverse__(&self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
+        self.os.traverse(visit)
+    }
+
+    fn __clear__(&mut self) {
+        self.os.clear()
+    }
+
     #[getter]
     fn pid(&self, py: Python) -> PyResult<u32> {
         let os = self.os.borrow(py)?;
@@ -370,18 +375,7 @@ impl Process {
     }
 }
 
-#[pyproto]
-impl<'p> PyGCProtocol<'p> for Process {
-    fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
-        self.os.traverse(visit)
-    }
-
-    fn __clear__(&'p mut self) {
-        self.os.clear()
-    }
-}
-
-#[pyclass(gc)]
+#[pyclass]
 struct Thread {
     thread: ibc::Thread,
     os: PyOwned<RawOs>,
@@ -398,6 +392,14 @@ impl Thread {
 
 #[pymethods]
 impl Thread {
+    fn __traverse__(&self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
+        self.os.traverse(visit)
+    }
+
+    fn __clear__(&mut self) {
+        self.os.clear()
+    }
+
     #[getter]
     fn tid(&self, py: Python) -> PyResult<u32> {
         let os = self.os.borrow(py)?;
@@ -419,18 +421,7 @@ impl Thread {
     }
 }
 
-#[pyproto]
-impl<'p> PyGCProtocol<'p> for Thread {
-    fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
-        self.os.traverse(visit)
-    }
-
-    fn __clear__(&'p mut self) {
-        self.os.clear()
-    }
-}
-
-#[pyclass(gc)]
+#[pyclass]
 struct Vma {
     vma: ibc::Vma,
     os: PyOwned<RawOs>,
@@ -447,6 +438,14 @@ impl Vma {
 
 #[pymethods]
 impl Vma {
+    fn __traverse__(&self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
+        self.os.traverse(visit)
+    }
+
+    fn __clear__(&mut self) {
+        self.os.clear()
+    }
+
     #[getter]
     fn start(&self, py: Python) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
@@ -469,17 +468,6 @@ impl Vma {
             .map(|path| os.0.path_to_string(path))
             .transpose()
             .convert_err()?)
-    }
-}
-
-#[pyproto]
-impl<'p> PyGCProtocol<'p> for Vma {
-    fn __traverse__(&'p self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
-        self.os.traverse(visit)
-    }
-
-    fn __clear__(&'p mut self) {
-        self.os.clear()
     }
 }
 
@@ -523,8 +511,8 @@ struct ProcessIter {
     os: PyOwned<RawOs>,
 }
 
-#[pyproto]
-impl pyo3::PyIterProtocol for ProcessIter {
+#[pymethods]
+impl ProcessIter {
     fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
         this
     }
@@ -541,8 +529,8 @@ struct ThreadIter {
     os: PyOwned<RawOs>,
 }
 
-#[pyproto]
-impl pyo3::PyIterProtocol for ThreadIter {
+#[pymethods]
+impl ThreadIter {
     fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
         this
     }
@@ -559,8 +547,8 @@ struct VmaIter {
     os: PyOwned<RawOs>,
 }
 
-#[pyproto]
-impl pyo3::PyIterProtocol for VmaIter {
+#[pymethods]
+impl VmaIter {
     fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
         this
     }
@@ -576,8 +564,8 @@ struct CallStackIter {
     frames: std::vec::IntoIter<StackFrame>,
 }
 
-#[pyproto]
-impl pyo3::PyIterProtocol for CallStackIter {
+#[pymethods]
+impl CallStackIter {
     fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
         this
     }
