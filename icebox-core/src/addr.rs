@@ -3,7 +3,10 @@ use crate::mask_range;
 use super::mask;
 use core::ops::Sub;
 use core::ops::SubAssign;
-use core::{fmt, ops::Add};
+use core::{
+    fmt,
+    ops::{Add, AddAssign},
+};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -125,6 +128,13 @@ impl Add<u64> for VirtualAddress {
     #[inline]
     fn add(self, rhs: u64) -> Self::Output {
         Self(self.0 + rhs)
+    }
+}
+
+impl AddAssign<u64> for VirtualAddress {
+    #[inline]
+    fn add_assign(&mut self, rhs: u64) {
+        self.0 += rhs;
     }
 }
 

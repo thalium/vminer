@@ -94,6 +94,21 @@ pub trait Backend {
         self.arch()
             .find_in_kernel_memory(self.memory(), mmu_addr, needle)
     }
+
+    #[inline]
+    fn iter_in_kernel_memory<'a, 'b>(
+        &'a self,
+        mmu_addr: PhysicalAddress,
+        needle: &'b [u8],
+    ) -> KernelSearchIterator<'a, 'b, Self> {
+        KernelSearchIterator {
+            backend: self,
+            mmu_addr,
+            finder: memchr::memmem::Finder::new(needle),
+            base_search_addr: self.arch().kernel_base(),
+            buffer: alloc::vec![0; (2 << 20) + needle.len()],
+        }
+    }
 }
 
 impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
@@ -309,5 +324,43 @@ impl AsDynMemory for dyn Memory + 'static {
     #[inline]
     fn as_dyn(&self) -> &(dyn Memory + 'static) {
         self
+    }
+}
+
+#[derive(Debug)]
+pub struct KernelSearchIterator<'a, 'b, B: ?Sized> {
+    backend: &'a B,
+    finder: memchr::memmem::Finder<'b>,
+    buffer: alloc::vec::Vec<u8>,
+    mmu_addr: PhysicalAddress,
+    base_search_addr: VirtualAddress,
+}
+
+impl<B: Backend + ?Sized> Iterator for KernelSearchIterator<'_, '_, B> {
+    type Item = IceResult<VirtualAddress>;
+
+    fn next(&mut self) -> Option<IceResult<VirtualAddress>> {
+        let result = self
+            .backend
+            .arch()
+            .find_in_kernel_memory_raw(
+                self.backend.memory(),
+                self.mmu_addr,
+                self.base_search_addr,
+                &self.finder,
+                &mut self.buffer,
+            )
+            .transpose()?;
+
+        Some(match result {
+            Ok(addr) => {
+                self.base_search_addr = addr + 1u64;
+                Ok(addr)
+            }
+            Err(err) => {
+                self.base_search_addr += 1u64;
+                Err(err.into())
+            }
+        })
     }
 }

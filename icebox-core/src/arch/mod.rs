@@ -112,12 +112,23 @@ pub trait Architecture<'a> {
         addr: VirtualAddress,
     ) -> MemoryAccessResult<Option<PhysicalAddress>>;
 
+    fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        base_search_addr: VirtualAddress,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<VirtualAddress>>;
+
     fn find_in_kernel_memory<M: crate::Memory + ?Sized>(
         &self,
         memory: &M,
         mmu_addr: PhysicalAddress,
         needle: &[u8],
     ) -> MemoryAccessResult<Option<VirtualAddress>>;
+
+    fn kernel_base(&self) -> VirtualAddress;
 }
 
 /// The description of how a MMU works
@@ -204,39 +215,53 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     };
 
     let mut table = [MmuEntry(0u64); 512];
-    memory.read(table_addr, bytemuck::bytes_of_mut(&mut table))?;
+    match memory.read(table_addr, bytemuck::bytes_of_mut(&mut table)) {
+        Err(crate::MemoryAccessError::OutOfBounds) => return Ok(None),
+        Err(err) => return Err(err),
+        _ => (),
+    }
     let page_size = 1 << shift;
 
-    // The base virtual address from which we calculate other addresses
-    let true_base_addr = VirtualAddress(base_search_addr.0 & !mask(shift + 9));
+    // The search address can be split in three parts:
+    // - A prefix that will used to get final address
+    // - An index for the current level to start searching
+    // - The rest of the adress that will be given to the next level
+    let prefix = VirtualAddress(base_search_addr.0 & !mask(shift + 9));
+    let base_index = ((base_search_addr.0 >> shift) & mask(9)) as usize;
+    let search_rest = base_search_addr.0 & mask(shift);
 
     // Iterate over the valid entries
     for (index, entry) in table
         .into_iter()
         .enumerate()
+        .skip(base_index)
         .filter(|(_, mmu_entry)| Mmu::is_valid(*mmu_entry))
     {
-        // Skip entries that are too low
-        let base_addr = true_base_addr + index as u64 * page_size;
-        if base_addr < base_search_addr {
-            continue;
-        }
+        let base_addr = prefix + index as u64 * page_size;
+        let offset = if index == base_index { search_rest } else { 0 };
+
         let entry = entry - Mmu::MEM_OFFSET;
 
         if rest.is_empty() || (has_large && Mmu::is_large(entry)) {
             // If this is the last level or if we encountered a large page, look
             // for the pattern in memory
             let addr = entry.take_bits(shift, Mmu::ADDR_BITS);
-            match memory.search(addr, page_size, finder, buf) {
-                Ok(Some(i)) => return Ok(Some(base_addr + i as u64)),
+            match memory.search(addr + offset, page_size - offset, finder, buf) {
+                Ok(Some(i)) => return Ok(Some(base_addr + offset + i as u64)),
                 Ok(None) | Err(crate::MemoryAccessError::OutOfBounds) => (),
                 Err(err) => return Err(err),
             }
         } else {
             // Else call ourselves recursively
             let table_addr = entry.take_bits(12, Mmu::ADDR_BITS);
+            let base_search_addr = base_addr + offset;
             let result = find_in_kernel_memory_inner::<Mmu, M>(
-                memory, table_addr, base_addr, finder, buf, rest,
+                memory,
+                table_addr,
+                base_search_addr,
+                finder,
+                buf,
+                rest,
             )?;
             if let Some(addr) = result {
                 return Ok(Some(addr));
@@ -247,7 +272,31 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     Ok(None)
 }
 
-/// Find a pattern in kernel memory by walking the translation table.
+/// Find a pattern in kernel memory by walking the translation table starting
+/// from the given address.
+///
+/// This will probably fail if the pattern overlaps multiple pages.
+fn find_in_kernel_memory_raw<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
+    memory: &M,
+    mmu_addr: PhysicalAddress,
+    base_search_addr: VirtualAddress,
+    finder: &memchr::memmem::Finder,
+    buf: &mut [u8],
+) -> MemoryAccessResult<Option<VirtualAddress>> {
+    let table_addr = MmuEntry(mmu_addr.0).take_bits(12, Mmu::ADDR_BITS);
+
+    find_in_kernel_memory_inner::<Mmu, M>(
+        memory,
+        table_addr,
+        base_search_addr,
+        &finder,
+        buf,
+        Mmu::LEVELS,
+    )
+}
+
+/// Find a pattern in kernel memory by walking the translation table starting
+/// from the given address.
 ///
 /// This will probably fail if the pattern overlaps multiple pages.
 fn find_in_kernel_memory<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
@@ -258,14 +307,6 @@ fn find_in_kernel_memory<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
 ) -> MemoryAccessResult<Option<VirtualAddress>> {
     let mut buf = alloc::vec![0; (1 << 21) + needle.len()];
     let finder = memchr::memmem::Finder::new(needle);
-    let table_addr = MmuEntry(mmu_addr.0).take_bits(12, Mmu::ADDR_BITS);
 
-    find_in_kernel_memory_inner::<Mmu, M>(
-        memory,
-        table_addr,
-        base_search_addr,
-        &finder,
-        &mut buf,
-        Mmu::LEVELS,
-    )
+    find_in_kernel_memory_raw::<Mmu, M>(memory, mmu_addr, base_search_addr, &finder, &mut buf)
 }

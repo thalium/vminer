@@ -160,6 +160,28 @@ impl<'a> super::Architecture<'a> for X86_64 {
         let base_search_addr = VirtualAddress(0xffff_f800_0000_0000);
         super::find_in_kernel_memory::<MmuDesc, M>(memory, mmu_addr, needle, base_search_addr)
     }
+
+    fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        base_search_addr: VirtualAddress,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> crate::MemoryAccessResult<Option<VirtualAddress>> {
+        super::find_in_kernel_memory_raw::<MmuDesc, M>(
+            memory,
+            mmu_addr,
+            base_search_addr,
+            finder,
+            buf,
+        )
+    }
+
+    #[inline]
+    fn kernel_base(&self) -> VirtualAddress {
+        VirtualAddress(0xffff_f800_0000_0000)
+    }
 }
 
 #[repr(C)]
