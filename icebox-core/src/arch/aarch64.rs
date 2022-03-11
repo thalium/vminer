@@ -182,8 +182,7 @@ impl<'a> super::Architecture<'a> for Aarch64 {
         mmu_addr: PhysicalAddress,
         needle: &[u8],
     ) -> crate::MemoryAccessResult<Option<VirtualAddress>> {
-        let base_search_addr = VirtualAddress(0xffff_a000_0000_0000);
-        super::find_in_kernel_memory::<MmuDesc, M>(memory, mmu_addr, needle, base_search_addr)
+        super::find_in_kernel_memory::<MmuDesc, M>(memory, mmu_addr, needle, self.kernel_base())
     }
 
     fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(
