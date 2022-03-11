@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use ibc::{IceError, IceResult, MemoryAccessResultExt};
 use icebox::os::OsBuilder;
-use pyo3::{exceptions, prelude::*, types::PyBytes};
+use pyo3::{
+    exceptions,
+    prelude::*,
+    types::{PyBytes, PyString},
+};
 
 use icebox_core::{self as ibc, Backend as _};
 
@@ -356,10 +360,11 @@ impl Process {
 
         let mut frames = Vec::new();
         os.0.process_callstack(self.proc, &mut |frame| {
-            let file = match frame.file {
-                Some(file) => Some(os.0.path_to_string(file)?),
-                None => None,
-            };
+            let file = frame
+                .file
+                .map(|file| os.0.path_to_string(file))
+                .transpose()?
+                .map(|path| PyString::new(py, &path).into());
 
             frames.push(StackFrame {
                 frame: frame.clone(),
@@ -423,58 +428,47 @@ impl Thread {
 
 #[pyclass]
 struct Vma {
-    vma: ibc::Vma,
-    os: PyOwned<RawOs>,
+    start: u64,
+    end: u64,
+    file: Option<Py<PyString>>,
 }
 
 impl Vma {
-    fn new(py: Python, vma: ibc::Vma, os: &PyOwned<RawOs>) -> Self {
-        Self {
-            vma,
-            os: os.clone_ref(py),
-        }
+    fn new(py: Python, vma: ibc::Vma, os: &RawOs) -> IceResult<Self> {
+        let start = os.0.vma_start(vma)?.0;
+        let end = os.0.vma_end(vma)?.0;
+        let file =
+            os.0.vma_file(vma)?
+                .map(|path| os.0.path_to_string(path))
+                .transpose()?
+                .map(|file| PyString::new(py, &file).into());
+
+        Ok(Self { start, end, file })
     }
 }
 
 #[pymethods]
 impl Vma {
-    fn __traverse__(&self, visit: pyo3::PyVisit) -> Result<(), pyo3::PyTraverseError> {
-        self.os.traverse(visit)
-    }
-
-    fn __clear__(&mut self) {
-        self.os.clear()
+    #[getter]
+    fn start(&self) -> u64 {
+        self.start
     }
 
     #[getter]
-    fn start(&self, py: Python) -> PyResult<u64> {
-        let os = self.os.borrow(py)?;
-        let start = os.0.vma_start(self.vma).convert_err()?;
-        Ok(start.0)
+    fn end(&self) -> u64 {
+        self.end
     }
 
     #[getter]
-    fn end(&self, py: Python) -> PyResult<u64> {
-        let os = self.os.borrow(py)?;
-        let end = os.0.vma_end(self.vma).convert_err()?;
-        Ok(end.0)
-    }
-
-    #[getter]
-    fn file(&self, py: Python) -> PyResult<Option<String>> {
-        let os = self.os.borrow(py)?;
-        let path = os.0.vma_file(self.vma).convert_err()?;
-        Ok(path
-            .map(|path| os.0.path_to_string(path))
-            .transpose()
-            .convert_err()?)
+    fn file(&self) -> Option<&Py<PyString>> {
+        self.file.as_ref()
     }
 }
 
 #[pyclass]
 struct StackFrame {
     frame: ibc::StackFrame,
-    file: Option<String>,
+    file: Option<Py<PyString>>,
 }
 
 #[pymethods]
@@ -500,8 +494,8 @@ impl StackFrame {
     }
 
     #[getter]
-    fn file(&self) -> Option<String> {
-        self.file.clone()
+    fn file(&self) -> Option<&Py<PyString>> {
+        self.file.as_ref()
     }
 }
 
@@ -553,9 +547,13 @@ impl VmaIter {
         this
     }
 
-    fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Vma>> {
-        let vma = this.vmas.next();
-        Ok(vma.map(|vma| Vma::new(this.py(), vma, &this.os)))
+    fn __next__(&mut self, py: Python) -> PyResult<Option<Vma>> {
+        let os = self.os.borrow(py)?;
+        self.vmas
+            .next()
+            .map(|vma| Vma::new(py, vma, &os))
+            .transpose()
+            .convert_err()
     }
 }
 
