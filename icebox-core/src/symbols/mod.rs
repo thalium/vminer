@@ -1,4 +1,6 @@
 pub mod dwarf;
+#[cfg(feature = "pdb")]
+pub mod pdb;
 
 use alloc::{
     borrow::{Cow, ToOwned},

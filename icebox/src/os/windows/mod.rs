@@ -1,12 +1,63 @@
 use core::{fmt, mem};
-use ibc::{Backend, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
+use ibc::{Backend, IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
+
+use self::profile::{Pointer, StructOffset};
+
+pub mod profile;
+
+/// Values that we can read from guest memory
+trait Readable: Sized {
+    fn read<B: ibc::Backend>(windows: &Windows<B>, addr: VirtualAddress) -> IceResult<Self>;
+}
+
+impl<T: bytemuck::Pod> Readable for T {
+    fn read<B: ibc::Backend>(windows: &Windows<B>, addr: VirtualAddress) -> IceResult<Self> {
+        let val = windows.read_kernel_value(addr)?;
+        Ok(val)
+    }
+}
+
+impl<T> Readable for Pointer<T> {
+    fn read<B: ibc::Backend>(windows: &Windows<B>, addr: VirtualAddress) -> IceResult<Self> {
+        let addr = VirtualAddress(windows.read_kernel_value(addr)?);
+        Ok(Pointer::new(addr))
+    }
+}
+
+trait HasStruct<Layout> {
+    fn get_struct_layout(&self) -> &Layout;
+}
+
+impl From<ibc::Thread> for Pointer<profile::Ethread> {
+    fn from(thread: ibc::Thread) -> Self {
+        Self::new(thread.0)
+    }
+}
+
+impl From<Pointer<profile::Ethread>> for ibc::Thread {
+    fn from(path: Pointer<profile::Ethread>) -> Self {
+        Self(path.addr)
+    }
+}
+
+impl From<ibc::Process> for Pointer<profile::Eprocess> {
+    fn from(thread: ibc::Process) -> Self {
+        Self::new(thread.0)
+    }
+}
+
+impl From<Pointer<profile::Eprocess>> for ibc::Process {
+    fn from(path: Pointer<profile::Eprocess>) -> Self {
+        Self(path.addr)
+    }
+}
 
 const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
 
-#[derive(Debug)]
 pub struct Windows<B> {
-    backend: B,
+    pub backend: B,
     kpgd: PhysicalAddress,
+    profile: profile::Profile,
 }
 
 #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
@@ -103,16 +154,65 @@ fn find_kernel<B: Backend>(
 }
 
 impl<B: Backend> Windows<B> {
-    pub fn create(backend: B) -> IceResult<Self> {
+    pub fn create(backend: B, profile: profile::Profile) -> IceResult<Self> {
         let kpgd = backend.find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])?;
         let (pdb_id, addr) = find_kernel(&backend, kpgd)?.context("failed to find kernel data")?;
         println!("Found kernel at 0x{addr:x} (PDB: {pdb_id})");
-        Ok(Self { backend, kpgd })
+        Ok(Self {
+            backend,
+            kpgd,
+            profile,
+        })
     }
 
     #[allow(dead_code)]
     fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
         self.backend.read_virtual_memory(self.kpgd, addr, buf)
+    }
+
+    fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
+        self.backend.read_value_virtual(self.kpgd, addr)
+    }
+
+    /// Converts a pointer to a struct to a pointer to a field
+    ///
+    /// Generic parameters ensure that the conversion is valid.
+    fn read_struct<L, T>(
+        &self,
+        pointer: Pointer<L>,
+        get_offset: impl FnOnce(&L) -> StructOffset<T>,
+    ) -> IceResult<Pointer<T>>
+    where
+        Self: HasStruct<L>,
+    {
+        if pointer.is_null() {
+            return Err(IceError::deref_null_ptr());
+        }
+        let offset = get_offset(self.get_struct_layout());
+        Ok(Pointer::new(pointer.addr + offset.offset))
+    }
+
+    /// Reads a field from a struct pointer
+    fn read_struct_pointer<L, T: Readable>(
+        &self,
+        pointer: Pointer<L>,
+        get_offset: impl FnOnce(&L) -> StructOffset<T>,
+    ) -> IceResult<T>
+    where
+        Self: HasStruct<L>,
+    {
+        if pointer.is_null() {
+            return Err(IceError::deref_null_ptr());
+        }
+        let offset = get_offset(self.get_struct_layout());
+        println!("ADDR {:x?}", pointer.addr + offset.offset);
+        T::read(self, pointer.addr + offset.offset)
+    }
+
+    fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr>> {
+        let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
+        // let addr = VirtualAddress(self.read_kernel_value(per_cpu)?);
+        Ok(Pointer::new(per_cpu))
     }
 }
 
@@ -121,20 +221,28 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn current_thread(&self, _cpuid: usize) -> IceResult<ibc::Thread> {
-        Err(ibc::IceError::unimplemented())
+    fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
+        let kpcr = self.kpcr(cpuid)?;
+        let kprcb = self.read_struct(kpcr, |k| k.Prcb)?;
+        // println!("TEST {:x}", self.read_struct_pointer(kprcb, |k| k.KernelDirectoryTableBase)?);
+        let thread = self.read_struct_pointer(kprcb, |k| k.CurrentThread)?;
+        Ok(thread.into())
     }
 
     fn process_is_kernel(&self, _proc: ibc::Process) -> IceResult<bool> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn process_pid(&self, _proc: ibc::Process) -> IceResult<u32> {
-        Err(ibc::IceError::unimplemented())
+    fn process_pid(&self, _proc: ibc::Process) -> IceResult<u64> {
+        self.read_struct_pointer(_proc.into(), |eprocess| eprocess.UniqueProcessId)
     }
 
     fn process_name(&self, _proc: ibc::Process) -> IceResult<String> {
-        Err(ibc::IceError::unimplemented())
+        let name = self.read_struct_pointer(_proc.into(), |eprocess| eprocess.ImageFileName)?;
+        println!("- 0x{name:x}");
+        let mut buf = [0; 15];
+        self.read_kernel_memory(name, &mut buf)?;
+        Ok(String::from_utf8_lossy(&buf).into_owned())
     }
 
     fn process_pgd(&self, _proc: ibc::Process) -> IceResult<ibc::PhysicalAddress> {
@@ -185,12 +293,15 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn thread_process(&self, _thread: ibc::Thread) -> IceResult<ibc::Process> {
-        Err(ibc::IceError::unimplemented())
+    fn thread_process(&self, thread: ibc::Thread) -> IceResult<ibc::Process> {
+        let tcb = self.read_struct(thread.into(), |k| k.Tcb)?;
+        let proc = self.read_struct_pointer(tcb, |k| k.Process)?;
+        Ok(proc.into())
     }
 
-    fn thread_id(&self, _thread: ibc::Thread) -> IceResult<u32> {
-        Err(ibc::IceError::unimplemented())
+    fn thread_id(&self, thread: ibc::Thread) -> IceResult<u64> {
+        let cid = self.read_struct(thread.into(), |ethread| ethread.Cid)?;
+        self.read_struct_pointer(cid, |cid| cid.UniqueThread)
     }
 
     fn thread_name(&self, _thread: ibc::Thread) -> IceResult<String> {

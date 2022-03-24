@@ -202,7 +202,7 @@ pub unsafe extern "C" fn process_name(
 pub unsafe extern "C" fn process_pid(
     os: &Os,
     proc: Process,
-    pid: &mut mem::MaybeUninit<u32>,
+    pid: &mut mem::MaybeUninit<u64>,
 ) -> *mut Error {
     let res = os.0.process_pid(proc.into());
     error::wrap_result(res, pid)

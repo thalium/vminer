@@ -59,13 +59,13 @@ where
 fn proc_tree(arch: Arch) {
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct Thread {
-        tid: u32,
+        tid: u64,
         name: String,
     }
 
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     struct Proc {
-        pid: u32,
+        pid: u64,
         name: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         children: Vec<Proc>,

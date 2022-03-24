@@ -81,7 +81,7 @@ pub trait Os {
 
         Ok(proc)
     }
-    fn find_process_by_pid(&self, pid: u32) -> IceResult<Option<Process>> {
+    fn find_process_by_pid(&self, pid: u64) -> IceResult<Option<Process>> {
         let mut proc = None;
 
         self.for_each_process(&mut |p| {
@@ -95,7 +95,7 @@ pub trait Os {
     }
 
     fn process_is_kernel(&self, proc: Process) -> IceResult<bool>;
-    fn process_pid(&self, proc: Process) -> IceResult<u32>;
+    fn process_pid(&self, proc: Process) -> IceResult<u64>;
     fn process_name(&self, proc: Process) -> IceResult<String>;
     fn process_pgd(&self, proc: Process) -> IceResult<PhysicalAddress>;
     fn process_exe(&self, proc: Process) -> IceResult<Option<Path>>;
@@ -144,7 +144,7 @@ pub trait Os {
     ) -> IceResult<()>;
 
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
-    fn thread_id(&self, thread: Thread) -> IceResult<u32>;
+    fn thread_id(&self, thread: Thread) -> IceResult<u64>;
     fn thread_name(&self, thread: Thread) -> IceResult<String>;
 
     fn path_to_string(&self, path: Path) -> IceResult<String>;

@@ -14,7 +14,7 @@ object1 = ["ibc/object"]
 
 all_os = ["linux", "windows"]
 linux = []
-windows = ["std", "object", "pdb"]
+windows = ["std", "object", "pdb", "ibc/pdb"]
 
 all_backends = ["kvm", "dump"]
 kvm = ["std", "libc"]

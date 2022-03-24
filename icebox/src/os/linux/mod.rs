@@ -387,13 +387,14 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Ok(flags & 0x200000 != 0)
     }
 
-    fn process_pid(&self, proc: ibc::Process) -> IceResult<u32> {
+    fn process_pid(&self, proc: ibc::Process) -> IceResult<u64> {
         let get_pid = || self.read_struct_pointer(proc.into(), |ts| ts.tgid);
 
         match self.process(proc)? {
             Some(proc) => proc.pid.get_or_try_init(get_pid).map(|pid| *pid),
             None => get_pid(),
         }
+        .map(|pid| pid as u64)
     }
 
     fn process_name(&self, proc: ice::Process) -> IceResult<String> {
@@ -514,8 +515,9 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         callstack::iter(self, proc, f)
     }
 
-    fn thread_id(&self, thread: ice::Thread) -> IceResult<u32> {
+    fn thread_id(&self, thread: ice::Thread) -> IceResult<u64> {
         self.read_struct_pointer(thread.into(), |ts| ts.pid)
+            .map(|pid| pid as u64)
     }
 
     fn thread_name(&self, thread: ibc::Thread) -> IceResult<String> {
