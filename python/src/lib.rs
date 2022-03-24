@@ -28,7 +28,7 @@ impl<T> ToPyResult<T> for ibc::MemoryAccessResult<T> {
     }
 }
 
-#[derive(pyo3::FromPyObject)]
+#[derive(Clone, Copy, pyo3::FromPyObject)]
 struct VirtualAddress(u64);
 
 impl From<VirtualAddress> for ibc::VirtualAddress {
@@ -37,7 +37,7 @@ impl From<VirtualAddress> for ibc::VirtualAddress {
     }
 }
 
-#[derive(pyo3::FromPyObject)]
+#[derive(Clone, Copy, pyo3::FromPyObject)]
 struct PhysicalAddress(u64);
 
 impl From<PhysicalAddress> for ibc::PhysicalAddress {
@@ -378,6 +378,27 @@ impl Process {
             frames: frames.into_iter(),
         })
     }
+
+    fn resolve_symbol(&self, py: Python, addr: VirtualAddress) -> PyResult<Option<Py<PyString>>> {
+        let os = self.os.borrow(py)?;
+
+        let mut vma = None;
+        os.0.process_for_each_vma(self.proc, &mut |cur_vma| {
+            if os.0.vma_contains(cur_vma, addr.into())? {
+                vma = Some(cur_vma);
+            }
+            Ok(())
+        })
+        .convert_err()?;
+
+        match vma {
+            Some(vma) => {
+                let sym = os.0.resolve_symbol(addr.into(), vma).convert_err()?;
+                Ok(sym.map(|s| PyString::new(py, &ibc::symbols::demangle(s)).into()))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 #[pyclass]
@@ -575,11 +596,11 @@ impl CallStackIter {
 
 /// Python module for Icebox
 #[pymodule]
-fn icebox(py: Python, m: &PyModule) -> PyResult<()> {
-    let logger = pyo3_log::Logger::new(py, pyo3_log::Caching::Loggers)?;
-    if let Err(err) = logger.install() {
-        log::error!("{}", err);
-    }
+fn icebox(_py: Python, m: &PyModule) -> PyResult<()> {
+    // let logger = pyo3_log::Logger::new(py, pyo3_log::Caching::Loggers)?;
+    // if let Err(err) = logger.install() {
+    //     log::error!("{}", err);
+    // }
 
     m.add_class::<Backend>()?;
     m.add_class::<Dump>()?;
