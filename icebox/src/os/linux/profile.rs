@@ -18,6 +18,7 @@ pub struct StructOffset<T> {
 }
 
 impl<T> Clone for StructOffset<T> {
+    #[inline]
     fn clone(&self) -> Self {
         *self
     }
@@ -31,7 +32,8 @@ impl<T> StructOffset<T> {
         Ok(Self::from_offset(offset))
     }
 
-    fn from_offset(offset: u64) -> Self {
+    #[inline]
+    const fn from_offset(offset: u64) -> Self {
         Self {
             offset,
             _type: PhantomData,
@@ -45,6 +47,7 @@ pub(crate) struct Pointer<T> {
 }
 
 impl<T> Pointer<T> {
+    #[inline]
     pub const fn new(addr: VirtualAddress) -> Self {
         Self {
             addr,
@@ -52,12 +55,14 @@ impl<T> Pointer<T> {
         }
     }
 
+    #[inline]
     pub const fn is_null(self) -> bool {
         self.addr.is_null()
     }
 }
 
 impl<T> Clone for Pointer<T> {
+    #[inline]
     fn clone(&self) -> Self {
         *self
     }
@@ -66,6 +71,7 @@ impl<T> Clone for Pointer<T> {
 impl<T> Copy for Pointer<T> {}
 
 impl<T> PartialEq for Pointer<T> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.addr == other.addr
     }
@@ -129,7 +135,7 @@ macro_rules! define_kernel_structs {
             )*
         }
 
-        impl Layouts {
+        impl $layouts {
             fn new(syms: &ice::SymbolsIndexer) -> IceResult<Self> {
                 Ok(Self {
                     $(

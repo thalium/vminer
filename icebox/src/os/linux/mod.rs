@@ -4,10 +4,8 @@ pub mod profile;
 use crate::core::{
     self as ice, IceError, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress,
 };
-use crate::utils::OnceCell;
 use alloc::{string::String, vec::Vec};
 use core::fmt;
-use hashbrown::HashMap;
 
 pub use profile::Profile;
 
@@ -86,25 +84,11 @@ impl From<Pointer<profile::VmAreaStruct>> for ice::Vma {
     }
 }
 
-/// Cached data for a process
-///
-/// FIXME: should we really keep this ? Maybe only for "complex" fields ?
-#[derive(Default)]
-struct ProcessData {
-    name: OnceCell<String>,
-    pid: OnceCell<u32>,
-
-    parent: OnceCell<ibc::Process>,
-    children: OnceCell<Vec<ibc::Process>>,
-}
-
 pub struct Linux<B> {
     backend: B,
     profile: Profile,
     kpgd: PhysicalAddress,
     kaslr: i64,
-
-    processes: OnceCell<HashMap<ibc::Process, ProcessData>>,
 }
 
 pub fn get_aslr<B: ice::Backend>(
@@ -128,8 +112,6 @@ impl<B: ice::Backend> Linux<B> {
             profile,
             kpgd,
             kaslr,
-
-            processes: OnceCell::new(),
         })
     }
 
@@ -268,44 +250,6 @@ impl<B: ice::Backend> Linux<B> {
         Ok(())
     }
 
-    fn processes(&self) -> IceResult<&HashMap<ibc::Process, ProcessData>> {
-        self.processes.get_or_try_init(|| {
-            let mut processes = HashMap::new();
-
-            let init = ibc::Os::init_process(self)?;
-
-            processes.insert(init, ProcessData::default());
-
-            self.iterate_list::<profile::TaskStruct, _, _>(
-                self.read_struct(init.into(), |ts| ts.tasks)?,
-                |ts| ts.tasks,
-                |proc| {
-                    processes.insert(proc.into(), ProcessData::default());
-                    Ok(())
-                },
-            )?;
-
-            Ok(processes)
-        })
-    }
-
-    fn process(&self, proc: ibc::Process) -> IceResult<Option<&ProcessData>> {
-        let procs = self.processes()?;
-        Ok(procs.get(&proc))
-    }
-
-    fn process_iter_children<F>(&self, proc: ibc::Process, mut f: F) -> IceResult<()>
-    where
-        F: FnMut(ibc::Process) -> IceResult<()>,
-    {
-        let children = self.read_struct(proc.into(), |ts| ts.children)?;
-        self.iterate_list::<profile::TaskStruct, _, _>(
-            children,
-            |ts| ts.sibling,
-            |child| f(child.into()),
-        )
-    }
-
     fn build_path(&self, dentry: Pointer<profile::Dentry>, buf: &mut Vec<u8>) -> IceResult<()> {
         // Paths start with the last components in the kernel but we want them
         // to start by the root, so we call ourselves recursively to build the
@@ -388,30 +332,18 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_pid(&self, proc: ibc::Process) -> IceResult<u32> {
-        let get_pid = || self.read_struct_pointer(proc.into(), |ts| ts.tgid);
-
-        match self.process(proc)? {
-            Some(proc) => proc.pid.get_or_try_init(get_pid).map(|pid| *pid),
-            None => get_pid(),
-        }
+        self.read_struct_pointer(proc.into(), |ts| ts.tgid)
     }
 
     fn process_name(&self, proc: ice::Process) -> IceResult<String> {
-        let get_name = || {
-            let comm = self.read_struct_pointer(proc.into(), |ts| ts.comm)?;
+        let comm = self.read_struct_pointer(proc.into(), |ts| ts.comm)?;
 
-            let buf = match memchr::memchr(0, &comm) {
-                Some(i) => &comm[..i],
-                None => &comm,
-            };
-
-            Ok(String::from_utf8_lossy(buf).into_owned())
+        let buf = match memchr::memchr(0, &comm) {
+            Some(i) => &comm[..i],
+            None => &comm,
         };
 
-        match self.process(proc)? {
-            Some(proc) => proc.name.get_or_try_init(get_name).map(Clone::clone),
-            None => get_name(),
-        }
+        Ok(String::from_utf8_lossy(buf).into_owned())
     }
 
     fn process_pgd(&self, proc: ice::Process) -> IceResult<PhysicalAddress> {
@@ -440,15 +372,8 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
-        let get_parent = || {
-            let proc = self.read_struct_pointer(proc.into(), |ts| ts.real_parent)?;
-            Ok(proc.into())
-        };
-
-        match self.process(proc)? {
-            Some(proc) => proc.parent.get_or_try_init(get_parent).map(|p| *p),
-            None => get_parent(),
-        }
+        let proc = self.read_struct_pointer(proc.into(), |ts| ts.real_parent)?;
+        Ok(proc.into())
     }
 
     fn process_for_each_child(
@@ -456,21 +381,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
     ) -> IceResult<()> {
-        match self.process(proc)? {
-            Some(proc_data) => {
-                let children = proc_data.children.get_or_try_init(|| {
-                    let mut children = Vec::new();
-                    self.process_iter_children(proc, |child| {
-                        children.push(child);
-                        Ok(())
-                    })?;
-                    Ok(children)
-                })?;
-
-                children.iter().copied().try_for_each(f)
-            }
-            None => self.process_iter_children(proc, f),
-        }
+        let children = self.read_struct(proc.into(), |ts| ts.children)?;
+        self.iterate_list::<profile::TaskStruct, _, _>(
+            children,
+            |ts| ts.sibling,
+            |child| f(child.into()),
+        )
     }
 
     fn process_for_each_thread(
@@ -487,7 +403,13 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
-        self.processes()?.keys().copied().try_for_each(f)
+        let init = self.init_process()?;
+
+        self.iterate_list::<profile::TaskStruct, _, _>(
+            self.read_struct(init.into(), |ts| ts.tasks)?,
+            |ts| ts.tasks,
+            |proc| f(proc.into()),
+        )
     }
 
     fn process_for_each_vma(
