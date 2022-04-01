@@ -104,7 +104,7 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
         match &self.vcpus {
             Vcpus::X86_64(vcpus) => {
                 out.write_all(bytemuck::bytes_of(&0u32))?;
-                out.write_all(bytemuck::bytes_of(&vcpus.len()))?;
+                out.write_all(bytemuck::bytes_of(&(vcpus.len() as u32)))?;
 
                 for vcpu in vcpus {
                     out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
@@ -115,7 +115,7 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
             }
             Vcpus::Aarch64(vcpus) => {
                 out.write_all(bytemuck::bytes_of(&1u32))?;
-                out.write_all(bytemuck::bytes_of(&vcpus.len()))?;
+                out.write_all(bytemuck::bytes_of(&(vcpus.len() as u32)))?;
 
                 for vcpu in vcpus {
                     out.write_all(bytemuck::bytes_of(&vcpu.registers))?;

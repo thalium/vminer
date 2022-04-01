@@ -269,4 +269,29 @@ impl<'a> arch::Architecture<'a> for Architecture {
             Self::Aarch64(arch) => arch.find_in_kernel_memory(memory, mmu_addr, needle),
         }
     }
+
+    fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        base_search_addr: VirtualAddress,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> crate::MemoryAccessResult<Option<VirtualAddress>> {
+        match self {
+            Self::X86_64(arch) => {
+                arch.find_in_kernel_memory_raw(memory, mmu_addr, base_search_addr, finder, buf)
+            }
+            Self::Aarch64(arch) => {
+                arch.find_in_kernel_memory_raw(memory, mmu_addr, base_search_addr, finder, buf)
+            }
+        }
+    }
+
+    fn kernel_base(&self) -> VirtualAddress {
+        match self {
+            Self::X86_64(arch) => arch.kernel_base(),
+            Self::Aarch64(arch) => arch.kernel_base(),
+        }
+    }
 }

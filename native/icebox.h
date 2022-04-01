@@ -38,7 +38,7 @@ struct Error *os_processes(const struct Os *os, struct Process *procs, uintptr_t
 
 struct Error *process_name(const struct Os *os, struct Process proc, char *name, uintptr_t max_len);
 
-struct Error *process_pid(const struct Os *os, struct Process proc, uint32_t *pid);
+struct Error *process_pid(const struct Os *os, struct Process proc, uint64_t *pid);
 
 void backend_free(struct Backend *backend);
 
