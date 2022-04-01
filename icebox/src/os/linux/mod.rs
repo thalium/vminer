@@ -520,8 +520,8 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             .map(|pid| pid as u64)
     }
 
-    fn thread_name(&self, thread: ibc::Thread) -> IceResult<String> {
-        self.process_name(ibc::Process(thread.0))
+    fn thread_name(&self, thread: ibc::Thread) -> IceResult<Option<String>> {
+        self.process_name(ibc::Process(thread.0)).map(Some)
     }
 
     fn path_to_string(&self, path: ice::Path) -> IceResult<String> {

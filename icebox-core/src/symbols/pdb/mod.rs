@@ -92,9 +92,23 @@ pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
 
 pub fn load_syms_from_pdb<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
-    _syms: &mut crate::symbols::ModuleSymbols,
+    syms: &mut crate::symbols::ModuleSymbols,
 ) -> Result<(), pdb::Error> {
-    let _symbols = pdb.global_symbols()?;
+    let symbols = pdb.global_symbols()?;
+    let address_map = pdb.address_map()?;
+
+    symbols.iter().for_each(|sym| match sym.parse()? {
+        pdb::SymbolData::Public(sym) => {
+            if let Some(addr) = sym.offset.to_rva(&address_map) {
+                if let Ok(name) = std::str::from_utf8(sym.name.as_bytes()) {
+                    let addr = crate::VirtualAddress(addr.0 as u64);
+                    syms.extend([(name, addr)])
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    })?;
 
     Ok(())
 }

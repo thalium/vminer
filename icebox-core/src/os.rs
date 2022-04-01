@@ -145,7 +145,7 @@ pub trait Os {
 
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
     fn thread_id(&self, thread: Thread) -> IceResult<u64>;
-    fn thread_name(&self, thread: Thread) -> IceResult<String>;
+    fn thread_name(&self, thread: Thread) -> IceResult<Option<String>>;
 
     fn path_to_string(&self, path: Path) -> IceResult<String>;
 

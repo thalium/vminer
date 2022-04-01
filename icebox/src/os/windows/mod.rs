@@ -57,6 +57,7 @@ const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
 pub struct Windows<B> {
     pub backend: B,
     kpgd: PhysicalAddress,
+    base_addr: VirtualAddress,
     profile: profile::Profile,
 }
 
@@ -156,13 +157,17 @@ fn find_kernel<B: Backend>(
 impl<B: Backend> Windows<B> {
     pub fn create(backend: B, profile: profile::Profile) -> IceResult<Self> {
         let kpgd = backend.find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])?;
-        let (pdb_id, addr) = find_kernel(&backend, kpgd)?.context("failed to find kernel data")?;
-        println!("Found kernel at 0x{addr:x} (PDB: {pdb_id})");
-        Ok(Self {
+        let (pdb_id, base_addr) =
+            find_kernel(&backend, kpgd)?.context("failed to find kernel data")?;
+        log::info!("Found kernel at 0x{base_addr:x} (PDB: {pdb_id})");
+        let this = Self {
             backend,
             kpgd,
+            base_addr,
             profile,
-        })
+        };
+
+        Ok(this)
     }
 
     #[allow(dead_code)]
@@ -205,13 +210,50 @@ impl<B: Backend> Windows<B> {
             return Err(IceError::deref_null_ptr());
         }
         let offset = get_offset(self.get_struct_layout());
-        println!("ADDR {:x?}", pointer.addr + offset.offset);
         T::read(self, pointer.addr + offset.offset)
+    }
+
+    /// Iterate a kernel linked list, yielding elements of type `T`
+    fn iterate_list<T, O, F>(
+        &self,
+        head: Pointer<profile::ListEntry>,
+        get_offset: O,
+        mut f: F,
+    ) -> IceResult<()>
+    where
+        Self: HasStruct<T> + HasStruct<profile::ListEntry>,
+        O: FnOnce(&T) -> StructOffset<profile::ListEntry>,
+        F: FnMut(Pointer<T>) -> IceResult<()>,
+    {
+        let mut pos = head;
+        let offset = get_offset(self.get_struct_layout()).offset;
+
+        loop {
+            pos = self.read_struct_pointer(pos, |list| list.Flink)?;
+
+            if pos == head {
+                break;
+            }
+
+            f(Pointer::new(pos.addr - offset))?;
+        }
+
+        Ok(())
+    }
+
+    fn read_unicode_string(&self, ptr: Pointer<profile::UnicodeString>) -> IceResult<String> {
+        let len = self.read_struct_pointer(ptr, |str| str.Length)?;
+        let mut name = vec![0u16; len as usize / 2];
+
+        let buffer = self.read_struct_pointer(ptr, |str| str.Buffer)?;
+        self.backend
+            .read_virtual_memory(self.kpgd, buffer, bytemuck::cast_slice_mut(&mut name))?;
+
+        Ok(String::from_utf16_lossy(&name))
     }
 
     fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr>> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
-        // let addr = VirtualAddress(self.read_kernel_value(per_cpu)?);
         Ok(Pointer::new(per_cpu))
     }
 }
@@ -224,7 +266,6 @@ impl<B: Backend> ibc::Os for Windows<B> {
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
         let kpcr = self.kpcr(cpuid)?;
         let kprcb = self.read_struct(kpcr, |k| k.Prcb)?;
-        // println!("TEST {:x}", self.read_struct_pointer(kprcb, |k| k.KernelDirectoryTableBase)?);
         let thread = self.read_struct_pointer(kprcb, |k| k.CurrentThread)?;
         Ok(thread.into())
     }
@@ -239,42 +280,75 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn process_name(&self, _proc: ibc::Process) -> IceResult<String> {
         let name = self.read_struct_pointer(_proc.into(), |eprocess| eprocess.ImageFileName)?;
-        println!("- 0x{name:x}");
-        let mut buf = [0; 15];
-        self.read_kernel_memory(name, &mut buf)?;
-        Ok(String::from_utf8_lossy(&buf).into_owned())
+
+        let name = match memchr::memchr(0, &name) {
+            Some(i) => &name[..i],
+            None => &name,
+        };
+
+        Ok(String::from_utf8_lossy(name).into_owned())
     }
 
-    fn process_pgd(&self, _proc: ibc::Process) -> IceResult<ibc::PhysicalAddress> {
-        Err(ibc::IceError::unimplemented())
+    fn process_pgd(&self, proc: ibc::Process) -> IceResult<ibc::PhysicalAddress> {
+        let kproc = self.read_struct(proc.into(), |eproc| eproc.Pcb)?;
+
+        let dtb = self.read_struct_pointer(kproc, |kproc| kproc.UserDirectoryTableBase)?;
+
+        if dtb.0 != 0 && dtb.0 != 1 {
+            return Ok(dtb);
+        }
+
+        self.read_struct_pointer(kproc, |kproc| kproc.DirectoryTableBase)
     }
 
     fn process_exe(&self, _proc: ibc::Process) -> IceResult<Option<ibc::Path>> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn process_parent(&self, _proc: ibc::Process) -> IceResult<ibc::Process> {
-        Err(ibc::IceError::unimplemented())
+    fn process_parent(&self, proc: ibc::Process) -> IceResult<ibc::Process> {
+        let parent_pid =
+            self.read_struct_pointer(proc.into(), |e| e.InheritedFromUniqueProcessId)?;
+        Ok(self.find_process_by_pid(parent_pid)?.unwrap_or(proc))
     }
 
     fn process_for_each_child(
         &self,
-        _proc: ibc::Process,
-        _f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
     ) -> IceResult<()> {
-        Err(ibc::IceError::unimplemented())
+        let pid = self.process_pid(proc)?;
+        self.for_each_process(&mut |proc| {
+            let parent_pid =
+                self.read_struct_pointer(proc.into(), |e| e.InheritedFromUniqueProcessId)?;
+            if parent_pid == pid {
+                f(proc)
+            } else {
+                Ok(())
+            }
+        })
     }
 
     fn process_for_each_thread(
         &self,
-        _proc: ibc::Process,
-        _f: &mut dyn FnMut(ibc::Thread) -> IceResult<()>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Thread) -> IceResult<()>,
     ) -> IceResult<()> {
-        Err(ibc::IceError::unimplemented())
+        let thread_list = self.read_struct(proc.into(), |eproc| eproc.ThreadListHead)?;
+        self.iterate_list::<profile::Ethread, _, _>(
+            thread_list,
+            |ethread| ethread.ThreadListEntry,
+            |thread| f(thread.into()),
+        )
     }
 
-    fn for_each_process(&self, _f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
-        Err(ibc::IceError::unimplemented())
+    fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
+        let head = self.base_addr + self.profile.fast_syms.PsActiveProcessHead;
+
+        self.iterate_list::<profile::Eprocess, _, _>(
+            Pointer::new(head),
+            |ep| ep.ActiveProcessLinks,
+            |proc| f(proc.into()),
+        )
     }
 
     fn process_for_each_vma(
@@ -304,8 +378,12 @@ impl<B: Backend> ibc::Os for Windows<B> {
         self.read_struct_pointer(cid, |cid| cid.UniqueThread)
     }
 
-    fn thread_name(&self, _thread: ibc::Thread) -> IceResult<String> {
-        Err(ibc::IceError::unimplemented())
+    fn thread_name(&self, thread: ibc::Thread) -> IceResult<Option<String>> {
+        let name = self.read_struct_pointer(thread.into(), |et| et.ThreadName)?;
+        if name.is_null() {
+            return Ok(None);
+        }
+        self.read_unicode_string(name).map(Some)
     }
 
     fn path_to_string(&self, _path: ibc::Path) -> IceResult<String> {

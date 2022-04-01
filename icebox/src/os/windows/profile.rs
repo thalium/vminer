@@ -1,7 +1,13 @@
+#![allow(non_snake_case)]
+
+use ice::PhysicalAddress;
+
 use crate::core::{self as ice, IceResult, VirtualAddress};
 use core::marker::PhantomData;
 
-pub(crate) struct FastSymbols {}
+pub(crate) struct FastSymbols {
+    pub PsActiveProcessHead: u64,
+}
 
 pub struct StructOffset<T> {
     pub offset: u64,
@@ -115,7 +121,6 @@ macro_rules! define_kernel_structs {
         )*
 
         // Then put all layouts in a single structure
-        #[allow(non_snake_case)]
         pub(super) struct $layouts {
             $(
                 $kname: $struct_name,
@@ -138,6 +143,29 @@ macro_rules! define_kernel_structs {
 define_kernel_structs! {
     struct Layouts { .. }
 
+    #[kernel_name(_CLIENT_ID)]
+    struct ClientId {
+        UniqueThread: u64,
+    }
+
+    #[kernel_name(_EPROCESS)]
+    struct Eprocess {
+        ActiveProcessLinks: ListEntry,
+        Pcb: Kprocess,
+        UniqueProcessId: u64,
+        ImageFileName: [u8; 16],
+        InheritedFromUniqueProcessId: u64,
+        ThreadListHead: ListEntry,
+    }
+
+    #[kernel_name(_ETHREAD)]
+    struct Ethread {
+        Tcb: Kthread,
+        Cid: ClientId,
+        ThreadListEntry: ListEntry,
+        ThreadName: Pointer<UnicodeString>,
+    }
+
     #[kernel_name(_KPCR)]
     struct Kpcr {
         Prcb: Kprcb,
@@ -146,19 +174,21 @@ define_kernel_structs! {
     #[kernel_name(_KPRCB)]
     struct Kprcb {
         CurrentThread: Pointer<Ethread>,
-        KernelDirectoryTableBase: u64,
+        #[allow(dead_code)]
+        KernelDirectoryTableBase: PhysicalAddress,
     }
 
-    #[kernel_name(_EPROCESS)]
-    struct Eprocess {
-        UniqueProcessId: u64,
-        ImageFileName: VirtualAddress,
+    #[kernel_name(_KPROCESS)]
+    struct Kprocess {
+        UserDirectoryTableBase: PhysicalAddress,
+        DirectoryTableBase: PhysicalAddress,
     }
 
-    #[kernel_name(_ETHREAD)]
-    struct Ethread {
-        Tcb: Kthread,
-        Cid: ClientId,
+    #[kernel_name(_LIST_ENTRY)]
+    struct ListEntry {
+        Flink: Pointer<ListEntry>,
+        #[allow(dead_code)]
+        Blink: Pointer<ListEntry>,
     }
 
     #[kernel_name(_KTHREAD)]
@@ -166,15 +196,21 @@ define_kernel_structs! {
         Process: Pointer<Eprocess>,
     }
 
-
-    #[kernel_name(_CLIENT_ID)]
-    struct ClientId {
-        UniqueThread: u64,
+    #[kernel_name(_UNICODE_STRING)]
+    struct UnicodeString {
+        Length: u16,
+        Buffer: VirtualAddress,
     }
 }
 
 impl From<Pointer<Ethread>> for Pointer<Kthread> {
     fn from(p: Pointer<Ethread>) -> Self {
+        Pointer::new(p.addr)
+    }
+}
+
+impl From<Pointer<Eprocess>> for Pointer<Kprocess> {
+    fn from(p: Pointer<Eprocess>) -> Self {
         Pointer::new(p.addr)
     }
 }
@@ -192,9 +228,14 @@ impl Profile {
     pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
         let layouts = Layouts::new(&syms)?;
 
+        let kernel = syms.get_lib("ntkrnlmp.exe")?;
+        let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;
+
         Ok(Self {
             syms,
-            fast_syms: FastSymbols {},
+            fast_syms: FastSymbols {
+                PsActiveProcessHead,
+            },
             layouts,
         })
     }

@@ -406,7 +406,7 @@ impl Thread {
     }
 
     #[getter]
-    fn name(&self, py: Python) -> PyResult<String> {
+    fn name(&self, py: Python) -> PyResult<Option<String>> {
         let os = self.os.borrow(py)?;
         let name = os.0.thread_name(self.thread).convert_err()?;
         Ok(name)
