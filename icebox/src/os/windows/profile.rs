@@ -156,6 +156,7 @@ define_kernel_structs! {
         ImageFileName: [u8; 16],
         InheritedFromUniqueProcessId: u64,
         ThreadListHead: ListEntry,
+        VadRoot: RtlAvlTree,
     }
 
     #[kernel_name(_ETHREAD)]
@@ -191,9 +192,29 @@ define_kernel_structs! {
         Blink: Pointer<ListEntry>,
     }
 
+    #[kernel_name(_MMVAD_SHORT)]
+    struct MmvadShort {
+        EndingVpn: u32,
+        EndingVpnHigh: u32,
+        StartingVpn: u32,
+        StartingVpnHigh: u32,
+        VadNode: RtlBalancedNode,
+    }
+
     #[kernel_name(_KTHREAD)]
     struct Kthread {
         Process: Pointer<Eprocess>,
+    }
+
+    #[kernel_name(_RTL_AVL_TREE)]
+    struct RtlAvlTree {
+        Root: Pointer<RtlBalancedNode>,
+    }
+
+    #[kernel_name(_RTL_BALANCED_NODE)]
+    struct RtlBalancedNode {
+        Left: Pointer<RtlBalancedNode>,
+        Right: Pointer<RtlBalancedNode>,
     }
 
     #[kernel_name(_UNICODE_STRING)]

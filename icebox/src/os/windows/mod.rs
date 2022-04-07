@@ -52,6 +52,18 @@ impl From<Pointer<profile::Eprocess>> for ibc::Process {
     }
 }
 
+impl From<ibc::Vma> for Pointer<profile::MmvadShort> {
+    fn from(vma: ibc::Vma) -> Self {
+        Self::new(vma.0)
+    }
+}
+
+impl From<Pointer<profile::MmvadShort>> for ibc::Vma {
+    fn from(vma: Pointer<profile::MmvadShort>) -> Self {
+        Self(vma.addr)
+    }
+}
+
 const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
 
 pub struct Windows<B> {
@@ -241,6 +253,51 @@ impl<B: Backend> Windows<B> {
         Ok(())
     }
 
+    fn _iterate_tree<T, F>(
+        &self,
+        node: Pointer<profile::RtlBalancedNode>,
+        f: &mut F,
+    ) -> IceResult<()>
+    where
+        F: FnMut(Pointer<T>) -> IceResult<()>,
+    {
+        let left = self.read_struct_pointer(node, |node| node.Left)?;
+        if !left.is_null() {
+            self._iterate_tree(left, f)?;
+        }
+
+        f(Pointer::new(node.addr))?;
+
+        let right = self.read_struct_pointer(node, |node| node.Right)?;
+        if !right.is_null() {
+            self._iterate_tree(right, f)?;
+        }
+
+        Ok(())
+    }
+
+    /// Iterate a kernel AVL tree, yielding elements of type `T`
+    fn iterate_tree<T, O, F>(
+        &self,
+        root: Pointer<profile::RtlAvlTree>,
+        get_offset: O,
+        mut f: F,
+    ) -> IceResult<()>
+    where
+        Self: HasStruct<T> + HasStruct<profile::RtlAvlTree> + HasStruct<profile::RtlBalancedNode>,
+        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode>,
+        F: FnMut(Pointer<T>) -> IceResult<()>,
+    {
+        let node = self.read_struct_pointer(root, |tree| tree.Root)?;
+        let offset = get_offset(self.get_struct_layout()).offset;
+
+        if offset != 0 {
+            return Err(IceError::new("Unsupported structure layout"));
+        }
+
+        self._iterate_tree(node, &mut f)
+    }
+
     fn read_unicode_string(&self, ptr: Pointer<profile::UnicodeString>) -> IceResult<String> {
         let len = self.read_struct_pointer(ptr, |str| str.Length)?;
         let mut name = vec![0u16; len as usize / 2];
@@ -353,10 +410,16 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn process_for_each_vma(
         &self,
-        _proc: ibc::Process,
-        _f: &mut dyn FnMut(ibc::Vma) -> IceResult<()>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Vma) -> IceResult<()>,
     ) -> IceResult<()> {
-        Err(ibc::IceError::unimplemented())
+        let vad_root = self.read_struct(proc.into(), |ep| ep.VadRoot)?;
+
+        self.iterate_tree::<profile::MmvadShort, _, _>(
+            vad_root,
+            |vad| vad.VadNode,
+            |mmvad| f(mmvad.into()),
+        )
     }
 
     fn process_callstack(
@@ -394,12 +457,18 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn vma_start(&self, _vma: ibc::Vma) -> IceResult<VirtualAddress> {
-        Err(ibc::IceError::unimplemented())
+    fn vma_start(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
+        let vma = vma.into();
+        let low = self.read_struct_pointer(vma, |mmvad| mmvad.StartingVpn)? as u64;
+        let high = self.read_struct_pointer(vma, |mmvad| mmvad.StartingVpnHigh)? as u64;
+        Ok(VirtualAddress(((high << 32) + low) << 12))
     }
 
-    fn vma_end(&self, _vma: ibc::Vma) -> IceResult<VirtualAddress> {
-        Err(ibc::IceError::unimplemented())
+    fn vma_end(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
+        let vma = vma.into();
+        let low = self.read_struct_pointer(vma, |mmvad| mmvad.EndingVpn)? as u64;
+        let high = self.read_struct_pointer(vma, |mmvad| mmvad.EndingVpnHigh)? as u64;
+        Ok(VirtualAddress(((high << 32) + low + 1) << 12))
     }
 
     fn vma_flags(&self, _vma: ibc::Vma) -> IceResult<ibc::VmaFlags> {
