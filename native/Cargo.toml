@@ -17,4 +17,4 @@ spin = {version = "0.9", default-features = false, features = ["spin_mutex"]}
 log = "0.4"
 
 [build-dependencies]
-cbindgen = "0.20"
+cbindgen = "0.21"
