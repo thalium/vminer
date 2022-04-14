@@ -6,7 +6,8 @@ use crate::{LittleEndian, PhysicalAddress, VirtualAddress};
 #[derive(Debug, Clone, Copy)]
 pub struct X86_64;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
 pub struct Vcpu {
     pub registers: Registers,
     pub special_registers: SpecialRegisters,

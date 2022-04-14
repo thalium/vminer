@@ -7,14 +7,17 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [features]
+# default = ["std"]
 std = ["icebox/std", "icebox/kvm", "icebox/linux", "icebox/dump"]
+custom_allocator = []
 
 [dependencies]
-icebox = {path = "../icebox", default-features = false, features = ["object"]}
-ibc = {package = "icebox-core", path = "../icebox-core"}
+icebox = {path = "../icebox", features = ["object", "all_backends"]}
+ibc = {package = "icebox-core", path = "../icebox-core", features = ["object"]}
 
+bytemuck = "1.9"
 spin = {version = "0.9", default-features = false, features = ["spin_mutex"]}
 log = "0.4"
 
 [build-dependencies]
-cbindgen = "0.21"
+cbindgen = {version = "0.21", default-features = false}

@@ -63,7 +63,7 @@ pub unsafe extern "C" fn error_print(err: *const Error, str: *mut c_char, max_le
         let _ = fmt.write_str("success");
     } else {
         let err = error_ref(&err);
-        let _ = fmt::write(&mut fmt, format_args!("{}", err));
+        let _ = fmt::write(&mut fmt, format_args!("{:#}", err));
     }
     fmt.finish()
 }
