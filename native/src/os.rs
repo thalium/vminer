@@ -1,10 +1,11 @@
 use core::{
     fmt,
     mem::{self, MaybeUninit},
-    num::NonZeroUsize,
 };
 
-use crate::{c_char, cstring, error, Backend, Error, PhysicalAddress, VirtualAddress};
+use crate::{
+    c_char, cstring, error, symbols::Symbols, Backend, Error, PhysicalAddress, VirtualAddress,
+};
 use alloc::boxed::Box;
 use ibc::{IceError, IceResult};
 
@@ -106,6 +107,20 @@ pub unsafe extern "C" fn os_new(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn os_new_linux(
+    backend: Box<Backend>,
+    profile: Option<Box<Symbols>>,
+    os: &mut mem::MaybeUninit<Box<Os>>,
+) -> *mut Error {
+    error::wrap(os, || {
+        let profile = profile.map(|p| p.0).unwrap_or_default();
+        let profile = icebox::os::linux::Profile::new(profile)?;
+        let linux = icebox::os::Linux::create(backend.0, profile)?;
+        Ok(Box::new(Os(Box::new(linux))))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn os_free(os: Option<Box<Os>>) {
     drop(os);
 }
@@ -163,17 +178,13 @@ pub unsafe extern "C" fn process_name(
     name: *mut c_char,
     max_len: usize,
 ) -> *mut Error {
-    let res = os.0.process_name(proc.into()).map(|n| {
-        let max_len = match NonZeroUsize::new(max_len) {
-            Some(l) => l,
-            None => return,
-        };
-
+    error::wrap_unit(|| {
+        let n = os.0.process_name(proc.into())?;
         let mut fmt = cstring::Formatter::new(name, max_len);
         let _ = fmt::write(&mut fmt, format_args!("{n}"));
         fmt.finish();
-    });
-    error::wrap_unit_result(res)
+        Ok(())
+    })
 }
 
 #[no_mangle]
@@ -211,11 +222,6 @@ pub unsafe extern "C" fn thread_name(
     max_len: usize,
 ) -> *mut Error {
     let res = os.0.thread_name(thread.into()).map(|n| {
-        let max_len = match NonZeroUsize::new(max_len) {
-            Some(l) => l,
-            None => return,
-        };
-
         let mut fmt = cstring::Formatter::new(name, max_len);
         if let Some(name) = n {
             let _ = fmt::write(&mut fmt, format_args!("{name}"));

@@ -67,6 +67,9 @@ impl Error for alloc::string::FromUtf8Error {}
 #[cfg(not(feature = "std"))]
 impl Error for core::str::Utf8Error {}
 
+#[cfg(all(feature = "object", not(feature = "std")))]
+impl Error for object::Error {}
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MemoryAccessError {
@@ -289,6 +292,13 @@ impl From<MemoryAccessError> for IceError {
     #[cold]
     fn from(err: MemoryAccessError) -> Self {
         Self::from_repr(Repr::Memory(err))
+    }
+}
+
+impl From<core::str::Utf8Error> for IceError {
+    #[cold]
+    fn from(error: core::str::Utf8Error) -> Self {
+        Self::from(error.to_string())
     }
 }
 

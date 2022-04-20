@@ -1,26 +1,28 @@
 use crate::{c_char, cstring};
 use core::{
     fmt::{self, Write},
-    mem,
-    num::NonZeroUsize,
-    ptr,
+    mem, ptr,
 };
 use ibc::IceError;
 
+#[inline]
 unsafe fn error_ref(err: &*const Error) -> &IceError {
     mem::transmute(err)
 }
 
+#[inline]
 unsafe fn error_from(err: *mut Error) -> IceError {
     mem::transmute(err)
 }
 
+#[inline]
 fn error_into(err: IceError) -> *mut Error {
     unsafe { mem::transmute(err) }
 }
 
 pub struct Error;
 
+#[inline]
 pub fn wrap_result<T, U>(result: ibc::IceResult<U>, res: &mut mem::MaybeUninit<T>) -> *mut Error
 where
     U: Into<T>,
@@ -34,11 +36,25 @@ where
     }
 }
 
+#[inline]
+pub fn wrap<F, T>(res: &mut mem::MaybeUninit<T>, f: F) -> *mut Error
+where
+    F: FnOnce() -> ibc::IceResult<T>,
+{
+    wrap_result(f(), res)
+}
+
+#[inline]
 pub fn wrap_unit_result(result: ibc::IceResult<()>) -> *mut Error {
     match result {
         Ok(()) => ptr::null_mut(),
         Err(err) => error_into(err),
     }
+}
+
+#[inline]
+pub fn wrap_unit(f: impl FnOnce() -> ibc::IceResult<()>) -> *mut Error {
+    wrap_unit_result(f())
 }
 
 #[no_mangle]
@@ -56,11 +72,6 @@ pub unsafe extern "C" fn error_missing_symbol(sym: *mut c_char) -> *mut Error {
 
 #[no_mangle]
 pub unsafe extern "C" fn error_print(err: *const Error, str: *mut c_char, max_len: usize) -> usize {
-    let max_len = match NonZeroUsize::new(max_len) {
-        Some(l) => l,
-        None => return 0,
-    };
-
     let mut fmt = cstring::Formatter::new(str, max_len);
     if err.is_null() {
         let _ = fmt.write_str("success");

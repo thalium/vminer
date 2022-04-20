@@ -8,11 +8,11 @@ mod arch;
 mod cstring;
 mod error;
 mod os;
+mod symbols;
 
 use crate::error::Error;
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
-use ibc::IceError;
 
 #[allow(non_camel_case_types)]
 pub type c_char = u8;
@@ -140,11 +140,10 @@ pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
 #[no_mangle]
 #[cfg(target_os = "linux")]
 pub extern "C" fn kvm_connect(pid: i32, kvm: &mut mem::MaybeUninit<Box<Backend>>) -> *mut Error {
-    let kvm_result = match icebox::backends::kvm::Kvm::connect(pid) {
-        Ok(kvm) => Ok(Backend::new(kvm)),
-        Err(err) => Err(IceError::new(err)),
-    };
-    error::wrap_result(kvm_result, kvm)
+    error::wrap(kvm, || {
+        let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
+        Ok(Backend::new(kvm))
+    })
 }
 
 #[no_mangle]
@@ -152,12 +151,11 @@ pub unsafe extern "C" fn read_dump(
     path: *const c_char,
     dump: &mut mem::MaybeUninit<Box<Backend>>,
 ) -> *mut Error {
-    let path = cstring::from_ut8_lossy(path);
-    let kvm_result = match icebox::backends::kvm_dump::DumbDump::read(&*path) {
-        Ok(kvm) => Ok(Backend::new(kvm)),
-        Err(err) => Err(IceError::from(err)),
-    };
-    error::wrap_result(kvm_result, dump)
+    error::wrap(dump, || {
+        let path = cstring::from_ut8(path)?;
+        let dump = icebox::backends::kvm_dump::DumbDump::read(&*path)?;
+        Ok(Backend::new(dump))
+    })
 }
 
 #[no_mangle]

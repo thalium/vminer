@@ -219,24 +219,16 @@ impl SymbolsIndexer {
     }
 
     #[cfg(all(feature = "object", feature = "std"))]
-    fn _read_object_file(&mut self, path: &std::path::Path) -> IceResult<()> {
-        let content = std::fs::read(path)?;
-        (|| {
-            let obj = object::File::parse(&*content)?;
-            crate::symbols::dwarf::load_types(&obj, self)
-        })()
-        .map_err(IceError::new)
-    }
-
-    #[cfg(all(feature = "object", feature = "std"))]
     #[inline]
     pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
-        self._read_object_file(path.as_ref())
+        let content = std::fs::read(path)?;
+        self.read_object_from_bytes(&content)
     }
 
     #[cfg(feature = "object")]
-    pub fn read_object(&mut self, obj: &object::File) -> IceResult<()> {
-        crate::symbols::dwarf::load_types(obj, self).map_err(IceError::new)
+    pub fn read_object_from_bytes(&mut self, obj: &[u8]) -> IceResult<()> {
+        let obj = object::File::parse(obj).map_err(IceError::new)?;
+        crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)
     }
 }
 

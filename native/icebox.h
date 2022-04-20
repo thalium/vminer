@@ -11,6 +11,8 @@ typedef struct Error Error;
 
 typedef struct Os Os;
 
+typedef struct Symbols Symbols;
+
 typedef struct PhysicalAddress {
   uint64_t val;
 } PhysicalAddress;
@@ -166,6 +168,8 @@ void error_free(struct Error *err);
 
 struct Error *os_new(struct Backend *backend, struct Os **os);
 
+struct Error *os_new_linux(struct Backend *backend, struct Symbols *profile, struct Os **os);
+
 void os_free(struct Os *os);
 
 struct Error *os_current_process(const struct Os *os, uintptr_t cpuid, struct Process *proc);
@@ -191,6 +195,14 @@ struct Error *thread_process(const struct Os *os, struct Thread thread, struct P
 struct Error *vma_start(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
 
 struct Error *vma_end(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
+
+struct Symbols *symbols_new(void);
+
+struct Error *symbols_read_object(struct Symbols *indexer, const uint8_t *data, uintptr_t len);
+
+struct Error *symbols_read_object_from_file(struct Symbols *indexer, const char *path);
+
+void symbols_free(struct Symbols *indexer);
 
 #ifdef __cplusplus
 } // extern "C"

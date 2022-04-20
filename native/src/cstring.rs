@@ -1,5 +1,9 @@
 use alloc::{borrow::Cow, string::String};
-use core::{cmp, fmt, num::NonZeroUsize, ptr, slice};
+use core::{
+    cmp, fmt,
+    ptr::{self, NonNull},
+    slice, str,
+};
 
 use crate::c_char;
 
@@ -19,24 +23,43 @@ pub unsafe fn from_ut8_lossy<'a>(str: *const c_char) -> Cow<'a, str> {
     String::from_utf8_lossy(bytes)
 }
 
+#[inline]
+pub unsafe fn from_ut8<'a>(str: *const c_char) -> Result<&'a str, str::Utf8Error> {
+    let len = strlen(str);
+    let bytes = slice::from_raw_parts(str, len);
+    str::from_utf8(bytes)
+}
+
 pub struct Formatter {
-    ptr: *mut c_char,
+    ptr: Option<NonNull<c_char>>,
     len: usize,
     written: usize,
 }
 
 impl Formatter {
-    pub unsafe fn new(ptr: *mut c_char, len: NonZeroUsize) -> Self {
-        Self {
-            ptr,
-            len: len.get() - 1,
-            written: 0,
+    #[inline]
+    pub unsafe fn new(ptr: *mut c_char, len: usize) -> Self {
+        if len != 0 {
+            Self {
+                ptr: NonNull::new(ptr),
+                len: len - 1,
+                written: 0,
+            }
+        } else {
+            Self {
+                ptr: None,
+                len: 0,
+                written: 0,
+            }
         }
     }
 
+    #[inline]
     pub fn finish(self) -> usize {
         unsafe {
-            self.ptr.write(0);
+            if let Some(ptr) = self.ptr {
+                ptr.as_ptr().write(0);
+            }
         }
         self.written
     }
@@ -45,22 +68,29 @@ impl Formatter {
 impl Drop for Formatter {
     fn drop(&mut self) {
         unsafe {
-            self.ptr.write(0);
+            if let Some(ptr) = self.ptr {
+                ptr.as_ptr().write(0);
+            }
         }
     }
 }
 
 impl fmt::Write for Formatter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        let ptr = match self.ptr {
+            Some(ptr) => ptr.as_ptr(),
+            None => return Ok(()),
+        };
+
         let bytes = s.as_bytes();
 
         let n = cmp::min(bytes.len(), self.len);
 
         unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr, n);
+            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, n);
         }
 
-        self.ptr = unsafe { self.ptr.add(n) };
+        self.ptr = unsafe { NonNull::new(ptr.add(n)) };
         self.len -= n;
         self.written += n;
 
