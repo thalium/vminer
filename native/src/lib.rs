@@ -22,25 +22,6 @@ pub type c_void = u8;
 pub struct Backend(Arc<dyn ibc::RuntimeBackend + Send + Sync>);
 
 #[repr(C)]
-pub struct Process {
-    addr: VirtualAddress,
-}
-
-impl From<ibc::Process> for Process {
-    fn from(proc: ibc::Process) -> Self {
-        Self {
-            addr: proc.0.into(),
-        }
-    }
-}
-
-impl From<Process> for ibc::Process {
-    fn from(proc: Process) -> Self {
-        Self(proc.addr.into())
-    }
-}
-
-#[repr(C)]
 pub struct PhysicalAddress {
     val: u64,
 }

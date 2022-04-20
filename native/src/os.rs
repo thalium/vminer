@@ -4,9 +4,64 @@ use core::{
     num::NonZeroUsize,
 };
 
-use crate::{c_char, cstring, error, Backend, Error, Process};
+use crate::{c_char, cstring, error, Backend, Error, PhysicalAddress, VirtualAddress};
 use alloc::boxed::Box;
 use ibc::{IceError, IceResult};
+
+#[repr(C)]
+pub struct Process {
+    addr: VirtualAddress,
+}
+
+impl From<ibc::Process> for Process {
+    fn from(proc: ibc::Process) -> Self {
+        Self {
+            addr: proc.0.into(),
+        }
+    }
+}
+
+impl From<Process> for ibc::Process {
+    fn from(proc: Process) -> Self {
+        Self(proc.addr.into())
+    }
+}
+
+#[repr(C)]
+pub struct Thread {
+    addr: VirtualAddress,
+}
+
+impl From<ibc::Thread> for Thread {
+    fn from(thread: ibc::Thread) -> Self {
+        Self {
+            addr: thread.0.into(),
+        }
+    }
+}
+
+impl From<Thread> for ibc::Thread {
+    fn from(thread: Thread) -> Self {
+        Self(thread.addr.into())
+    }
+}
+
+#[repr(C)]
+pub struct Vma {
+    addr: VirtualAddress,
+}
+
+impl From<ibc::Vma> for Vma {
+    fn from(vma: ibc::Vma) -> Self {
+        Self { addr: vma.0.into() }
+    }
+}
+
+impl From<Vma> for ibc::Vma {
+    fn from(vma: Vma) -> Self {
+        Self(vma.addr.into())
+    }
+}
 
 pub struct Os(Box<dyn ibc::Os + Send + Sync>);
 
@@ -61,7 +116,16 @@ pub unsafe extern "C" fn os_current_process(
     cpuid: usize,
     proc: &mut MaybeUninit<Process>,
 ) -> *mut Error {
-    error::wrap_result(os.0.current_process(cpuid).map(Into::into), proc)
+    error::wrap_result(os.0.current_process(cpuid), proc)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn os_current_thread(
+    os: &Os,
+    cpuid: usize,
+    proc: &mut MaybeUninit<Thread>,
+) -> *mut Error {
+    error::wrap_result(os.0.current_thread(cpuid), proc)
 }
 
 #[no_mangle]
@@ -81,6 +145,15 @@ pub unsafe extern "C" fn os_processes(
     });
     *n_procs = n;
     error::wrap_unit_result(res)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn process_id(
+    os: &Os,
+    proc: Process,
+    pid: &mut mem::MaybeUninit<u64>,
+) -> *mut Error {
+    error::wrap_result(os.0.process_pid(proc.into()), pid)
 }
 
 #[no_mangle]
@@ -104,11 +177,77 @@ pub unsafe extern "C" fn process_name(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn process_pid(
+pub unsafe extern "C" fn process_pgd(
     os: &Os,
     proc: Process,
-    pid: &mut mem::MaybeUninit<u64>,
+    pgd: &mut mem::MaybeUninit<PhysicalAddress>,
 ) -> *mut Error {
-    let res = os.0.process_pid(proc.into());
-    error::wrap_result(res, pid)
+    error::wrap_result(os.0.process_pgd(proc.into()), pgd)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn process_parent(
+    os: &Os,
+    proc: Process,
+    parent: &mut mem::MaybeUninit<Process>,
+) -> *mut Error {
+    error::wrap_result(os.0.process_parent(proc.into()), parent)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thread_id(
+    os: &Os,
+    thread: Thread,
+    tid: &mut mem::MaybeUninit<u64>,
+) -> *mut Error {
+    error::wrap_result(os.0.thread_id(thread.into()), tid)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thread_name(
+    os: &Os,
+    thread: Thread,
+    name: *mut c_char,
+    max_len: usize,
+) -> *mut Error {
+    let res = os.0.thread_name(thread.into()).map(|n| {
+        let max_len = match NonZeroUsize::new(max_len) {
+            Some(l) => l,
+            None => return,
+        };
+
+        let mut fmt = cstring::Formatter::new(name, max_len);
+        if let Some(name) = n {
+            let _ = fmt::write(&mut fmt, format_args!("{name}"));
+        }
+        fmt.finish();
+    });
+    error::wrap_unit_result(res)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn thread_process(
+    os: &Os,
+    thread: Thread,
+    proc: &mut mem::MaybeUninit<Process>,
+) -> *mut Error {
+    error::wrap_result(os.0.thread_process(thread.into()), proc)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vma_start(
+    os: &Os,
+    vma: Vma,
+    proc: &mut mem::MaybeUninit<VirtualAddress>,
+) -> *mut Error {
+    error::wrap_result(os.0.vma_start(vma.into()), proc)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vma_end(
+    os: &Os,
+    vma: Vma,
+    proc: &mut mem::MaybeUninit<VirtualAddress>,
+) -> *mut Error {
+    error::wrap_result(os.0.vma_end(vma.into()), proc)
 }

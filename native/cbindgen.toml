@@ -5,9 +5,9 @@ cpp_compat = true
 [defines]
 "feature = custom_allocator" = "CUSTOM_ALLOCATOR"
 
-# [parse]
-# parse_deps = true
-# include = ["ibc", "icebox-core"]
+[parse]
+parse_deps = true
+include = ["ibc", "icebox-core"]
 
 # [parse.expand]
 # crates = ["ibc", "icebox-core"]

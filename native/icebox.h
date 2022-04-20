@@ -116,6 +116,14 @@ typedef struct Process {
   struct VirtualAddress addr;
 } Process;
 
+typedef struct Thread {
+  struct VirtualAddress addr;
+} Thread;
+
+typedef struct Vma {
+  struct VirtualAddress addr;
+} Vma;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -162,11 +170,27 @@ void os_free(struct Os *os);
 
 struct Error *os_current_process(const struct Os *os, uintptr_t cpuid, struct Process *proc);
 
+struct Error *os_current_thread(const struct Os *os, uintptr_t cpuid, struct Thread *proc);
+
 struct Error *os_processes(const struct Os *os, struct Process *procs, uintptr_t *n_procs);
+
+struct Error *process_id(const struct Os *os, struct Process proc, uint64_t *pid);
 
 struct Error *process_name(const struct Os *os, struct Process proc, char *name, uintptr_t max_len);
 
-struct Error *process_pid(const struct Os *os, struct Process proc, uint64_t *pid);
+struct Error *process_pgd(const struct Os *os, struct Process proc, struct PhysicalAddress *pgd);
+
+struct Error *process_parent(const struct Os *os, struct Process proc, struct Process *parent);
+
+struct Error *thread_id(const struct Os *os, struct Thread thread, uint64_t *tid);
+
+struct Error *thread_name(const struct Os *os, struct Thread thread, char *name, uintptr_t max_len);
+
+struct Error *thread_process(const struct Os *os, struct Thread thread, struct Process *proc);
+
+struct Error *vma_start(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
+
+struct Error *vma_end(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
 
 #ifdef __cplusplus
 } // extern "C"

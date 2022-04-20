@@ -21,10 +21,13 @@ fn error_into(err: IceError) -> *mut Error {
 
 pub struct Error;
 
-pub fn wrap_result<T>(result: ibc::IceResult<T>, res: &mut mem::MaybeUninit<T>) -> *mut Error {
+pub fn wrap_result<T, U>(result: ibc::IceResult<U>, res: &mut mem::MaybeUninit<T>) -> *mut Error
+where
+    U: Into<T>,
+{
     match result {
         Ok(val) => {
-            res.write(val);
+            res.write(val.into());
             ptr::null_mut()
         }
         Err(err) => error_into(err),

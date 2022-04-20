@@ -42,6 +42,14 @@ impl Formatter {
     }
 }
 
+impl Drop for Formatter {
+    fn drop(&mut self) {
+        unsafe {
+            self.ptr.write(0);
+        }
+    }
+}
+
 impl fmt::Write for Formatter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let bytes = s.as_bytes();
