@@ -463,6 +463,10 @@ impl Vma {
     fn file(&self) -> Option<&Py<PyString>> {
         self.file.as_ref()
     }
+
+    fn __contains__(&self, addr: u64) -> bool {
+        self.start <= addr && addr < self.end
+    }
 }
 
 #[pyclass]
