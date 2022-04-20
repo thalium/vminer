@@ -67,7 +67,7 @@ impl Error for alloc::string::FromUtf8Error {}
 #[cfg(not(feature = "std"))]
 impl Error for core::str::Utf8Error {}
 
-#[cfg(all(feature = "object", not(feature = "std")))]
+#[cfg(not(feature = "std"))]
 impl Error for object::Error {}
 
 #[derive(Debug)]

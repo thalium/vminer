@@ -23,6 +23,7 @@ pub unsafe fn from_ut8_lossy<'a>(str: *const c_char) -> Cow<'a, str> {
     String::from_utf8_lossy(bytes)
 }
 
+#[allow(dead_code)]
 #[inline]
 pub unsafe fn from_ut8<'a>(str: *const c_char) -> Result<&'a str, str::Utf8Error> {
     let len = strlen(str);

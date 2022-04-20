@@ -1,5 +1,5 @@
 pub mod dwarf;
-#[cfg(feature = "pdb")]
+#[cfg(feature = "std")]
 pub mod pdb;
 
 use alloc::{
@@ -21,12 +21,12 @@ use super::VirtualAddress;
 /// If the symbol was not mangled or if the mangling scheme is unknown, the
 /// symbol is returned as-is.
 pub fn demangle(sym: &str) -> Cow<str> {
-    #[cfg(feature = "cpp_demangle")]
+    // TODO: Always enable cpp_demangle once it works with no_std
+    #[cfg(feature = "std")]
     if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
         return Cow::Owned(sym.to_string());
     }
 
-    #[cfg(feature = "rustc-demangle")]
     if let Ok(sym) = rustc_demangle::try_demangle(sym) {
         return Cow::Owned(sym.to_string());
     }
@@ -39,13 +39,13 @@ pub fn demangle(sym: &str) -> Cow<str> {
 /// If the symbol was not mangled or if the mangling scheme is unknown, the
 /// symbol is written as-is.
 pub fn demangle_to<W: fmt::Write>(sym: &str, mut writer: W) -> fmt::Result {
-    #[cfg(feature = "cpp_demangle")]
+    // TODO: Always enable cpp_demangle once it works with no_std
+    #[cfg(feature = "std")]
     if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
         writer.write_fmt(format_args!("{sym}"))?;
         return Ok(());
     }
 
-    #[cfg(feature = "rustc-demangle")]
     if let Ok(sym) = rustc_demangle::try_demangle(sym) {
         writer.write_fmt(format_args!("{sym}"))?;
         return Ok(());
@@ -218,14 +218,13 @@ impl SymbolsIndexer {
         self.symbols.entry(name).or_insert_with(ModuleSymbols::new)
     }
 
-    #[cfg(all(feature = "object", feature = "std"))]
+    #[cfg(feature = "std")]
     #[inline]
     pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
         let content = std::fs::read(path)?;
         self.read_object_from_bytes(&content)
     }
 
-    #[cfg(feature = "object")]
     pub fn read_object_from_bytes(&mut self, obj: &[u8]) -> IceResult<()> {
         let obj = object::File::parse(obj).map_err(IceError::new)?;
         crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)

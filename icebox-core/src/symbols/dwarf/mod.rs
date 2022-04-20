@@ -1,13 +1,11 @@
 #![allow(dead_code)]
 
+use crate as ibc;
 use alloc::{collections::VecDeque, rc::Rc, string::String, vec::Vec};
 use core::{cell::Cell, fmt};
-
 use gimli::{DebugStr, UnitOffset};
 
-use crate as ice;
-
-mod read;
+mod relocations;
 
 trait GimliReader: gimli::Reader<Offset = usize> {}
 impl<R: gimli::Reader<Offset = usize>> GimliReader for R {}
@@ -480,7 +478,7 @@ fn fill<R: GimliReader>(
     unit: &gimli::UnitHeader<R>,
     abbrs: &gimli::Abbreviations,
     debug_str: &gimli::DebugStr<R>,
-    symbols: &mut ice::SymbolsIndexer,
+    symbols: &mut ibc::SymbolsIndexer,
 ) -> gimli::Result<()> {
     // First pass: iterate all DWARF entries and store all types
     let mut types = Vec::new();
@@ -589,13 +587,13 @@ fn fill<R: GimliReader>(
             .into_iter()
             .filter_map(|typ| typ.name.zip(typ.typ.into_resolved()))
             .filter_map(|(name, ty)| match ty {
-                DwarfType::Struct(LazyStruct { size, fields }) => Some(ice::symbols::OwnedStruct {
+                DwarfType::Struct(LazyStruct { size, fields }) => Some(ibc::symbols::OwnedStruct {
                     size,
                     name,
                     fields: fields
                         .iter()
                         .filter_map(|&(offset, ref name, _)| {
-                            name.as_ref().map(|name| ice::symbols::StructField {
+                            name.as_ref().map(|name| ibc::symbols::StructField {
                                 name: name.clone(),
                                 offset,
                             })
@@ -612,16 +610,16 @@ fn fill<R: GimliReader>(
 /// Find an object's debug infos and load types to `symbols`
 pub fn load_types(
     obj: &object::File,
-    symbols: &mut ice::SymbolsIndexer,
-) -> Result<(), read::Error> {
-    let dwarf = read::load_dwarf(obj)?;
+    symbols: &mut ibc::SymbolsIndexer,
+) -> Result<(), relocations::Error> {
+    let dwarf = relocations::load_dwarf(obj)?;
     Ok(load_types_from_dwarf(&dwarf, symbols)?)
 }
 
 /// Add types found in the DWARF to `symbols`
 pub fn load_types_from_dwarf<R>(
     dwarf: &gimli::Dwarf<R>,
-    symbols: &mut ice::SymbolsIndexer,
+    symbols: &mut ibc::SymbolsIndexer,
 ) -> Result<(), gimli::Error>
 where
     R: gimli::Reader<Offset = usize>,

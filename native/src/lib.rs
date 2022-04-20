@@ -129,7 +129,7 @@ impl ibc::Backend for X86_64Backend {
 
 #[no_mangle]
 pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
-    Box::new(Backend(Arc::new(backend)))
+    Backend::new(backend)
 }
 
 // #[no_mangle]
@@ -137,8 +137,8 @@ pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
 //     backend.0.virtual_to_physical(mmu_addr, addr).valid().unwrap()
 // }
 
+#[cfg(all(target_os = "linux", feature = "std"))]
 #[no_mangle]
-#[cfg(target_os = "linux")]
 pub extern "C" fn kvm_connect(pid: i32, kvm: &mut mem::MaybeUninit<Box<Backend>>) -> *mut Error {
     error::wrap(kvm, || {
         let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
@@ -146,6 +146,7 @@ pub extern "C" fn kvm_connect(pid: i32, kvm: &mut mem::MaybeUninit<Box<Backend>>
     })
 }
 
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn read_dump(
     path: *const c_char,

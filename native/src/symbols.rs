@@ -1,7 +1,6 @@
-use crate::{
-    c_char, cstring,
-    error::{self, Error},
-};
+use crate::error::{self, Error};
+#[cfg(feature = "std")]
+use crate::{c_char, cstring};
 use alloc::boxed::Box;
 use ibc::SymbolsIndexer;
 
@@ -23,6 +22,7 @@ pub unsafe extern "C" fn symbols_read_object(
     error::wrap_unit_result(indexer.0.read_object_from_bytes(data))
 }
 
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn symbols_read_object_from_file(
     indexer: &mut Symbols,
