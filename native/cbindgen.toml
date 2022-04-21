@@ -4,6 +4,7 @@ cpp_compat = true
 
 [defines]
 "feature = custom_allocator" = "CUSTOM_ALLOCATOR"
+"feature = std" = "STD"
 
 [parse]
 parse_deps = true

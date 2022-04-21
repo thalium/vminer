@@ -12,6 +12,19 @@
 
 #define CHECK(expr) do { err = expr; if (err) goto error; } while(0)
 
+void send_log(void* data, LogRecord *record) {
+	static const char* NAMES[] = {"ERROR", "WARN ", "INFO ", "DEBUG", "TRACE"};
+
+	fprintf(stderr, "%s [%s] %s\n", NAMES[record.level], record.target, record.message);
+}
+
+static Logger LOGGER = {
+	.data = NULL,
+	.enabled = NULL,
+	.flush = NULL,
+	.log = send_log,
+};
+
 typedef struct {
 	X86_64Vcpu *vcpus;
 	int n_vcpus;
@@ -120,6 +133,7 @@ int main() {
 	uint64_t pid;
 	size_t n_procs = (sizeof procs)/(sizeof *procs);
 
+	set_logger(&LOGGER);
 
 	Backend *dump = make_dump("../data/linux-5.10-x86_64/dump");
 	if(dump == NULL) {
@@ -132,7 +146,7 @@ int main() {
 
 	for(size_t i = 0; i < n_procs; ++i) {
 		CHECK(process_name(os, procs[i], name, sizeof name));
-		CHECK(process_pid(os, procs[i], &pid));
+		CHECK(process_id(os, procs[i], &pid));
 
 		printf("%ld: %s\n", pid, name);
 	}

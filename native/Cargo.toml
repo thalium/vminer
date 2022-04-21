@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [features]
 default = ["std"]
-std = ["icebox/std", "icebox/all_backends", "icebox/windows"]
+std = ["icebox/std", "icebox/all_backends", "icebox/windows", "dep:env_logger"]
 
 custom_allocator = []
 
@@ -17,8 +17,11 @@ icebox = {path = "../icebox", default-features = false, features = ["linux"]}
 ibc = {package = "icebox-core", path = "../icebox-core"}
 
 bytemuck = "1.9"
+cty = "0.2.2"
 spin = {version = "0.9", default-features = false, features = ["spin_mutex"]}
+
 log = "0.4"
+env_logger = {version = "0.9", optional = true}
 
 [build-dependencies]
 cbindgen = {version = "0.21", default-features = false}

@@ -5,6 +5,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+typedef enum LogLevel {
+  LogLevelError,
+  LogLevelWarn,
+  LogLevelInfo,
+  LogLevelDebug,
+  LogLevelTrace,
+} LogLevel;
+
 typedef struct Backend Backend;
 
 typedef struct Error Error;
@@ -110,6 +118,21 @@ typedef struct Allocator {
 } Allocator;
 #endif
 
+typedef struct LogRecord {
+  enum LogLevel level;
+  const char *message;
+  const char *target;
+  const char *file;
+  uint32_t line;
+} LogRecord;
+
+typedef struct Logger {
+  void *data;
+  int (*enabled)(void *data, enum LogLevel level);
+  void (*log)(void *data, const struct LogRecord *message);
+  void (*flush)(void *data);
+} Logger;
+
 typedef struct VirtualAddress {
   uint64_t val;
 } VirtualAddress;
@@ -132,9 +155,13 @@ extern "C" {
 
 struct Backend *backend_make(struct X86_64Backend backend);
 
+#if defined(STD)
 struct Error *kvm_connect(int32_t pid, struct Backend **kvm);
+#endif
 
+#if defined(STD)
 struct Error *read_dump(const char *path, struct Backend **dump);
+#endif
 
 void backend_free(struct Backend *backend);
 
@@ -165,6 +192,12 @@ struct Error *error_missing_symbol(char *sym);
 uintptr_t error_print(const struct Error *err, char *str, uintptr_t max_len);
 
 void error_free(struct Error *err);
+
+bool set_logger(struct Logger *logger);
+
+#if defined(STD)
+bool set_default_logger(void);
+#endif
 
 struct Error *os_new(struct Backend *backend, struct Os **os);
 
@@ -200,7 +233,9 @@ struct Symbols *symbols_new(void);
 
 struct Error *symbols_read_object(struct Symbols *indexer, const uint8_t *data, uintptr_t len);
 
+#if defined(STD)
 struct Error *symbols_read_object_from_file(struct Symbols *indexer, const char *path);
+#endif
 
 void symbols_free(struct Symbols *indexer);
 

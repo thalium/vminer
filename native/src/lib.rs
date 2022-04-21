@@ -7,6 +7,7 @@ mod allocator;
 mod arch;
 mod cstring;
 mod error;
+mod logging;
 mod os;
 mod symbols;
 
