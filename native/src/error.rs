@@ -23,13 +23,18 @@ fn error_into(err: IceError) -> *mut Error {
 pub struct Error;
 
 #[inline]
-pub fn wrap_result<T, U>(result: ibc::IceResult<U>, res: &mut mem::MaybeUninit<T>) -> *mut Error
+pub fn wrap_result<T, U>(
+    res: Option<&mut mem::MaybeUninit<T>>,
+    result: ibc::IceResult<U>,
+) -> *mut Error
 where
     U: Into<T>,
 {
     match result {
         Ok(val) => {
-            res.write(val.into());
+            if let Some(res) = res {
+                res.write(val.into());
+            }
             ptr::null_mut()
         }
         Err(err) => error_into(err),
@@ -37,11 +42,11 @@ where
 }
 
 #[inline]
-pub fn wrap<F, T>(res: &mut mem::MaybeUninit<T>, f: F) -> *mut Error
+pub fn wrap<F, T>(res: Option<&mut mem::MaybeUninit<T>>, f: F) -> *mut Error
 where
     F: FnOnce() -> ibc::IceResult<T>,
 {
-    wrap_result(f(), res)
+    wrap_result(res, f())
 }
 
 #[inline]

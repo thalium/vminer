@@ -139,7 +139,10 @@ pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
 
 #[cfg(all(target_os = "linux", feature = "std"))]
 #[no_mangle]
-pub extern "C" fn kvm_connect(pid: i32, kvm: &mut mem::MaybeUninit<Box<Backend>>) -> *mut Error {
+pub extern "C" fn kvm_connect(
+    pid: i32,
+    kvm: Option<&mut mem::MaybeUninit<Box<Backend>>>,
+) -> *mut Error {
     error::wrap(kvm, || {
         let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
         Ok(Backend::new(kvm))
@@ -150,7 +153,7 @@ pub extern "C" fn kvm_connect(pid: i32, kvm: &mut mem::MaybeUninit<Box<Backend>>
 #[no_mangle]
 pub unsafe extern "C" fn read_dump(
     path: *const c_char,
-    dump: &mut mem::MaybeUninit<Box<Backend>>,
+    dump: Option<&mut mem::MaybeUninit<Box<Backend>>>,
 ) -> *mut Error {
     error::wrap(dump, || {
         let path = cstring::from_ut8(path)?;

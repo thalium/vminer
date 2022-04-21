@@ -1,7 +1,4 @@
-use core::{
-    fmt,
-    mem::{self, MaybeUninit},
-};
+use core::{fmt, mem};
 
 use crate::{
     c_char, cstring, error, symbols::Symbols, Backend, Error, PhysicalAddress, VirtualAddress,
@@ -101,16 +98,16 @@ impl Os {
 #[no_mangle]
 pub unsafe extern "C" fn os_new(
     backend: Box<Backend>,
-    os: &mut mem::MaybeUninit<Box<Os>>,
+    os: Option<&mut mem::MaybeUninit<Box<Os>>>,
 ) -> *mut Error {
-    error::wrap_result(Os::new(*backend), os)
+    error::wrap_result(os, Os::new(*backend))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn os_new_linux(
     backend: Box<Backend>,
     profile: Option<Box<Symbols>>,
-    os: &mut mem::MaybeUninit<Box<Os>>,
+    os: Option<&mut mem::MaybeUninit<Box<Os>>>,
 ) -> *mut Error {
     error::wrap(os, || {
         let profile = profile.map(|p| p.0).unwrap_or_default();
@@ -129,18 +126,18 @@ pub extern "C" fn os_free(os: Option<Box<Os>>) {
 pub unsafe extern "C" fn os_current_process(
     os: &Os,
     cpuid: usize,
-    proc: &mut MaybeUninit<Process>,
+    proc: Option<&mut mem::MaybeUninit<Process>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.current_process(cpuid), proc)
+    error::wrap_result(proc, os.0.current_process(cpuid))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn os_current_thread(
     os: &Os,
     cpuid: usize,
-    proc: &mut MaybeUninit<Thread>,
+    proc: Option<&mut mem::MaybeUninit<Thread>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.current_thread(cpuid), proc)
+    error::wrap_result(proc, os.0.current_thread(cpuid))
 }
 
 #[no_mangle]
@@ -166,9 +163,9 @@ pub unsafe extern "C" fn os_processes(
 pub unsafe extern "C" fn process_id(
     os: &Os,
     proc: Process,
-    pid: &mut mem::MaybeUninit<u64>,
+    pid: Option<&mut mem::MaybeUninit<u64>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.process_pid(proc.into()), pid)
+    error::wrap_result(pid, os.0.process_pid(proc.into()))
 }
 
 #[no_mangle]
@@ -191,27 +188,27 @@ pub unsafe extern "C" fn process_name(
 pub unsafe extern "C" fn process_pgd(
     os: &Os,
     proc: Process,
-    pgd: &mut mem::MaybeUninit<PhysicalAddress>,
+    pgd: Option<&mut mem::MaybeUninit<PhysicalAddress>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.process_pgd(proc.into()), pgd)
+    error::wrap_result(pgd, os.0.process_pgd(proc.into()))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn process_parent(
     os: &Os,
     proc: Process,
-    parent: &mut mem::MaybeUninit<Process>,
+    parent: Option<&mut mem::MaybeUninit<Process>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.process_parent(proc.into()), parent)
+    error::wrap_result(parent, os.0.process_parent(proc.into()))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn thread_id(
     os: &Os,
     thread: Thread,
-    tid: &mut mem::MaybeUninit<u64>,
+    tid: Option<&mut mem::MaybeUninit<u64>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.thread_id(thread.into()), tid)
+    error::wrap_result(tid, os.0.thread_id(thread.into()))
 }
 
 #[no_mangle]
@@ -235,25 +232,25 @@ pub unsafe extern "C" fn thread_name(
 pub unsafe extern "C" fn thread_process(
     os: &Os,
     thread: Thread,
-    proc: &mut mem::MaybeUninit<Process>,
+    proc: Option<&mut mem::MaybeUninit<Process>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.thread_process(thread.into()), proc)
+    error::wrap_result(proc, os.0.thread_process(thread.into()))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn vma_start(
     os: &Os,
     vma: Vma,
-    proc: &mut mem::MaybeUninit<VirtualAddress>,
+    proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.vma_start(vma.into()), proc)
+    error::wrap_result(proc, os.0.vma_start(vma.into()))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn vma_end(
     os: &Os,
     vma: Vma,
-    proc: &mut mem::MaybeUninit<VirtualAddress>,
+    proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
 ) -> *mut Error {
-    error::wrap_result(os.0.vma_end(vma.into()), proc)
+    error::wrap_result(proc, os.0.vma_end(vma.into()))
 }
