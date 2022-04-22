@@ -21,13 +21,13 @@ use super::VirtualAddress;
 /// If the symbol was not mangled or if the mangling scheme is unknown, the
 /// symbol is returned as-is.
 pub fn demangle(sym: &str) -> Cow<str> {
-    // TODO: Always enable cpp_demangle once it works with no_std
-    #[cfg(feature = "std")]
-    if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
+    if let Ok(sym) = rustc_demangle::try_demangle(sym) {
         return Cow::Owned(sym.to_string());
     }
 
-    if let Ok(sym) = rustc_demangle::try_demangle(sym) {
+    // TODO: Always enable cpp_demangle once it works with no_std
+    #[cfg(feature = "std")]
+    if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
         return Cow::Owned(sym.to_string());
     }
 
