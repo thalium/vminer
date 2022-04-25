@@ -195,9 +195,9 @@ define_kernel_structs! {
     #[kernel_name(_MMVAD_SHORT)]
     struct MmvadShort {
         EndingVpn: u32,
-        EndingVpnHigh: u32,
+        EndingVpnHigh: u8,
         StartingVpn: u32,
-        StartingVpnHigh: u32,
+        StartingVpnHigh: u8,
         VadNode: RtlBalancedNode,
     }
 
