@@ -15,7 +15,7 @@
 void send_log(void* data, LogRecord *record) {
 	static const char* NAMES[] = {"ERROR", "WARN ", "INFO ", "DEBUG", "TRACE"};
 
-	fprintf(stderr, "%s [%s] %s\n", NAMES[record.level], record.target, record.message);
+	fprintf(stderr, "%s [%s] %s\n", NAMES[record->level], record->target, record->message);
 }
 
 static Logger LOGGER = {
