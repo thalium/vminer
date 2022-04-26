@@ -19,7 +19,7 @@ impl<'t> TypeList<'t> {
 
 pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
-    syms: &mut crate::SymbolsIndexer,
+    module: &mut crate::ModuleSymbols,
 ) -> Result<(), pdb::Error> {
     let types = pdb.type_information()?;
 
@@ -42,7 +42,7 @@ pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
         types,
     };
 
-    syms.extend(type_list.types.iter().filter_map(|item| match item {
+    module.extend(type_list.types.iter().filter_map(|item| match item {
         pdb::TypeData::Class(ty) => {
             let name = core::str::from_utf8(ty.name.as_bytes()).ok()?.to_owned();
 
@@ -92,7 +92,7 @@ pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
 
 pub fn load_syms_from_pdb<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
-    syms: &mut crate::symbols::ModuleSymbols,
+    module: &mut crate::symbols::ModuleSymbols,
 ) -> Result<(), pdb::Error> {
     let symbols = pdb.global_symbols()?;
     let address_map = pdb.address_map()?;
@@ -102,7 +102,7 @@ pub fn load_syms_from_pdb<'s, S: pdb::Source<'s> + 's>(
             if let Some(addr) = sym.offset.to_rva(&address_map) {
                 if let Ok(name) = std::str::from_utf8(sym.name.as_bytes()) {
                     let addr = crate::VirtualAddress(addr.0 as u64);
-                    syms.extend([(name, addr)])
+                    module.extend([(name, addr)])
                 }
             }
             Ok(())

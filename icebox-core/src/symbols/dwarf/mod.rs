@@ -478,7 +478,7 @@ fn fill<R: GimliReader>(
     unit: &gimli::UnitHeader<R>,
     abbrs: &gimli::Abbreviations,
     debug_str: &gimli::DebugStr<R>,
-    symbols: &mut ibc::SymbolsIndexer,
+    symbols: &mut ibc::ModuleSymbols,
 ) -> gimli::Result<()> {
     // First pass: iterate all DWARF entries and store all types
     let mut types = Vec::new();
@@ -610,7 +610,7 @@ fn fill<R: GimliReader>(
 /// Find an object's debug infos and load types to `symbols`
 pub fn load_types(
     obj: &object::File,
-    symbols: &mut ibc::SymbolsIndexer,
+    symbols: &mut ibc::ModuleSymbols,
 ) -> Result<(), relocations::Error> {
     let dwarf = relocations::load_dwarf(obj)?;
     Ok(load_types_from_dwarf(&dwarf, symbols)?)
@@ -619,7 +619,7 @@ pub fn load_types(
 /// Add types found in the DWARF to `symbols`
 pub fn load_types_from_dwarf<R>(
     dwarf: &gimli::Dwarf<R>,
-    symbols: &mut ibc::SymbolsIndexer,
+    symbols: &mut ibc::ModuleSymbols,
 ) -> Result<(), gimli::Error>
 where
     R: gimli::Reader<Offset = usize>,

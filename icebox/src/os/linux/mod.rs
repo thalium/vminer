@@ -282,7 +282,7 @@ impl<B: ice::Backend> Linux<B> {
 
     pub fn find_symbol(&self, lib: &str, addr: VirtualAddress) -> Option<&str> {
         let lib = self.profile.syms.get_lib(lib).ok()?;
-        lib.get_name(addr)
+        lib.get_symbols(addr)
     }
 
     fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct>> {

@@ -128,7 +128,7 @@ macro_rules! define_kernel_structs {
         }
 
         impl Layouts {
-            fn new(syms: &ice::SymbolsIndexer) -> IceResult<Self> {
+            fn new(syms: &ice::ModuleSymbols) -> IceResult<Self> {
                 Ok(Self {
                     $(
                         $kname: $struct_name::new(syms.get_struct(stringify!($kname))?)?,
@@ -247,9 +247,8 @@ pub struct Profile {
 
 impl Profile {
     pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
-        let layouts = Layouts::new(&syms)?;
-
         let kernel = syms.get_lib("ntkrnlmp.exe")?;
+        let layouts = Layouts::new(&kernel)?;
         let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;
 
         Ok(Self {

@@ -120,6 +120,8 @@ pub struct ModuleSymbols {
 
     /// A map to translate names to addresses
     addresses: HashMap<Arc<str>, VirtualAddress>,
+
+    types: HashMap<String, OwnedStruct>,
 }
 
 impl ModuleSymbols {
@@ -127,10 +129,11 @@ impl ModuleSymbols {
         Self {
             names: HashMap::new(),
             addresses: HashMap::new(),
+            types: HashMap::new(),
         }
     }
 
-    pub fn get_name(&self, addr: VirtualAddress) -> Option<&str> {
+    pub fn get_symbols(&self, addr: VirtualAddress) -> Option<&str> {
         Some(&**self.names.get(&addr)?)
     }
 
@@ -147,8 +150,31 @@ impl ModuleSymbols {
         self.addresses.insert(symbol, addr);
     }
 
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = (VirtualAddress, &str)> {
+    pub fn iter_symbols(&self) -> impl ExactSizeIterator<Item = (VirtualAddress, &str)> {
         self.names.iter().map(|(&addr, name)| (addr, &**name))
+    }
+
+    pub fn get_struct(&self, name: &str) -> IceResult<Struct> {
+        match self.types.get(name) {
+            Some(s) => Ok(s.borrow()),
+            None => Err(IceError::missing_symbol(name)),
+        }
+    }
+
+    pub fn insert_struct(&mut self, structure: OwnedStruct) {
+        self.types.insert(structure.name.clone(), structure);
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
+        let content = std::fs::read(path)?;
+        self.read_object_from_bytes(&content)
+    }
+
+    pub fn read_object_from_bytes(&mut self, obj: &[u8]) -> IceResult<()> {
+        let obj = object::File::parse(obj).map_err(IceError::new)?;
+        crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)
     }
 }
 
@@ -168,35 +194,29 @@ impl<S: AsRef<str>> Extend<(S, VirtualAddress)> for ModuleSymbols {
     }
 }
 
+impl Extend<OwnedStruct> for ModuleSymbols {
+    fn extend<I: IntoIterator<Item = OwnedStruct>>(&mut self, iter: I) {
+        self.types
+            .extend(iter.into_iter().map(|s| (s.name.clone(), s)))
+    }
+}
+
 impl fmt::Debug for ModuleSymbols {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_map().entries(self.iter()).finish()
+        f.debug_map().entries(self.iter_symbols()).finish()
     }
 }
 
 #[derive(Debug, Default)]
 pub struct SymbolsIndexer {
-    structs: HashMap<String, OwnedStruct>,
-    symbols: HashMap<Box<str>, ModuleSymbols>,
+    modules: HashMap<Box<str>, ModuleSymbols>,
 }
 
 impl SymbolsIndexer {
     pub fn new() -> Self {
         Self {
-            structs: HashMap::new(),
-            symbols: HashMap::new(),
+            modules: HashMap::new(),
         }
-    }
-
-    pub fn get_struct(&self, name: &str) -> IceResult<Struct> {
-        match self.structs.get(name) {
-            Some(s) => Ok(s.borrow()),
-            None => Err(IceError::missing_symbol(name)),
-        }
-    }
-
-    pub fn insert_struct(&mut self, structure: OwnedStruct) {
-        self.structs.insert(structure.name.clone(), structure);
     }
 
     pub fn get_addr(&self, lib: &str, name: &str) -> IceResult<VirtualAddress> {
@@ -208,32 +228,13 @@ impl SymbolsIndexer {
     }
 
     pub fn get_lib(&self, name: &str) -> IceResult<&ModuleSymbols> {
-        match self.symbols.get(name) {
+        match self.modules.get(name) {
             Some(lib) => Ok(lib),
             None => Err(IceError::missing_module(name)),
         }
     }
 
     pub fn get_lib_mut(&mut self, name: Box<str>) -> &mut ModuleSymbols {
-        self.symbols.entry(name).or_insert_with(ModuleSymbols::new)
-    }
-
-    #[cfg(feature = "std")]
-    #[inline]
-    pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
-        let content = std::fs::read(path)?;
-        self.read_object_from_bytes(&content)
-    }
-
-    pub fn read_object_from_bytes(&mut self, obj: &[u8]) -> IceResult<()> {
-        let obj = object::File::parse(obj).map_err(IceError::new)?;
-        crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)
-    }
-}
-
-impl Extend<OwnedStruct> for SymbolsIndexer {
-    fn extend<I: IntoIterator<Item = OwnedStruct>>(&mut self, iter: I) {
-        self.structs
-            .extend(iter.into_iter().map(|s| (s.name.clone(), s)))
+        self.modules.entry(name).or_insert_with(ModuleSymbols::new)
     }
 }

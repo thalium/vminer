@@ -136,7 +136,7 @@ macro_rules! define_kernel_structs {
         }
 
         impl $layouts {
-            fn new(syms: &ice::SymbolsIndexer) -> IceResult<Self> {
+            fn new(syms: &ice::ModuleSymbols) -> IceResult<Self> {
                 Ok(Self {
                     $(
                         $kname: $struct_name::new(syms.get_struct(stringify!($kname))?)?,
@@ -229,7 +229,7 @@ impl Profile {
         let init_task = kernel.get_address("init_task")?;
         let linux_banner = kernel.get_address("linux_banner")?;
 
-        let layouts = Layouts::new(&syms)?;
+        let layouts = Layouts::new(&kernel)?;
 
         Ok(Self {
             syms,
@@ -256,7 +256,7 @@ impl Profile {
                 .context("non-utf8 file name")?;
 
             if name == "module.ko" {
-                syms.read_object_file(path)
+                syms.get_lib_mut("System.map".into()).read_object_file(path)
             } else {
                 let file = io::BufReader::new(fs::File::open(path)?);
                 log::trace!("Reading symbol file \"{name}\"");
