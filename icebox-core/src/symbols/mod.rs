@@ -185,7 +185,7 @@ impl ModuleSymbols {
         }
 
         #[cfg(feature = "std")]
-        if content.starts_with(b"MZ") {
+        if content.starts_with(b"Microsoft C/C++") {
             let content = std::io::Cursor::new(content);
             let mut pdb = ::pdb::PDB::open(content).map_err(IceError::new)?;
             pdb::load_syms_from_pdb(&mut pdb, self).map_err(IceError::new)?;

@@ -247,7 +247,7 @@ pub struct Profile {
 
 impl Profile {
     pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
-        let kernel = syms.get_lib("ntkrnlmp.exe")?;
+        let kernel = syms.get_lib("ntkrnlmp.pdb")?;
         let layouts = Layouts::new(&kernel)?;
         let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;
 
