@@ -69,21 +69,9 @@ impl Os {
 
         match icebox::os::Linux::quick_check(&backend.0) {
             Ok(true) => {
-                #[allow(unused_mut)]
-                let mut syms = ibc::SymbolsIndexer::new();
-
+                let mut profile = ibc::SymbolsIndexer::new();
                 #[cfg(feature = "std")]
-                {
-                    let kallsyms = std::io::BufReader::new(std::fs::File::open(
-                        "../data/linux-5.10-x86_64/System.map",
-                    )?);
-                    icebox::os::linux::profile::parse_symbol_file(
-                        kallsyms,
-                        syms.get_lib_mut("System.map".into()),
-                    )?;
-                    syms.read_object_file("../data/linux-5.10-x86_64/module.ko")?;
-                }
-                let profile = icebox::os::linux::Profile::new(syms)?;
+                profile.load_dir("../data/linux-x86-64")?;
                 let linux = icebox::os::Linux::create(backend.0, profile)?;
                 return Ok(Box::new(Self(Box::new(linux))));
             }
@@ -106,13 +94,11 @@ pub unsafe extern "C" fn os_new(
 #[no_mangle]
 pub unsafe extern "C" fn os_new_linux(
     backend: Box<Backend>,
-    profile: Option<Box<Symbols>>,
+    profile: Box<Symbols>,
     os: Option<&mut mem::MaybeUninit<Box<Os>>>,
 ) -> *mut Error {
     error::wrap(os, || {
-        let profile = profile.map(|p| p.0).unwrap_or_default();
-        let profile = icebox::os::linux::Profile::new(profile)?;
-        let linux = icebox::os::Linux::create(backend.0, profile)?;
+        let linux = icebox::os::Linux::create(backend.0, profile.0)?;
         Ok(Box::new(Os(Box::new(linux))))
     })
 }

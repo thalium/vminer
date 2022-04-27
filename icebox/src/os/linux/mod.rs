@@ -1,5 +1,5 @@
 pub mod callstack;
-pub mod profile;
+mod profile;
 
 use crate::core::{
     self as ice, IceError, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress,
@@ -103,7 +103,8 @@ pub fn get_aslr<B: ice::Backend>(
 }
 
 impl<B: ice::Backend> Linux<B> {
-    pub fn create(backend: B, profile: Profile) -> IceResult<Self> {
+    pub fn create(backend: B, profile: ibc::SymbolsIndexer) -> IceResult<Self> {
+        let profile = Profile::new(profile)?;
         let kpgd = backend.find_kernel_pgd(true, &[])?;
         let kaslr = get_aslr(&backend, &profile, kpgd)?;
 

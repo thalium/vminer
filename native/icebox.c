@@ -7,12 +7,13 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-
+#define STD
 #include "icebox.h"
+#undef STD
 
 #define CHECK(expr) do { err = expr; if (err) goto error; } while(0)
 
-void send_log(void* data, LogRecord *record) {
+void send_log(void* data, const LogRecord *record) {
 	static const char* NAMES[] = {"ERROR", "WARN ", "INFO ", "DEBUG", "TRACE"};
 
 	fprintf(stderr, "%s [%s] %s\n", NAMES[record->level], record->target, record->message);
@@ -135,13 +136,18 @@ int main() {
 
 	set_logger(&LOGGER);
 
-	Backend *dump = make_dump("../data/linux-5.10-x86_64/dump");
+	Backend *dump = make_dump("../data/linux-5.10-x86_64-dump");
 	if(dump == NULL) {
 		puts("Error");
 		return 1;
 	}
 
-	CHECK(os_new(dump, &os));
+	Symbols *symbols = symbols_new();
+	CHECK(symbols_load_dir(symbols, "../data/linux-5.10-x86_64"));
+
+	err = os_new_linux(dump, symbols, &os);
+	symbols = NULL;
+	CHECK(err);
 	CHECK(os_processes(os, procs, &n_procs));
 
 	for(size_t i = 0; i < n_procs; ++i) {
@@ -154,6 +160,8 @@ int main() {
 error:
 	if(os != NULL) {
 		os_free(os);
+	} else {
+		symbols_free(symbols);
 	}
 
 	if(err) {

@@ -231,10 +231,17 @@ struct Error *vma_end(const struct Os *os, struct Vma vma, struct VirtualAddress
 
 struct Symbols *symbols_new(void);
 
-struct Error *symbols_read_object(struct Symbols *indexer, const uint8_t *data, uintptr_t len);
+struct Error *symbols_load_from_bytes(struct Symbols *indexer,
+                                      const char *name,
+                                      const uint8_t *data,
+                                      uintptr_t len);
 
 #if defined(STD)
-struct Error *symbols_read_object_from_file(struct Symbols *indexer, const char *path);
+struct Error *symbols_load_from_file(struct Symbols *indexer, const char *name, const char *path);
+#endif
+
+#if defined(STD)
+struct Error *symbols_load_dir(struct Symbols *indexer, const char *path);
 #endif
 
 void symbols_free(struct Symbols *indexer);

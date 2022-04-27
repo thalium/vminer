@@ -1,7 +1,10 @@
 pub mod dwarf;
 #[cfg(feature = "std")]
 pub mod pdb;
+pub mod symbols_file;
 
+use super::VirtualAddress;
+use crate::{IceError, IceResult};
 use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
@@ -11,10 +14,8 @@ use alloc::{
 };
 use core::fmt;
 use hashbrown::HashMap;
-
-use crate::{IceError, IceResult};
-
-use super::VirtualAddress;
+#[cfg(feature = "std")]
+use std::{fs, path};
 
 /// Demangles a symbol to a string.
 ///
@@ -166,15 +167,34 @@ impl ModuleSymbols {
     }
 
     #[cfg(feature = "std")]
-    #[inline]
-    pub fn read_object_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
-        let content = std::fs::read(path)?;
-        self.read_object_from_bytes(&content)
+    pub fn read_symbols_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
+        self.read_symbols_from_file_inner(path.as_ref())
     }
 
-    pub fn read_object_from_bytes(&mut self, obj: &[u8]) -> IceResult<()> {
-        let obj = object::File::parse(obj).map_err(IceError::new)?;
-        crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)
+    #[cfg(feature = "std")]
+    fn read_symbols_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<()> {
+        let content = std::fs::read(path)?;
+        self.read_symbols_from_bytes(&content)
+    }
+
+    pub fn read_symbols_from_bytes(&mut self, content: &[u8]) -> IceResult<()> {
+        if content.starts_with(b"\x7fELF") {
+            let obj = object::File::parse(content).map_err(IceError::new)?;
+            crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)?;
+            return Ok(());
+        }
+
+        #[cfg(feature = "std")]
+        if content.starts_with(b"MZ") {
+            let content = std::io::Cursor::new(content);
+            let mut pdb = ::pdb::PDB::open(content).map_err(IceError::new)?;
+            pdb::load_syms_from_pdb(&mut pdb, self).map_err(IceError::new)?;
+            pdb::load_types_from_pdb(&mut pdb, self).map_err(IceError::new)?;
+
+            return Ok(());
+        }
+
+        symbols_file::parse_symbol_file_from_bytes(content, self)
     }
 }
 
@@ -236,5 +256,55 @@ impl SymbolsIndexer {
 
     pub fn get_lib_mut(&mut self, name: Box<str>) -> &mut ModuleSymbols {
         self.modules.entry(name).or_insert_with(ModuleSymbols::new)
+    }
+
+    pub fn load(&mut self, name: Box<str>, content: &[u8]) -> IceResult<()> {
+        self.get_lib_mut(name).read_symbols_from_bytes(content)
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn load_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
+        self.load_from_file_inner(path.as_ref())
+    }
+
+    #[cfg(feature = "std")]
+    fn load_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<()> {
+        use crate::ResultExt;
+
+        let name = path
+            .file_name()
+            .context("no file name")?
+            .to_str()
+            .context("non UTF-8 file name")?
+            .into();
+
+        self.get_lib_mut(name).read_symbols_from_file(path)
+    }
+
+    #[cfg(feature = "std")]
+    fn load_dir_inner(&mut self, path: &path::Path) -> IceResult<()> {
+        for entry in fs::read_dir(path)? {
+            match entry {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if let Err(err) = self.load_from_file(&path) {
+                        log::warn!("Error reading {}: {err}", path.display());
+                    }
+                }
+                Err(err) => {
+                    log::warn!("Failed to read directory entry: {err}")
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    /// Reads profile data from the given directory.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn load_dir<P: AsRef<path::Path>>(&mut self, path: P) -> IceResult<()> {
+        self.load_dir_inner(path.as_ref())
     }
 }

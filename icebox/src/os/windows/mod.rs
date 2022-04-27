@@ -3,7 +3,7 @@ use ibc::{Backend, IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddre
 
 use self::profile::{Pointer, StructOffset};
 
-pub mod profile;
+mod profile;
 
 /// Values that we can read from guest memory
 trait Readable: Sized {
@@ -167,7 +167,8 @@ fn find_kernel<B: Backend>(
 }
 
 impl<B: Backend> Windows<B> {
-    pub fn create(backend: B, profile: profile::Profile) -> IceResult<Self> {
+    pub fn create(backend: B, profile: ibc::SymbolsIndexer) -> IceResult<Self> {
+        let profile = profile::Profile::new(profile)?;
         let kpgd = backend.find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])?;
         let (pdb_id, base_addr) =
             find_kernel(&backend, kpgd)?.context("failed to find kernel data")?;

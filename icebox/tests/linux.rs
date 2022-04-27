@@ -29,8 +29,9 @@ impl fmt::Display for Arch {
 }
 
 fn read_linux(arch: Arch) -> IceResult<Linux<DumbDump<ibc::File>>> {
-    let backend = DumbDump::read(format!("../data/linux-5.10-{arch}/dump"))?;
-    let profile = icebox::os::linux::Profile::read_from_dir(format!("../data/linux-5.10-{arch}"))?;
+    let backend = DumbDump::read(format!("../data/linux-5.10-{arch}-dump"))?;
+    let mut profile = ibc::SymbolsIndexer::new();
+    profile.load_dir(format!("../data/linux-5.10-{arch}"))?;
     Linux::create(backend, profile)
 }
 

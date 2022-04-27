@@ -13,24 +13,42 @@ pub extern "C" fn symbols_new() -> Box<Symbols> {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn symbols_read_object(
+pub unsafe extern "C" fn symbols_load_from_bytes(
     indexer: &mut Symbols,
+    name: *const c_char,
     data: *const u8,
     len: usize,
 ) -> *mut Error {
-    let data = core::slice::from_raw_parts(data, len);
-    error::wrap_unit_result(indexer.0.read_object_from_bytes(data))
+    error::wrap_unit(|| {
+        let data = core::slice::from_raw_parts(data, len);
+        let name = cstring::from_ut8(name)?.into();
+        indexer.0.get_lib_mut(name).read_symbols_from_bytes(data)
+    })
 }
 
 #[cfg(feature = "std")]
 #[no_mangle]
-pub unsafe extern "C" fn symbols_read_object_from_file(
+pub unsafe extern "C" fn symbols_load_from_file(
+    indexer: &mut Symbols,
+    name: *const c_char,
+    path: *const c_char,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let path = cstring::from_ut8(path)?;
+        let name = cstring::from_ut8(name)?.into();
+        indexer.0.get_lib_mut(name).read_symbols_from_file(path)
+    })
+}
+
+#[cfg(feature = "std")]
+#[no_mangle]
+pub unsafe extern "C" fn symbols_load_dir(
     indexer: &mut Symbols,
     path: *const c_char,
 ) -> *mut Error {
     error::wrap_unit(|| {
         let path = cstring::from_ut8(path)?;
-        indexer.0.read_object_file(path)
+        indexer.0.load_dir(path)
     })
 }
 
