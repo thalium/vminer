@@ -484,10 +484,11 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             .map(|offset| offset * 4096)
     }
 
-    fn resolve_symbol(&self, addr: VirtualAddress, vma: ice::Vma) -> IceResult<Option<&str>> {
-        if !self.vma_contains(vma, addr)? {
-            return Err(IceError::new("the address does not belong to the VMA"));
-        }
+    fn resolve_symbol(&self, addr: VirtualAddress, proc: ibc::Process) -> IceResult<Option<&str>> {
+        let vma = match self.process_find_vma_by_address(proc, addr)? {
+            Some(vma) => vma,
+            None => return Ok(None),
+        };
 
         let offset = addr - (self.vma_start(vma)? - self.vma_offset(vma)?);
         let addr = VirtualAddress(offset as u64);

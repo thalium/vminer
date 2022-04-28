@@ -137,6 +137,22 @@ pub trait Os {
         self.process_for_each_vma(proc, &mut |vma| Ok(vmas.push(vma)))?;
         Ok(vmas)
     }
+
+    fn process_find_vma_by_address(
+        &self,
+        proc: Process,
+        addr: VirtualAddress,
+    ) -> IceResult<Option<Vma>> {
+        let mut vma = None;
+        self.process_for_each_vma(proc, &mut |v| {
+            if self.vma_contains(v, addr)? {
+                vma = Some(v);
+            }
+            Ok(())
+        })?;
+        Ok(vma)
+    }
+
     fn process_callstack(
         &self,
         proc: Process,
@@ -158,5 +174,5 @@ pub trait Os {
         Ok(self.vma_start(vma)? <= addr && addr < self.vma_end(vma)?)
     }
 
-    fn resolve_symbol(&self, addr: VirtualAddress, vma: Vma) -> IceResult<Option<&str>>;
+    fn resolve_symbol(&self, addr: VirtualAddress, proc: Process) -> IceResult<Option<&str>>;
 }

@@ -169,7 +169,8 @@ impl RawOs {
     fn new(backend: Backend, path: &str) -> IceResult<Self> {
         match icebox::os::Linux::quick_check(&backend.0) {
             Ok(true) => {
-                let profile = icebox::os::linux::Profile::read_from_dir(path)?;
+                let mut profile = ibc::SymbolsIndexer::new();
+                profile.load_dir(path)?;
                 let linux = icebox::os::Linux::create(backend.0, profile)?;
                 return Ok(RawOs(Box::new(linux)));
             }

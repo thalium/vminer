@@ -1,4 +1,4 @@
-use core::{fmt, mem};
+use core::{fmt, mem, str};
 use ibc::{Backend, IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
 
 use self::profile::{Pointer, StructOffset};
@@ -88,8 +88,7 @@ struct Codeview {
     magic: [u8; 4],
     guid: Guid,
     age: u32,
-    name: [u8; 13],
-    _pad: [u8; 3],
+    name: [u8; 24],
 }
 
 impl Codeview {
@@ -113,6 +112,59 @@ impl Codeview {
         .expect("Failed to format GUID");
         s
     }
+
+    fn name(&self) -> Result<&str, str::Utf8Error> {
+        let i = self
+            .name
+            .iter()
+            .enumerate()
+            .find(|(_, b)| **b == 0)
+            .unwrap()
+            .0;
+        str::from_utf8(&self.name[..i])
+    }
+}
+
+fn pe_get_pdb_guid<B: Backend>(
+    backend: &B,
+    pgd: PhysicalAddress,
+    addr: VirtualAddress,
+    buf: &mut Vec<u8>,
+) -> IceResult<Option<Codeview>> {
+    buf.resize(0x1000, 0);
+    backend.read_virtual_memory(pgd, addr, buf)?;
+
+    if !buf.starts_with(b"MZ") {
+        return Ok(None);
+    }
+
+    let pe = object::read::pe::PeFile::<'_, object::pe::ImageNtHeaders64>::parse(buf.as_slice())
+        .map_err(IceError::new)?;
+    let size = pe
+        .nt_headers()
+        .optional_header
+        .size_of_image
+        .get(object::endian::LittleEndian) as usize;
+    buf.resize(size, 0);
+
+    for i in 1..(size / 0x1000) {
+        let _ = backend.read_virtual_memory(
+            pgd,
+            addr + i as u64 * 0x1000,
+            &mut buf[i * 0x1000..(i + 1) * 0x1000],
+        );
+    }
+
+    let index = match memchr::memmem::find(&buf, b"RSDS") {
+        Some(i) => i,
+        None => return Ok(None),
+    };
+
+    let mut codeview: Codeview = bytemuck::Zeroable::zeroed();
+    bytemuck::bytes_of_mut(&mut codeview)
+        .copy_from_slice(&buf[index..index + mem::size_of::<Codeview>()]);
+
+    Ok(Some(codeview))
 }
 
 fn find_kernel<B: Backend>(
@@ -126,41 +178,11 @@ fn find_kernel<B: Backend>(
         .map_while(|addr| addr.ok())
         .filter(|addr| addr.0 & 0xfff == 0)
     {
-        buf.resize(0x1000, 0);
-        backend.read_virtual_memory(kpgd, addr, &mut buf).unwrap();
-
-        let pe =
-            object::read::pe::PeFile::<'_, object::pe::ImageNtHeaders64>::parse(buf.as_slice())
-                .unwrap();
-        let size = pe
-            .nt_headers()
-            .optional_header
-            .size_of_image
-            .get(object::endian::LittleEndian) as usize;
-        buf.resize(size, 0);
-
-        for i in 1..(size / 0x1000) {
-            let _ = backend.read_virtual_memory(
-                kpgd,
-                addr + i as u64 * 0x1000,
-                &mut buf[i * 0x1000..(i + 1) * 0x1000],
-            );
+        if let Ok(Some(codeview)) = pe_get_pdb_guid(backend, kpgd, addr, &mut buf) {
+            if &codeview.name[..KERNEL_PDB.len()] == KERNEL_PDB {
+                return Ok(Some((codeview.pdb_id(), addr)));
+            }
         }
-
-        let index = match memchr::memmem::find(&buf, b"RSDS") {
-            Some(i) => i,
-            None => continue,
-        };
-
-        let mut codeview: Codeview = bytemuck::Zeroable::zeroed();
-        bytemuck::bytes_of_mut(&mut codeview)
-            .copy_from_slice(&buf[index..index + mem::size_of::<Codeview>()]);
-
-        if codeview.name != KERNEL_PDB {
-            continue;
-        }
-
-        return Ok(Some((codeview.pdb_id(), addr)));
     }
 
     Ok(None)
@@ -477,10 +499,29 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn vma_offset(&self, _vma: ibc::Vma) -> IceResult<u64> {
-        Err(ibc::IceError::unimplemented())
+        Ok(0)
     }
 
-    fn resolve_symbol(&self, _addr: VirtualAddress, _vma: ibc::Vma) -> IceResult<Option<&str>> {
-        Err(ibc::IceError::unimplemented())
+    fn resolve_symbol(&self, addr: VirtualAddress, proc: ibc::Process) -> IceResult<Option<&str>> {
+        let vma = match self.process_find_vma_by_address(proc, addr)? {
+            Some(vma) => vma,
+            None => return Ok(None),
+        };
+        let pgd = self.process_pgd(proc)?;
+
+        let vma_start = self.vma_start(vma)?;
+        let codeview = pe_get_pdb_guid(&self.backend, pgd, vma_start, &mut Vec::new())?;
+        let codeview = match codeview {
+            Some(codeview) => codeview,
+            None => return Ok(None),
+        };
+
+        match self.profile.syms.get_lib(codeview.name()?) {
+            Ok(lib) => {
+                let addr = VirtualAddress((addr - vma_start) as u64);
+                Ok(lib.get_symbols(addr))
+            }
+            Err(_) => Ok(None),
+        }
     }
 }
