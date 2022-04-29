@@ -378,6 +378,10 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Ok(proc.into())
     }
 
+    fn process_parent_id(&self, proc: ibc::Process) -> IceResult<u64> {
+        self.process_pid(self.process_parent(proc)?)
+    }
+
     fn process_for_each_child(
         &self,
         proc: ibc::Process,

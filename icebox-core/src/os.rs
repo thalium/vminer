@@ -100,6 +100,7 @@ pub trait Os {
     fn process_pgd(&self, proc: Process) -> IceResult<PhysicalAddress>;
     fn process_exe(&self, proc: Process) -> IceResult<Option<Path>>;
     fn process_parent(&self, proc: Process) -> IceResult<Process>;
+    fn process_parent_id(&self, proc: Process) -> IceResult<u64>;
     fn process_for_each_child(
         &self,
         proc: Process,

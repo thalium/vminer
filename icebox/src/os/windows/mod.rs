@@ -386,9 +386,12 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn process_parent(&self, proc: ibc::Process) -> IceResult<ibc::Process> {
-        let parent_pid =
-            self.read_struct_pointer(proc.into(), |e| e.InheritedFromUniqueProcessId)?;
+        let parent_pid = self.process_parent_id(proc)?;
         Ok(self.find_process_by_pid(parent_pid)?.unwrap_or(proc))
+    }
+
+    fn process_parent_id(&self, proc: ibc::Process) -> IceResult<u64> {
+        self.read_struct_pointer(proc.into(), |e| e.InheritedFromUniqueProcessId)
     }
 
     fn process_for_each_child(
