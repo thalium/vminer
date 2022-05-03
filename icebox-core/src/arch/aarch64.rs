@@ -172,7 +172,7 @@ impl<'a> super::Architecture<'a> for Aarch64 {
         memory: &M,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
+    ) -> crate::TranslationResult<PhysicalAddress> {
         super::virtual_to_physical::<MmuDesc, M>(memory, mmu_addr, addr)
     }
 

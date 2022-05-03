@@ -3,8 +3,8 @@ use alloc::{format, vec::Vec};
 use gimli::UnwindSection;
 use hashbrown::HashMap;
 use ibc::{
-    Architecture, Endianness, IceError, IceResult, MemoryAccessResult, MemoryAccessResultExt, Os,
-    PhysicalAddress, VirtualAddress,
+    Architecture, Endianness, IceError, IceResult, MemoryAccessResult, Os, PhysicalAddress,
+    TranslationResult, TranslationResultExt, VirtualAddress,
 };
 use once_cell::unsync::OnceCell;
 
@@ -75,16 +75,13 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         })
     }
 
-    fn virtual_to_physical(
-        &self,
-        addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
+    fn virtual_to_physical(&self, addr: VirtualAddress) -> TranslationResult<PhysicalAddress> {
         self.linux.backend.virtual_to_physical(self.pgd, addr)
     }
 
     #[allow(dead_code)]
     fn is_valid(&self, addr: VirtualAddress) -> IceResult<bool> {
-        Ok(self.virtual_to_physical(addr)?.is_some())
+        Ok(self.virtual_to_physical(addr).maybe_invalid()?.is_some())
     }
 
     // TODO: this should probably move to core
@@ -95,7 +92,10 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             let max = core::cmp::min(offset + 0x1000, buf.len());
             let chunk = &mut buf[offset..max];
 
-            match self.virtual_to_physical(addr + offset as u64)? {
+            match self
+                .virtual_to_physical(addr + offset as u64)
+                .maybe_invalid()?
+            {
                 Some(p_addr) => {
                     self.linux.backend.read_memory(p_addr, chunk)?;
                 }
@@ -111,11 +111,9 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         Ok(())
     }
 
-    fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> MemoryAccessResult<Option<T>> {
-        Ok(match self.virtual_to_physical(addr)? {
-            Some(addr) => Some(self.linux.backend.read_value(addr)?),
-            None => None,
-        })
+    fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> TranslationResult<T> {
+        let addr = self.virtual_to_physical(addr)?;
+        Ok(self.linux.backend.read_value(addr)?)
     }
 
     /// Read a whole mapping
@@ -194,7 +192,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                     Ok(hdr) => match hdr.eh_frame_ptr() {
                         gimli::Pointer::Direct(addr) => VirtualAddress(addr),
                         gimli::Pointer::Indirect(addr) => {
-                            match self.read_value(VirtualAddress(addr))? {
+                            match self.read_value(VirtualAddress(addr)).maybe_invalid()? {
                                 Some(addr) => addr,
                                 None => continue,
                             }
@@ -365,7 +363,7 @@ pub fn iter<B: ibc::Backend>(
             Some(bp_reg) => (|| {
                 Ok(Some(match row.register(bp_reg) {
                     gimli::RegisterRule::SameValue => get_base_pointer(base_pointer)?,
-                    gimli::RegisterRule::Offset(offset) => ctx.read_value(cfa + offset).valid()?,
+                    gimli::RegisterRule::Offset(offset) => ctx.read_value(cfa + offset)?,
                     gimli::RegisterRule::ValOffset(offset) => cfa + offset,
                     gimli::RegisterRule::Register(register) => match register {
                         reg if reg == registers.sp => old_sp,
@@ -381,7 +379,7 @@ pub fn iter<B: ibc::Backend>(
         frame.instruction_pointer = match row.register(registers.ip) {
             gimli::RegisterRule::Undefined => break,
             gimli::RegisterRule::SameValue => frame.instruction_pointer,
-            gimli::RegisterRule::Offset(offset) => ctx.read_value(cfa + offset).valid()?,
+            gimli::RegisterRule::Offset(offset) => ctx.read_value(cfa + offset)?,
             gimli::RegisterRule::ValOffset(offset) => cfa + offset,
             gimli::RegisterRule::Register(register) => match register {
                 reg if reg == registers.sp => old_sp,

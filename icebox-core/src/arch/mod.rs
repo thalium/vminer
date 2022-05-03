@@ -7,7 +7,9 @@ pub use runtime::Architecture as RuntimeArchitecture;
 pub mod x86_64;
 pub use x86_64::X86_64;
 
-use crate::{addr::MmuEntry, mask, MemoryAccessResult, PhysicalAddress, VirtualAddress};
+use crate::{
+    addr::MmuEntry, mask, MemoryAccessResult, PhysicalAddress, TranslationResult, VirtualAddress,
+};
 
 fn try_all_addresses(test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
     for addr in (0..u32::MAX as u64).step_by(0x1000) {
@@ -29,7 +31,7 @@ fn make_address_test<'a>(
     let mem_size = memory.size();
     move |addr| {
         let test_one = |test_addr| match vcpus.arch().virtual_to_physical(memory, addr, test_addr) {
-            Ok(Some(addr)) => addr.0 < mem_size,
+            Ok(addr) => addr.0 < mem_size,
             _ => false,
         };
 
@@ -110,7 +112,7 @@ pub trait Architecture<'a> {
         memory: &M,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>>;
+    ) -> TranslationResult<PhysicalAddress>;
 
     fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(
         &self,
@@ -166,7 +168,7 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     memory: &M,
     mmu_addr: PhysicalAddress,
     addr: VirtualAddress,
-) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
+) -> TranslationResult<PhysicalAddress> {
     let mut mmu_entry = MmuEntry(mmu_addr.0);
 
     // This loop is generally unrolled and values are calculated at compile time
@@ -182,7 +184,7 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
             bytemuck::bytes_of_mut(&mut mmu_entry),
         )?;
         if !Mmu::is_valid(mmu_entry) {
-            return Ok(None);
+            return Err(crate::TranslationError::Invalid(mmu_entry.0));
         }
         mmu_entry -= Mmu::MEM_OFFSET;
 
@@ -190,12 +192,12 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
         if has_huge && Mmu::is_large(mmu_entry) {
             let base = mmu_entry.take_bits(shift, Mmu::ADDR_BITS);
             let phys_addr = base + (addr.0 & mask(shift));
-            return Ok(Some(phys_addr));
+            return Ok(phys_addr);
         }
     }
 
     let phys_addr = mmu_entry.take_bits(12, Mmu::ADDR_BITS) + (addr.0 & mask(12));
-    Ok(Some(phys_addr))
+    Ok(phys_addr)
 }
 
 /// This is a recursive function to walk the translation table.

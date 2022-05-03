@@ -251,7 +251,7 @@ impl<'a> arch::Architecture<'a> for Architecture {
         memory: &M,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> crate::MemoryAccessResult<Option<PhysicalAddress>> {
+    ) -> crate::TranslationResult<PhysicalAddress> {
         match self {
             Self::X86_64(arch) => arch.virtual_to_physical(memory, mmu_addr, addr),
             Self::Aarch64(arch) => arch.virtual_to_physical(memory, mmu_addr, addr),

@@ -128,9 +128,50 @@ impl From<MemoryAccessError> for std::io::Error {
 pub type MemoryAccessResult<T> = Result<T, MemoryAccessError>;
 
 #[derive(Debug)]
+pub enum TranslationError {
+    Memory(MemoryAccessError),
+    Invalid(u64),
+}
+
+pub type TranslationResult<T> = Result<T, TranslationError>;
+
+impl From<MemoryAccessError> for TranslationError {
+    fn from(err: MemoryAccessError) -> Self {
+        Self::Memory(err)
+    }
+}
+
+impl From<TranslationError> for IceError {
+    fn from(err: TranslationError) -> Self {
+        match err {
+            TranslationError::Memory(err) => err.into(),
+            TranslationError::Invalid(entry) => IceError::from_repr(Repr::InvalidPage(entry)),
+        }
+    }
+}
+
+impl fmt::Display for TranslationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TranslationError::Memory(err) => err.fmt(f),
+            TranslationError::Invalid(_) => f.write_str("invalid MMU entry"),
+        }
+    }
+}
+
+impl Error for TranslationError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            TranslationError::Memory(err) => err.source(),
+            TranslationError::Invalid(_) => None,
+        }
+    }
+}
+
+#[derive(Debug)]
 enum Repr {
     Memory(MemoryAccessError),
-    InvalidPage,
+    InvalidPage(u64),
 
     UnsupportedArchitecture,
     Unimplemented,
@@ -214,7 +255,7 @@ impl fmt::Display for Repr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Repr::Memory(_) => f.write_str("failed to access physical memory"),
-            Repr::InvalidPage => f.write_str("failed to translate virtual address"),
+            Repr::InvalidPage(_) => f.write_str("failed to translate virtual address"),
             Repr::UnsupportedArchitecture => {
                 f.write_str("operation unsupported by the architecture")
             }
@@ -310,13 +351,17 @@ impl From<std::io::Error> for IceError {
     }
 }
 
-pub trait MemoryAccessResultExt<T>: seal::Sealed {
-    fn valid(self) -> IceResult<T>;
+pub trait TranslationResultExt<T>: seal::Sealed {
+    fn maybe_invalid(self) -> MemoryAccessResult<Option<T>>;
 }
 
-impl<T> MemoryAccessResultExt<T> for MemoryAccessResult<Option<T>> {
-    fn valid(self) -> IceResult<T> {
-        self?.ok_or_else(|| IceError::from_repr(Repr::InvalidPage))
+impl<T> TranslationResultExt<T> for TranslationResult<T> {
+    fn maybe_invalid(self) -> MemoryAccessResult<Option<T>> {
+        match self {
+            Ok(x) => Ok(Some(x)),
+            Err(TranslationError::Invalid(_)) => Ok(None),
+            Err(TranslationError::Memory(err)) => Err(err),
+        }
     }
 }
 

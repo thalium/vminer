@@ -1,9 +1,7 @@
 pub mod callstack;
 mod profile;
 
-use crate::core::{
-    self as ice, IceError, IceResult, MemoryAccessResultExt, PhysicalAddress, VirtualAddress,
-};
+use crate::core::{self as ice, IceError, IceResult, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 use core::fmt;
 
@@ -121,7 +119,7 @@ impl<B: ice::Backend> Linux<B> {
     }
 
     fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        self.backend.read_virtual_memory(self.kpgd, addr, buf)
+        Ok(self.backend.read_virtual_memory(self.kpgd, addr, buf)?)
     }
 
     /// Converts a pointer to a struct to a pointer to a field
@@ -358,7 +356,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             }
         } else {
             let pgd = self.read_struct_pointer(mm, |mms| mms.pgd)?;
-            self.backend.virtual_to_physical(self.kpgd, pgd).valid()
+            Ok(self.backend.virtual_to_physical(self.kpgd, pgd)?)
         }
     }
 

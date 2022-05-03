@@ -64,6 +64,41 @@ impl From<Pointer<profile::MmvadShort>> for ibc::Vma {
     }
 }
 
+fn read_virtual_memory<B: Backend>(
+    backend: &B,
+    kpgd: PhysicalAddress,
+    mmu_addr: PhysicalAddress,
+    addr: VirtualAddress,
+    buf: &mut [u8],
+) -> IceResult<()> {
+    let entry = match backend.read_virtual_memory(mmu_addr, addr, buf) {
+        Ok(()) => return Ok(()),
+        Err(ibc::TranslationError::Invalid(entry)) => entry,
+        Err(ibc::TranslationError::Memory(err)) => return Err(err.into()),
+    };
+
+    let offset = addr.0 & ibc::mask(12);
+
+    if entry & (1 << 10) != 0 {
+        let entry: u64 = backend.read_value_virtual(kpgd, VirtualAddress(entry >> 16))?;
+        if entry & 0x1 != 0 {
+            let addr_base = PhysicalAddress(entry & ibc::mask_range(12, 48));
+            backend.read_memory(addr_base + offset, buf)?;
+            return Ok(());
+        } else if entry & (1 << 10) == 0 && entry & (1 << 11) != 0 {
+            let addr_base = PhysicalAddress(entry & ibc::mask_range(12, 40));
+            backend.read_memory(addr_base + offset, buf)?;
+            return Ok(());
+        }
+    } else if entry & (1 << 11) != 0 {
+        let addr_base = PhysicalAddress(entry & ibc::mask_range(12, 40));
+        backend.read_memory(addr_base + offset, buf)?;
+        return Ok(());
+    }
+
+    Err(ibc::TranslationError::Invalid(entry).into())
+}
+
 const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
 
 pub struct Windows<B> {
@@ -127,12 +162,13 @@ impl Codeview {
 
 fn pe_get_pdb_guid<B: Backend>(
     backend: &B,
+    kpgd: PhysicalAddress,
     pgd: PhysicalAddress,
     addr: VirtualAddress,
     buf: &mut Vec<u8>,
 ) -> IceResult<Option<Codeview>> {
     buf.resize(0x1000, 0);
-    backend.read_virtual_memory(pgd, addr, buf)?;
+    read_virtual_memory(backend, kpgd, pgd, addr, buf)?;
 
     if !buf.starts_with(b"MZ") {
         return Ok(None);
@@ -148,7 +184,9 @@ fn pe_get_pdb_guid<B: Backend>(
     buf.resize(size, 0);
 
     for i in 1..(size / 0x1000) {
-        let _ = backend.read_virtual_memory(
+        let _ = read_virtual_memory(
+            backend,
+            kpgd,
             pgd,
             addr + i as u64 * 0x1000,
             &mut buf[i * 0x1000..(i + 1) * 0x1000],
@@ -178,7 +216,7 @@ fn find_kernel<B: Backend>(
         .map_while(|addr| addr.ok())
         .filter(|addr| addr.0 & 0xfff == 0)
     {
-        if let Ok(Some(codeview)) = pe_get_pdb_guid(backend, kpgd, addr, &mut buf) {
+        if let Ok(Some(codeview)) = pe_get_pdb_guid(backend, kpgd, kpgd, addr, &mut buf) {
             if &codeview.name[..KERNEL_PDB.len()] == KERNEL_PDB {
                 return Ok(Some((codeview.pdb_id(), addr)));
             }
@@ -205,13 +243,24 @@ impl<B: Backend> Windows<B> {
         Ok(this)
     }
 
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
+    }
+
     #[allow(dead_code)]
     fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        self.backend.read_virtual_memory(self.kpgd, addr, buf)
+        self.read_virtual_memory(self.kpgd, addr, buf)
     }
 
     fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
-        self.backend.read_value_virtual(self.kpgd, addr)
+        let mut val = bytemuck::Zeroable::zeroed();
+        self.read_kernel_memory(addr, bytemuck::bytes_of_mut(&mut val))?;
+        Ok(val)
     }
 
     /// Converts a pointer to a struct to a pointer to a field
@@ -513,7 +562,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         let pgd = self.process_pgd(proc)?;
 
         let vma_start = self.vma_start(vma)?;
-        let codeview = pe_get_pdb_guid(&self.backend, pgd, vma_start, &mut Vec::new())?;
+        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, vma_start, &mut Vec::new())?;
         let codeview = match codeview {
             Some(codeview) => codeview,
             None => return Ok(None),

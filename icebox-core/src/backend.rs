@@ -1,6 +1,6 @@
 use crate::{
-    arch, Architecture, IceResult, Memory, MemoryAccessResult, MemoryAccessResultExt,
-    PhysicalAddress, VirtualAddress,
+    arch, Architecture, IceResult, Memory, MemoryAccessResult, PhysicalAddress, TranslationResult,
+    VirtualAddress,
 };
 
 pub trait Backend {
@@ -36,8 +36,8 @@ pub trait Backend {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         buf: &mut [u8],
-    ) -> IceResult<()> {
-        let addr = self.virtual_to_physical(mmu_addr, addr).valid()?;
+    ) -> TranslationResult<()> {
+        let addr = self.virtual_to_physical(mmu_addr, addr)?;
         self.read_memory(addr, buf)?;
         Ok(())
     }
@@ -58,7 +58,7 @@ pub trait Backend {
         &self,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
+    ) -> TranslationResult<PhysicalAddress> {
         self.arch()
             .virtual_to_physical(self.memory(), mmu_addr, addr)
     }
@@ -136,7 +136,7 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         buf: &mut [u8],
-    ) -> IceResult<()> {
+    ) -> TranslationResult<()> {
         (**self).read_virtual_memory(mmu_addr, addr, buf)
     }
 
@@ -144,7 +144,7 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
         &self,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
+    ) -> TranslationResult<PhysicalAddress> {
         (**self).virtual_to_physical(mmu_addr, addr)
     }
 
@@ -175,13 +175,13 @@ pub trait RuntimeBackend {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         buf: &mut [u8],
-    ) -> IceResult<()>;
+    ) -> TranslationResult<()>;
 
     fn rt_virtual_to_physical(
         &self,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>>;
+    ) -> TranslationResult<PhysicalAddress>;
 }
 
 impl<B> RuntimeBackend for B
@@ -217,7 +217,7 @@ where
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         buf: &mut [u8],
-    ) -> IceResult<()> {
+    ) -> TranslationResult<()> {
         self.read_virtual_memory(mmu_addr, addr, buf)
     }
 
@@ -226,7 +226,7 @@ where
         &self,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
+    ) -> TranslationResult<PhysicalAddress> {
         self.virtual_to_physical(mmu_addr, addr)
     }
 }
@@ -261,7 +261,7 @@ impl Backend for dyn RuntimeBackend + '_ {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         buf: &mut [u8],
-    ) -> IceResult<()> {
+    ) -> TranslationResult<()> {
         self.rt_read_virtual_memory(mmu_addr, addr, buf)
     }
 
@@ -270,7 +270,7 @@ impl Backend for dyn RuntimeBackend + '_ {
         &self,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
+    ) -> TranslationResult<PhysicalAddress> {
         self.rt_virtual_to_physical(mmu_addr, addr)
     }
 }
@@ -304,7 +304,7 @@ impl Backend for dyn RuntimeBackend + Send + Sync + '_ {
         &self,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> MemoryAccessResult<Option<PhysicalAddress>> {
+    ) -> TranslationResult<PhysicalAddress> {
         self.rt_virtual_to_physical(mmu_addr, addr)
     }
 }

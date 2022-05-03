@@ -17,8 +17,8 @@ pub use endian::{BigEndian, Endianness, LittleEndian, RuntimeEndian};
 
 mod error;
 pub use error::{
-    Error, IceError, IceResult, MemoryAccessError, MemoryAccessResult, MemoryAccessResultExt,
-    ResultExt,
+    Error, IceError, IceResult, MemoryAccessError, MemoryAccessResult, ResultExt, TranslationError,
+    TranslationResult, TranslationResultExt,
 };
 
 mod mem;

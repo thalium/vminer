@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ibc::{IceError, IceResult, MemoryAccessResultExt};
+use ibc::{IceError, IceResult};
 use icebox::os::OsBuilder;
 use pyo3::{
     exceptions,
@@ -23,6 +23,12 @@ impl<T> ToPyResult<T> for IceResult<T> {
 }
 
 impl<T> ToPyResult<T> for ibc::MemoryAccessResult<T> {
+    fn convert_err(self) -> PyResult<T> {
+        self.map_err(|err| IceboxError::new_err(err.to_string()))
+    }
+}
+
+impl<T> ToPyResult<T> for ibc::TranslationResult<T> {
     fn convert_err(self) -> PyResult<T> {
         self.map_err(|err| IceboxError::new_err(err.to_string()))
     }
@@ -96,7 +102,6 @@ impl Backend {
         let addr = self
             .0
             .virtual_to_physical(mmu_addr.into(), addr.into())
-            .valid()
             .convert_err()?;
         Ok(addr.0)
     }
