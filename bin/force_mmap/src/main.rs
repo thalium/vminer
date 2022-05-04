@@ -1,8 +1,5 @@
-use std::{
-    fs,
-    io::{self, BufRead},
-};
-use sync_file::ReadAt;
+#[cfg(target_os = "windows")]
+mod windows;
 
 fn usage() -> ! {
     eprintln!("Usage: force_mmap PID");
@@ -10,11 +7,6 @@ fn usage() -> ! {
 }
 
 pub fn main() {
-    if cfg!(not(target_os = "linux")) {
-        eprintln!("This tool is not supported on your OS");
-        std::process::exit(1);
-    }
-
     let mut args = std::env::args_os().skip(1);
 
     let pid = (|| args.next()?.to_str()?.parse().ok())().unwrap_or_else(|| usage());
@@ -28,7 +20,17 @@ pub fn main() {
     }
 }
 
-fn force_mmap(pid: i32) -> io::Result<()> {
+#[cfg(target_os = "windows")]
+use crate::windows::force_mmap;
+
+#[cfg(target_os = "linux")]
+fn force_mmap(pid: i32) -> std::io::Result<()> {
+    use std::{
+        fs,
+        io::{self, BufRead},
+    };
+    use sync_file::ReadAt;
+
     let maps = fs::File::open(format!("/proc/{}/maps", pid))?;
     let mut maps = io::BufReader::new(maps);
     let mem = sync_file::RandomAccessFile::open(format!("/proc/{}/mem", pid))?;
@@ -63,4 +65,10 @@ fn force_mmap(pid: i32) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux",)))]
+fn force_mmap(_: u32) -> std::io::Result<()> {
+    eprintln!("This tool is not supported on your OS");
+    std::process::exit(1);
 }
