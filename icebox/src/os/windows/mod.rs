@@ -1,8 +1,11 @@
 use core::{fmt, mem, str};
-use ibc::{Backend, IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
+use ibc::{
+    Backend, IceError, IceResult, PhysicalAddress, ResultExt, TranslationResultExt, VirtualAddress,
+};
 
 use self::profile::{Pointer, StructOffset};
 
+mod callstack;
 mod profile;
 
 /// Values that we can read from guest memory
@@ -70,7 +73,7 @@ fn read_virtual_memory<B: Backend>(
     mmu_addr: PhysicalAddress,
     addr: VirtualAddress,
     buf: &mut [u8],
-) -> IceResult<()> {
+) -> ibc::TranslationResult<()> {
     let entry = match backend.read_virtual_memory(mmu_addr, addr, buf) {
         Ok(()) => return Ok(()),
         Err(ibc::TranslationError::Invalid(entry)) => entry,
@@ -96,7 +99,7 @@ fn read_virtual_memory<B: Backend>(
         return Ok(());
     }
 
-    Err(ibc::TranslationError::Invalid(entry).into())
+    Err(ibc::TranslationError::Invalid(entry))
 }
 
 const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
@@ -148,15 +151,9 @@ impl Codeview {
         s
     }
 
-    fn name(&self) -> Result<&str, str::Utf8Error> {
-        let i = self
-            .name
-            .iter()
-            .enumerate()
-            .find(|(_, b)| **b == 0)
-            .unwrap()
-            .0;
-        str::from_utf8(&self.name[..i])
+    fn name(&self) -> Option<&str> {
+        let i = self.name.iter().enumerate().find(|(_, b)| **b == 0)?.0;
+        str::from_utf8(&self.name[..i]).ok()
     }
 }
 
@@ -174,8 +171,7 @@ fn pe_get_pdb_guid<B: Backend>(
         return Ok(None);
     }
 
-    let pe = object::read::pe::PeFile::<'_, object::pe::ImageNtHeaders64>::parse(buf.as_slice())
-        .map_err(IceError::new)?;
+    let pe = object::read::pe::PeFile64::parse(buf.as_slice()).map_err(IceError::new)?;
     let size = pe
         .nt_headers()
         .optional_header
@@ -190,19 +186,21 @@ fn pe_get_pdb_guid<B: Backend>(
             pgd,
             addr + i as u64 * 0x1000,
             &mut buf[i * 0x1000..(i + 1) * 0x1000],
-        );
+        )
+        .maybe_invalid()?;
     }
 
-    let index = match memchr::memmem::find(&buf, b"RSDS") {
-        Some(i) => i,
-        None => return Ok(None),
-    };
-
     let mut codeview: Codeview = bytemuck::Zeroable::zeroed();
-    bytemuck::bytes_of_mut(&mut codeview)
-        .copy_from_slice(&buf[index..index + mem::size_of::<Codeview>()]);
+    for index in memchr::memmem::find_iter(&buf, b"RSDS") {
+        bytemuck::bytes_of_mut(&mut codeview)
+            .copy_from_slice(&buf[index..index + mem::size_of::<Codeview>()]);
 
-    Ok(Some(codeview))
+        if codeview.name().is_some() {
+            return Ok(Some(codeview));
+        }
+    }
+
+    Ok(None)
 }
 
 fn find_kernel<B: Backend>(
@@ -248,13 +246,13 @@ impl<B: Backend> Windows<B> {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         buf: &mut [u8],
-    ) -> IceResult<()> {
+    ) -> ibc::TranslationResult<()> {
         read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
     }
 
     #[allow(dead_code)]
     fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        self.read_virtual_memory(self.kpgd, addr, buf)
+        Ok(self.read_virtual_memory(self.kpgd, addr, buf)?)
     }
 
     fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
@@ -499,10 +497,10 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn process_callstack(
         &self,
-        _proc: ibc::Process,
-        _f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<()>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<()>,
     ) -> IceResult<()> {
-        Err(ibc::IceError::unimplemented())
+        self.iter_process_callstack(proc, f)
     }
 
     fn thread_process(&self, thread: ibc::Thread) -> IceResult<ibc::Process> {
@@ -568,7 +566,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
             None => return Ok(None),
         };
 
-        match self.profile.syms.get_lib(codeview.name()?) {
+        match self.profile.syms.get_lib(codeview.name().unwrap()) {
             Ok(lib) => {
                 let addr = VirtualAddress((addr - vma_start) as u64);
                 Ok(lib.get_symbols(addr))

@@ -47,7 +47,7 @@ pub trait Backend {
         &self,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
-    ) -> IceResult<T> {
+    ) -> TranslationResult<T> {
         let mut value = bytemuck::Zeroable::zeroed();
         self.read_virtual_memory(mmu_addr, addr, bytemuck::bytes_of_mut(&mut value))?;
         Ok(value)

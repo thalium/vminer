@@ -115,7 +115,7 @@ impl<B: ice::Backend> Linux<B> {
     }
 
     fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
-        self.backend.read_value_virtual(self.kpgd, addr)
+        Ok(self.backend.read_value_virtual(self.kpgd, addr)?)
     }
 
     fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
