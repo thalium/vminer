@@ -26,10 +26,15 @@ pub fn demangle(sym: &str) -> Cow<str> {
         return Cow::Owned(sym.to_string());
     }
 
-    // TODO: Always enable cpp_demangle once it works with no_std
+    // TODO: Always enable these once they work with no_std
     #[cfg(feature = "std")]
     if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
         return Cow::Owned(sym.to_string());
+    }
+
+    #[cfg(feature = "std")]
+    if let Ok(sym) = msvc_demangler::demangle(sym, msvc_demangler::DemangleFlags::NAME_ONLY) {
+        return Cow::Owned(sym);
     }
 
     Cow::Borrowed(sym)
@@ -40,15 +45,21 @@ pub fn demangle(sym: &str) -> Cow<str> {
 /// If the symbol was not mangled or if the mangling scheme is unknown, the
 /// symbol is written as-is.
 pub fn demangle_to<W: fmt::Write>(sym: &str, mut writer: W) -> fmt::Result {
-    // TODO: Always enable cpp_demangle once it works with no_std
+    if let Ok(sym) = rustc_demangle::try_demangle(sym) {
+        writer.write_fmt(format_args!("{sym}"))?;
+        return Ok(());
+    }
+
+    // TODO: Always enable these once they work with no_std
     #[cfg(feature = "std")]
     if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
         writer.write_fmt(format_args!("{sym}"))?;
         return Ok(());
     }
 
-    if let Ok(sym) = rustc_demangle::try_demangle(sym) {
-        writer.write_fmt(format_args!("{sym}"))?;
+    #[cfg(feature = "std")]
+    if let Ok(sym) = msvc_demangler::demangle(sym, msvc_demangler::DemangleFlags::NAME_ONLY) {
+        writer.write_str(&sym)?;
         return Ok(());
     }
 

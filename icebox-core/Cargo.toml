@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-std = ["gimli/std", "object/std", "dep:sync_file", "dep:cpp_demangle", "dep:pdb"]
+std = ["gimli/std", "object/std", "dep:sync_file", "dep:cpp_demangle", "dep:msvc-demangler", "dep:pdb"]
 
 [dependencies]
 bytemuck = {version = "1.7", features = ["derive"]}
@@ -20,6 +20,7 @@ pdb = {version = "0.7", optional = true}
 
 sync_file = {version = "0.2", optional = true}
 
-# TODO: Always enable cpp_demangle once it works with no_std
+# TODO: Always enable these once they work with no_std
 cpp_demangle = {version = "0.3.5", optional = true}
+msvc-demangler = {version = "0.9", optional = true}
 rustc-demangle = {version = "0.1.21"}
