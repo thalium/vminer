@@ -281,7 +281,12 @@ impl<B: ice::Backend> Linux<B> {
 
     pub fn find_symbol(&self, lib: &str, addr: VirtualAddress) -> Option<&str> {
         let lib = self.profile.syms.get_lib(lib).ok()?;
-        lib.get_symbols(addr)
+        lib.get_symbol(addr)
+    }
+
+    pub fn find_symbol_inexact(&self, lib: &str, addr: VirtualAddress) -> Option<(&str, u64)> {
+        let lib = self.profile.syms.get_lib(lib).ok()?;
+        lib.get_symbol_inexact(addr)
     }
 
     fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct>> {
@@ -486,13 +491,19 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             .map(|offset| offset * 4096)
     }
 
-    fn resolve_symbol(&self, addr: VirtualAddress, proc: ibc::Process) -> IceResult<Option<&str>> {
-        let vma = match self.process_find_vma_by_address(proc, addr)? {
-            Some(vma) => vma,
-            None => return Ok(None),
-        };
+    fn resolve_symbol_exact(
+        &self,
+        addr: VirtualAddress,
+        _proc: ibc::Process,
+        vma: ibc::Vma,
+    ) -> IceResult<Option<&str>> {
+        let vma_start = self.vma_start(vma)?;
+        let vma_end = self.vma_end(vma)?;
+        if !(vma_start..vma_end).contains(&addr) {
+            return Err(IceError::new("address not in VMA"));
+        }
 
-        let offset = addr - (self.vma_start(vma)? - self.vma_offset(vma)?);
+        let offset = addr - (vma_start - self.vma_offset(vma)?);
         let addr = VirtualAddress(offset as u64);
 
         let module = match self.vma_file(vma)? {
@@ -505,6 +516,33 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         };
 
         Ok(self.find_symbol(&module, addr))
+    }
+
+    fn resolve_symbol(
+        &self,
+        addr: VirtualAddress,
+        _proc: ibc::Process,
+        vma: ibc::Vma,
+    ) -> IceResult<Option<(&str, u64)>> {
+        let vma_start = self.vma_start(vma)?;
+        let vma_end = self.vma_end(vma)?;
+        if !(vma_start..vma_end).contains(&addr) {
+            return Err(IceError::new("address not in VMA"));
+        }
+
+        let offset = addr - (vma_start - self.vma_offset(vma)?);
+        let addr = VirtualAddress(offset as u64);
+
+        let module = match self.vma_file(vma)? {
+            Some(path) => self.path_to_string(path)?,
+            None => return Ok(None),
+        };
+        let module = match module.rsplit_once('/') {
+            Some((_, module)) => module,
+            None => return Ok(None),
+        };
+
+        Ok(self.find_symbol_inexact(&module, addr))
     }
 }
 

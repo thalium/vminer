@@ -59,6 +59,7 @@
     "start": null,
     "size": null,
     "stack_pointer": 281474793762992,
-    "instruction_pointer": 187650564129180
+    "instruction_pointer": 187650564129180,
+    "symbol": "_start"
   }
 ]

@@ -175,5 +175,16 @@ pub trait Os {
         Ok(self.vma_start(vma)? <= addr && addr < self.vma_end(vma)?)
     }
 
-    fn resolve_symbol(&self, addr: VirtualAddress, proc: Process) -> IceResult<Option<&str>>;
+    fn resolve_symbol_exact(
+        &self,
+        addr: VirtualAddress,
+        proc: Process,
+        vma: Vma,
+    ) -> IceResult<Option<&str>>;
+    fn resolve_symbol(
+        &self,
+        addr: VirtualAddress,
+        proc: Process,
+        vma: Vma,
+    ) -> IceResult<Option<(&str, u64)>>;
 }

@@ -8,6 +8,7 @@ use crate::{IceError, IceResult};
 use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
+    collections::BTreeMap,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -128,7 +129,7 @@ impl<'a> Struct<'a> {
 pub struct ModuleSymbols {
     // TODO: Try to store all string in a single buffer
     /// A map to translate addresses to names
-    names: HashMap<VirtualAddress, Arc<str>>,
+    names: BTreeMap<VirtualAddress, Arc<str>>,
 
     /// A map to translate names to addresses
     addresses: HashMap<Arc<str>, VirtualAddress>,
@@ -139,14 +140,20 @@ pub struct ModuleSymbols {
 impl ModuleSymbols {
     fn new() -> Self {
         Self {
-            names: HashMap::new(),
+            names: BTreeMap::new(),
             addresses: HashMap::new(),
             types: HashMap::new(),
         }
     }
 
-    pub fn get_symbols(&self, addr: VirtualAddress) -> Option<&str> {
+    pub fn get_symbol(&self, addr: VirtualAddress) -> Option<&str> {
         Some(&**self.names.get(&addr)?)
+    }
+
+    pub fn get_symbol_inexact(&self, addr: VirtualAddress) -> Option<(&str, u64)> {
+        let before = self.names.range(..=addr);
+        let (&last_addr, sym) = before.last()?;
+        Some((sym, (addr - last_addr) as u64))
     }
 
     pub fn get_address(&self, name: &str) -> IceResult<VirtualAddress> {

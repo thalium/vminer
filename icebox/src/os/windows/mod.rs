@@ -552,14 +552,20 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Ok(0)
     }
 
-    fn resolve_symbol(&self, addr: VirtualAddress, proc: ibc::Process) -> IceResult<Option<&str>> {
-        let vma = match self.process_find_vma_by_address(proc, addr)? {
-            Some(vma) => vma,
-            None => return Ok(None),
-        };
+    fn resolve_symbol_exact(
+        &self,
+        addr: VirtualAddress,
+        proc: ibc::Process,
+        vma: ibc::Vma,
+    ) -> IceResult<Option<&str>> {
+        let vma_start = self.vma_start(vma)?;
+        let vma_end = self.vma_end(vma)?;
+        if !(vma_start..vma_end).contains(&addr) {
+            return Err(IceError::new("address not in VMA"));
+        }
+
         let pgd = self.process_pgd(proc)?;
 
-        let vma_start = self.vma_start(vma)?;
         let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, vma_start, &mut Vec::new())?;
         let codeview = match codeview {
             Some(codeview) => codeview,
@@ -569,7 +575,36 @@ impl<B: Backend> ibc::Os for Windows<B> {
         match self.profile.syms.get_lib(codeview.name().unwrap()) {
             Ok(lib) => {
                 let addr = VirtualAddress((addr - vma_start) as u64);
-                Ok(lib.get_symbols(addr))
+                Ok(lib.get_symbol(addr))
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    fn resolve_symbol(
+        &self,
+        addr: VirtualAddress,
+        proc: ibc::Process,
+        vma: ibc::Vma,
+    ) -> IceResult<Option<(&str, u64)>> {
+        let vma_start = self.vma_start(vma)?;
+        let vma_end = self.vma_end(vma)?;
+        if !(vma_start..vma_end).contains(&addr) {
+            return Err(IceError::new("address not in VMA"));
+        }
+
+        let pgd = self.process_pgd(proc)?;
+
+        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, vma_start, &mut Vec::new())?;
+        let codeview = match codeview {
+            Some(codeview) => codeview,
+            None => return Ok(None),
+        };
+
+        match self.profile.syms.get_lib(codeview.name().unwrap()) {
+            Ok(lib) => {
+                let addr = VirtualAddress((addr - vma_start) as u64);
+                Ok(lib.get_symbol_inexact(addr))
             }
             Err(_) => Ok(None),
         }
