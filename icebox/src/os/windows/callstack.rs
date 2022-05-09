@@ -32,9 +32,6 @@ struct FunctionEntry {
     start: u32,
     end: u32,
     stack_frame_size: u32,
-    frame_register: u32,
-    #[allow(dead_code)]
-    frame_register_offset: u32,
     mother: Option<RuntimeFunction>,
 }
 
@@ -292,8 +289,8 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             let _prolog_size = read_u8(unwind_data)?;
             let unwind_code_count = read_u8(unwind_data)?;
             let frame_infos = read_u8(unwind_data)?;
-            let frame_register = (frame_infos & 0x0f) as u32;
-            let frame_register_offset = (frame_infos & 0xf0) as u32;
+            let _frame_register = (frame_infos & 0x0f) as u32;
+            let _frame_register_offset = (frame_infos & 0xf0) as u32;
 
             let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
             let stack_frame_size = self
@@ -311,8 +308,6 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 start: runtime_function.start,
                 end: runtime_function.end,
                 stack_frame_size,
-                frame_register,
-                frame_register_offset,
                 mother,
             });
         }
@@ -405,10 +400,6 @@ impl<B: Backend> Windows<B> {
             // Move stack pointer to the upper frame
             let caller_sp = match function {
                 Some(function) => {
-                    if function.frame_register != 0 {
-                        return Err("unsupported non-zero frame_register".into());
-                    }
-
                     let mut sp = frame.stack_pointer + function.stack_frame_size as u64;
 
                     if let Some(mother) = function.mother {
