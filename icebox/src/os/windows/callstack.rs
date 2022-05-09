@@ -388,6 +388,10 @@ impl<B: Backend> Windows<B> {
         };
 
         loop {
+            if instruction_pointer.is_kernel() {
+                return Err(IceError::new("encountered kernel IP"));
+            }
+
             // Where are we ?
             let (vma, unwind_data) = ctx
                 .find_vma_by_address(frame.instruction_pointer)
