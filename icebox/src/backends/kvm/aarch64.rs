@@ -26,6 +26,11 @@ impl Registers {
         self.0.regs[8] = addr;
     }
 
+    pub fn prepare_funcall1(&mut self, addr: u64, a: u64) {
+        self.0.regs[8] = addr;
+        self.0.regs[0] = a;
+    }
+
     pub fn prepare_funcall2(&mut self, addr: u64, a: u64, b: u64) {
         self.0.regs[8] = addr;
         self.0.regs[0] = a;

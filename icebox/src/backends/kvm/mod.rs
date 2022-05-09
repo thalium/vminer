@@ -54,6 +54,10 @@ fn get_dlerror(tracee: &ptrace::Tracee, dlerror: u64) -> IceError {
         // char *error = dlerror();
         let mut addr = tracee.funcall0(dlerror)?;
 
+        if addr == 0 {
+            return Ok(String::from("Success"));
+        }
+
         let mut error = Vec::with_capacity(128);
         let mut buf = [0];
 
@@ -94,6 +98,14 @@ fn get_errno(tracee: &ptrace::Tracee, errno: u64) -> IceError {
     }
 }
 
+struct OnDrop<F: FnMut()>(F);
+
+impl<F: FnMut()> Drop for OnDrop<F> {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
 /// Attach to a process, and make it execute our payload
 #[allow(clippy::fn_to_numeric_cast)]
 fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
@@ -103,6 +115,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
     let our_libdl = find_lib(std::process::id() as _, "libdl-2")?;
     let their_libdl = find_lib(pid, "libdl-2")?;
     let their_dlopen = their_libdl + (libc::dlopen as u64 - our_libdl);
+    let their_dlclose = their_libdl + (libc::dlclose as u64 - our_libdl);
     let their_dlsym = their_libdl + (libc::dlsym as u64 - our_libdl);
     let their_dlerror = their_libdl + (libc::dlerror as u64 - our_libdl);
 
@@ -144,6 +157,18 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
         return Err(IceError::with_context("remote dlopen failed", err));
     }
     log::trace!("dlopen handle at 0x{handle:x}");
+
+    let _do_dlclose = OnDrop(|| {
+        // dlclose(handle);
+        match tracee.funcall1(their_dlclose, handle) {
+            Ok(0) => (),
+            Ok(_) => {
+                let err = get_dlerror(&tracee, their_dlerror);
+                log::error!("Remote dlclose failed: {err}");
+            }
+            Err(err) => log::error!("Failed to call dlclose: {err}"),
+        }
+    });
 
     // payload = dlsym(handle, FUN_NAME);
     let payload = tracee.funcall2(their_dlsym, handle, mmap_addr + LIB_PATH.len() as u64)?;

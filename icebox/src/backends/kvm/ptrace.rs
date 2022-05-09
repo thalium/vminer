@@ -181,6 +181,12 @@ impl Tracee {
         self.do_funcall(&mut registers)
     }
 
+    pub fn funcall1(&self, addr: u64, a: u64) -> IceResult<u64> {
+        let mut registers = self.registers;
+        registers.prepare_funcall1(addr, a);
+        self.do_funcall(&mut registers)
+    }
+
     pub fn funcall2(&self, addr: u64, a: u64, b: u64) -> IceResult<u64> {
         let mut registers = self.registers;
         registers.prepare_funcall2(addr, a, b);

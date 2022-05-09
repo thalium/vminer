@@ -26,6 +26,11 @@ impl Registers {
         self.0.rax = addr;
     }
 
+    pub fn prepare_funcall1(&mut self, addr: u64, a: u64) {
+        self.0.rax = addr;
+        self.0.rdi = a;
+    }
+
     pub fn prepare_funcall2(&mut self, addr: u64, a: u64, b: u64) {
         self.0.rax = addr;
         self.0.rdi = a;
