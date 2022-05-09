@@ -181,9 +181,9 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
     // payload(fds)
     tracee.poke_data(mmap_addr, bytemuck::cast_slice(fds))?;
 
-    let error = tracee.funcall2(payload, mmap_addr, fds.len() as u64)?;
+    let error = tracee.funcall2(payload, mmap_addr, fds.len() as u64)? as i32;
     if error != 0 {
-        let err = io::Error::from_raw_os_error(error as _);
+        let err = io::Error::from_raw_os_error(error);
         return Err(IceError::with_context("payload failed", err));
     }
 
