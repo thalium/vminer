@@ -70,6 +70,12 @@ impl<T> PartialEq for Pointer<T> {
 
 impl<T> Eq for Pointer<T> {}
 
+impl<T> std::fmt::Debug for Pointer<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Pointer").field("addr", &self.addr).finish()
+    }
+}
+
 /// This macro defines Rust types to access kernel structures with type checking
 macro_rules! define_kernel_structs {
     (
@@ -151,11 +157,12 @@ define_kernel_structs! {
     #[kernel_name(_EPROCESS)]
     struct Eprocess {
         ActiveProcessLinks: ListEntry,
-        Pcb: Kprocess,
-        UniqueProcessId: u64,
         ImageFileName: [u8; 16],
+        ImageFilePointer: Pointer<FileObject>,
         InheritedFromUniqueProcessId: u64,
+        Pcb: Kprocess,
         ThreadListHead: ListEntry,
+        UniqueProcessId: u64,
         VadRoot: RtlAvlTree,
     }
 
@@ -165,6 +172,11 @@ define_kernel_structs! {
         Cid: ClientId,
         ThreadListEntry: ListEntry,
         ThreadName: Pointer<UnicodeString>,
+    }
+
+    #[kernel_name(_FILE_OBJECT)]
+    struct FileObject {
+        FileName: UnicodeString,
     }
 
     #[kernel_name(_KPCR)]
@@ -181,8 +193,8 @@ define_kernel_structs! {
 
     #[kernel_name(_KPROCESS)]
     struct Kprocess {
-        UserDirectoryTableBase: PhysicalAddress,
         DirectoryTableBase: PhysicalAddress,
+        UserDirectoryTableBase: PhysicalAddress,
     }
 
     #[kernel_name(_LIST_ENTRY)]

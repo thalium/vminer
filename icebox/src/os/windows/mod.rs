@@ -67,6 +67,18 @@ impl From<Pointer<profile::MmvadShort>> for ibc::Vma {
     }
 }
 
+impl From<ibc::Path> for Pointer<profile::FileObject> {
+    fn from(path: ibc::Path) -> Self {
+        Self::new(path.0)
+    }
+}
+
+impl From<Pointer<profile::FileObject>> for ibc::Path {
+    fn from(path: Pointer<profile::FileObject>) -> Self {
+        Self(path.addr)
+    }
+}
+
 fn read_virtual_memory<B: Backend>(
     backend: &B,
     kpgd: PhysicalAddress,
@@ -428,8 +440,13 @@ impl<B: Backend> ibc::Os for Windows<B> {
         self.read_struct_pointer(kproc, |kproc| kproc.DirectoryTableBase)
     }
 
-    fn process_exe(&self, _proc: ibc::Process) -> IceResult<Option<ibc::Path>> {
-        Err(ibc::IceError::unimplemented())
+    fn process_exe(&self, proc: ibc::Process) -> IceResult<Option<ibc::Path>> {
+        let path = self.read_struct_pointer(proc.into(), |e| e.ImageFilePointer)?;
+        Ok(if path.is_null() {
+            None
+        } else {
+            Some(path.into())
+        })
     }
 
     fn process_parent(&self, proc: ibc::Process) -> IceResult<ibc::Process> {
@@ -522,8 +539,9 @@ impl<B: Backend> ibc::Os for Windows<B> {
         self.read_unicode_string(name).map(Some)
     }
 
-    fn path_to_string(&self, _path: ibc::Path) -> IceResult<String> {
-        Err(ibc::IceError::unimplemented())
+    fn path_to_string(&self, path: ibc::Path) -> IceResult<String> {
+        let path = self.read_struct(path.into(), |fo| fo.FileName)?;
+        self.read_unicode_string(path)
     }
 
     fn vma_file(&self, _vma: ibc::Vma) -> IceResult<Option<ibc::Path>> {
