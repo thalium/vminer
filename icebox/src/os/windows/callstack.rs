@@ -193,22 +193,19 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         self.read_memory(start, buf)
     }
 
-    fn find_vma_by_address(&self, addr: VirtualAddress) -> Option<(&Vma, &UnwindData)> {
-        let vma = match self.vmas.binary_search_by_key(&addr, |vma| vma.start) {
+    fn find_vma_by_address(&self, addr: VirtualAddress) -> Option<&Vma> {
+        match self.vmas.binary_search_by_key(&addr, |vma| vma.start) {
             Ok(i) => Some(&self.vmas[i]),
             Err(i) => {
                 let vma = &self.vmas[i.checked_sub(1)?];
                 vma.contains(addr).then(|| vma)
             }
-        }?;
+        }
+    }
 
-        let unwind_data = vma
-            .unwind_data
+    fn get_unwind_data<'v>(&self, vma: &'v Vma) -> IceResult<&'v UnwindData> {
+        vma.unwind_data
             .get_or_try_init(|| self.init_unwind_data(vma))
-            .map_err(|err| log::error!("Cannot get unwind data for 0x{addr:x}: {err}"))
-            .ok()?;
-
-        Some((vma, unwind_data))
     }
 
     fn parse_unwind_codes(&self, mut codes: &[u8], version: u8) -> Option<u32> {
@@ -383,18 +380,19 @@ impl<B: Backend> Windows<B> {
         };
 
         loop {
-            if instruction_pointer.is_kernel() {
+            if frame.instruction_pointer.is_kernel() {
                 return Err(IceError::new("encountered kernel IP"));
             }
 
             // Where are we ?
-            let (vma, unwind_data) = ctx
+            let vma = ctx
                 .find_vma_by_address(frame.instruction_pointer)
                 .ok_or("encountered unmapped page")?;
             frame.vma = vma.vma;
 
             f(&frame)?;
 
+            let unwind_data = ctx.get_unwind_data(vma).context("cannot get unwind data")?;
             let function = unwind_data.find_by_address(frame.instruction_pointer);
 
             // Move stack pointer to the upper frame
