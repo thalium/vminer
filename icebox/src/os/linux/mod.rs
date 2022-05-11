@@ -32,54 +32,11 @@ trait HasStruct<Layout> {
     fn get_struct_layout(&self) -> &Layout;
 }
 
-// Conversions between core types and kernel pointeurs
-
-impl From<ice::Path> for Pointer<profile::Path> {
-    fn from(path: ice::Path) -> Self {
-        Self::new(path.0)
-    }
-}
-
-impl From<Pointer<profile::Path>> for ice::Path {
-    fn from(path: Pointer<profile::Path>) -> Self {
-        Self(path.addr)
-    }
-}
-
-impl From<ice::Process> for Pointer<profile::TaskStruct> {
-    fn from(proc: ice::Process) -> Self {
-        Self::new(proc.0)
-    }
-}
-
-impl From<Pointer<profile::TaskStruct>> for ice::Process {
-    fn from(path: Pointer<profile::TaskStruct>) -> Self {
-        Self(path.addr)
-    }
-}
-
-impl From<ice::Thread> for Pointer<profile::TaskStruct> {
-    fn from(thread: ice::Thread) -> Self {
-        Self::new(thread.0)
-    }
-}
-
-impl From<Pointer<profile::TaskStruct>> for ice::Thread {
-    fn from(path: Pointer<profile::TaskStruct>) -> Self {
-        Self(path.addr)
-    }
-}
-
-impl From<ice::Vma> for Pointer<profile::VmAreaStruct> {
-    fn from(vma: ice::Vma) -> Self {
-        Self::new(vma.0)
-    }
-}
-
-impl From<Pointer<profile::VmAreaStruct>> for ice::Vma {
-    fn from(path: Pointer<profile::VmAreaStruct>) -> Self {
-        Self(path.addr)
-    }
+pointer_defs! {
+    ibc::Path = profile::Path;
+    ibc::Process = profile::TaskStruct;
+    ibc::Thread = profile::TaskStruct;
+    ibc::Vma = profile::VmAreaStruct;
 }
 
 pub struct Linux<B> {

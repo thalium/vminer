@@ -1,3 +1,24 @@
+#[cfg(any(feature = "linux", feature = "windows"))]
+macro_rules! pointer_defs {
+    ( $( $core_ty:ty = $ptr:ty; )* ) => {
+        $(
+            impl From<$core_ty> for Pointer<$ptr> {
+                #[inline]
+                fn from(val: $core_ty) -> Self {
+                    Self::new(val.0)
+                }
+            }
+
+            impl From<Pointer<$ptr>> for $core_ty {
+                #[inline]
+                fn from(ptr: Pointer<$ptr>) -> Self {
+                    Self(ptr.addr)
+                }
+            }
+        )*
+    };
+}
+
 #[cfg(feature = "linux")]
 pub mod linux;
 #[cfg(feature = "linux")]

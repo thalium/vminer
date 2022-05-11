@@ -31,52 +31,11 @@ trait HasStruct<Layout> {
     fn get_struct_layout(&self) -> &Layout;
 }
 
-impl From<ibc::Thread> for Pointer<profile::Ethread> {
-    fn from(thread: ibc::Thread) -> Self {
-        Self::new(thread.0)
-    }
-}
-
-impl From<Pointer<profile::Ethread>> for ibc::Thread {
-    fn from(path: Pointer<profile::Ethread>) -> Self {
-        Self(path.addr)
-    }
-}
-
-impl From<ibc::Process> for Pointer<profile::Eprocess> {
-    fn from(thread: ibc::Process) -> Self {
-        Self::new(thread.0)
-    }
-}
-
-impl From<Pointer<profile::Eprocess>> for ibc::Process {
-    fn from(path: Pointer<profile::Eprocess>) -> Self {
-        Self(path.addr)
-    }
-}
-
-impl From<ibc::Vma> for Pointer<profile::MmvadShort> {
-    fn from(vma: ibc::Vma) -> Self {
-        Self::new(vma.0)
-    }
-}
-
-impl From<Pointer<profile::MmvadShort>> for ibc::Vma {
-    fn from(vma: Pointer<profile::MmvadShort>) -> Self {
-        Self(vma.addr)
-    }
-}
-
-impl From<ibc::Path> for Pointer<profile::FileObject> {
-    fn from(path: ibc::Path) -> Self {
-        Self::new(path.0)
-    }
-}
-
-impl From<Pointer<profile::FileObject>> for ibc::Path {
-    fn from(path: Pointer<profile::FileObject>) -> Self {
-        Self(path.addr)
-    }
+pointer_defs! {
+    ibc::Path = profile::FileObject;
+    ibc::Process = profile::Eprocess;
+    ibc::Thread = profile::Ethread;
+    ibc::Vma = profile::MmvadShort;
 }
 
 fn read_virtual_memory<B: Backend>(
