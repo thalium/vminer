@@ -10,19 +10,34 @@ mod profile;
 
 /// Values that we can read from guest memory
 trait Readable: Sized {
-    fn read<B: ibc::Backend>(windows: &Windows<B>, addr: VirtualAddress) -> IceResult<Self>;
+    fn read<B: ibc::Backend>(
+        windows: &Windows<B>,
+        pgd: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> IceResult<Self>;
 }
 
 impl<T: bytemuck::Pod> Readable for T {
-    fn read<B: ibc::Backend>(windows: &Windows<B>, addr: VirtualAddress) -> IceResult<Self> {
-        let val = windows.read_kernel_value(addr)?;
-        Ok(val)
+    #[inline]
+    fn read<B: ibc::Backend>(
+        windows: &Windows<B>,
+        pgd: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> IceResult<Self> {
+        let mut value = bytemuck::Zeroable::zeroed();
+        windows.read_virtual_memory(pgd, addr, bytemuck::bytes_of_mut(&mut value))?;
+        Ok(value)
     }
 }
 
 impl<T> Readable for Pointer<T> {
-    fn read<B: ibc::Backend>(windows: &Windows<B>, addr: VirtualAddress) -> IceResult<Self> {
-        let addr = VirtualAddress(windows.read_kernel_value(addr)?);
+    #[inline]
+    fn read<B: ibc::Backend>(
+        windows: &Windows<B>,
+        pgd: PhysicalAddress,
+        addr: VirtualAddress,
+    ) -> IceResult<Self> {
+        let addr = VirtualAddress::read(windows, pgd, addr)?;
         Ok(Pointer::new(addr))
     }
 }
@@ -32,6 +47,7 @@ trait HasStruct<Layout> {
 }
 
 pointer_defs! {
+    ibc::Module = profile::LdrDataTableEntry;
     ibc::Path = profile::FileObject;
     ibc::Process = profile::Eprocess;
     ibc::Thread = profile::Ethread;
@@ -218,18 +234,9 @@ impl<B: Backend> Windows<B> {
         addr: VirtualAddress,
         buf: &mut [u8],
     ) -> ibc::TranslationResult<()> {
-        read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
-    }
-
-    #[allow(dead_code)]
-    fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        Ok(self.read_virtual_memory(self.kpgd, addr, buf)?)
-    }
-
-    fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
-        let mut val = bytemuck::Zeroable::zeroed();
-        self.read_kernel_memory(addr, bytemuck::bytes_of_mut(&mut val))?;
-        Ok(val)
+        ibc::read_virtual_memory(addr, buf, |addr, buf| {
+            read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
+        })
     }
 
     /// Converts a pointer to a struct to a pointer to a field
@@ -259,16 +266,45 @@ impl<B: Backend> Windows<B> {
     where
         Self: HasStruct<L>,
     {
+        self.read_struct_pointer_with_pgd(self.kpgd, pointer, get_offset)
+    }
+
+    /// Reads a field from a struct pointer
+    fn read_struct_pointer_with_pgd<L, T: Readable>(
+        &self,
+        pgd: PhysicalAddress,
+        pointer: Pointer<L>,
+        get_offset: impl FnOnce(&L) -> StructOffset<T>,
+    ) -> IceResult<T>
+    where
+        Self: HasStruct<L>,
+    {
         if pointer.is_null() {
             return Err(IceError::deref_null_ptr());
         }
         let offset = get_offset(self.get_struct_layout());
-        T::read(self, pointer.addr + offset.offset)
+        T::read(self, pgd, pointer.addr + offset.offset)
     }
 
     /// Iterate a kernel linked list, yielding elements of type `T`
     fn iterate_list<T, O, F>(
         &self,
+        head: Pointer<profile::ListEntry>,
+        get_offset: O,
+        f: F,
+    ) -> IceResult<()>
+    where
+        Self: HasStruct<T> + HasStruct<profile::ListEntry>,
+        O: FnOnce(&T) -> StructOffset<profile::ListEntry>,
+        F: FnMut(Pointer<T>) -> IceResult<()>,
+    {
+        self.iterate_list_with_pgd(self.kpgd, head, get_offset, f)
+    }
+
+    /// Iterate a linked list, yielding elements of type `T`
+    fn iterate_list_with_pgd<T, O, F>(
+        &self,
+        pgd: PhysicalAddress,
         head: Pointer<profile::ListEntry>,
         get_offset: O,
         mut f: F,
@@ -282,7 +318,7 @@ impl<B: Backend> Windows<B> {
         let offset = get_offset(self.get_struct_layout()).offset;
 
         loop {
-            pos = self.read_struct_pointer(pos, |list| list.Flink)?;
+            pos = self.read_struct_pointer_with_pgd(pgd, pos, |list| list.Flink)?;
 
             if pos == head {
                 break;
@@ -340,12 +376,19 @@ impl<B: Backend> Windows<B> {
     }
 
     fn read_unicode_string(&self, ptr: Pointer<profile::UnicodeString>) -> IceResult<String> {
-        let len = self.read_struct_pointer(ptr, |str| str.Length)?;
+        self.read_unicode_string_with_pgd(self.kpgd, ptr)
+    }
+
+    fn read_unicode_string_with_pgd(
+        &self,
+        pgd: PhysicalAddress,
+        ptr: Pointer<profile::UnicodeString>,
+    ) -> IceResult<String> {
+        let len = self.read_struct_pointer_with_pgd(pgd, ptr, |str| str.Length)?;
         let mut name = vec![0u16; len as usize / 2];
 
-        let buffer = self.read_struct_pointer(ptr, |str| str.Buffer)?;
-        self.backend
-            .read_virtual_memory(self.kpgd, buffer, bytemuck::cast_slice_mut(&mut name))?;
+        let buffer = self.read_struct_pointer_with_pgd(pgd, ptr, |str| str.Buffer)?;
+        self.read_virtual_memory(pgd, buffer, bytemuck::cast_slice_mut(&mut name))?;
 
         Ok(String::from_utf16_lossy(&name))
     }
@@ -471,6 +514,29 @@ impl<B: Backend> ibc::Os for Windows<B> {
         )
     }
 
+    fn process_for_each_module(
+        &self,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+    ) -> IceResult<()> {
+        let pgd = self.process_pgd(proc)?;
+
+        let peb = self.read_struct_pointer(proc.into(), |e| e.Peb)?;
+        if peb.is_null() {
+            return Ok(());
+        }
+
+        let ldr = self.read_struct_pointer_with_pgd(pgd, peb, |peb| peb.Ldr)?;
+        let ldr_table = self.read_struct(ldr, |ldr| ldr.InLoadOrderModuleList)?;
+
+        self.iterate_list_with_pgd::<profile::LdrDataTableEntry, _, _>(
+            pgd,
+            ldr_table,
+            |entry| entry.InLoadOrderLinks,
+            |entry| f(entry.into()),
+        )
+    }
+
     fn process_callstack(
         &self,
         proc: ibc::Process,
@@ -527,6 +593,33 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn vma_offset(&self, _vma: ibc::Vma) -> IceResult<u64> {
         Ok(0)
+    }
+
+    fn module_span(
+        &self,
+        module: ibc::Module,
+        proc: ibc::Process,
+    ) -> IceResult<(VirtualAddress, VirtualAddress)> {
+        let pgd = self.process_pgd(proc)?;
+
+        let module = module.into();
+        let dll_base = self.read_struct_pointer_with_pgd(pgd, module, |e| e.DllBase)?;
+        let size = self.read_struct_pointer_with_pgd(pgd, module, |e| e.SizeOfImage)?;
+        Ok((dll_base, dll_base + size as u64))
+    }
+
+    fn module_name(&self, module: ibc::Module, proc: ibc::Process) -> IceResult<String> {
+        let pgd = self.process_pgd(proc)?;
+
+        let name = self.read_struct(module.into(), |e| e.BaseDllName)?;
+        self.read_unicode_string_with_pgd(pgd, name)
+    }
+
+    fn module_path(&self, module: ibc::Module, proc: ibc::Process) -> IceResult<String> {
+        let pgd = self.process_pgd(proc)?;
+
+        let name = self.read_struct(module.into(), |e| e.FullDllName)?;
+        self.read_unicode_string_with_pgd(pgd, name)
     }
 
     fn resolve_symbol_exact(

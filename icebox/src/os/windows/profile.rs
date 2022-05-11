@@ -154,6 +154,25 @@ define_kernel_structs! {
         UniqueThread: u64,
     }
 
+    #[kernel_name(_PEB)]
+    struct Peb {
+        Ldr: Pointer<PebLdrData>,
+    }
+
+    #[kernel_name(_PEB_LDR_DATA)]
+    struct PebLdrData {
+        InLoadOrderModuleList: ListEntry,
+    }
+
+    #[kernel_name(_LDR_DATA_TABLE_ENTRY)]
+    struct LdrDataTableEntry {
+        BaseDllName: UnicodeString,
+        DllBase: VirtualAddress,
+        FullDllName: UnicodeString,
+        InLoadOrderLinks: ListEntry,
+        SizeOfImage: u32,
+    }
+
     #[kernel_name(_EPROCESS)]
     struct Eprocess {
         ActiveProcessLinks: ListEntry,
@@ -161,6 +180,7 @@ define_kernel_structs! {
         ImageFilePointer: Pointer<FileObject>,
         InheritedFromUniqueProcessId: u64,
         Pcb: Kprocess,
+        Peb: Pointer<Peb>,
         ThreadListHead: ListEntry,
         UniqueProcessId: u64,
         VadRoot: RtlAvlTree,

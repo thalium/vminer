@@ -27,7 +27,7 @@ pub use mem::File;
 pub use mem::Memory;
 
 mod os;
-pub use os::{Os, Path, Process, StackFrame, Thread, Vma, VmaFlags};
+pub use os::{Module, Os, Path, Process, StackFrame, Thread, Vma, VmaFlags};
 
 pub mod symbols;
 pub use symbols::{ModuleSymbols, SymbolsIndexer};
@@ -47,4 +47,27 @@ mod seal {
 
     impl<T, E> Sealed for Result<T, E> {}
     impl<T> Sealed for Option<T> {}
+}
+
+pub fn read_virtual_memory(
+    mut addr: VirtualAddress,
+    mut buf: &mut [u8],
+    read_memory: impl Fn(VirtualAddress, &mut [u8]) -> TranslationResult<()>,
+) -> TranslationResult<()> {
+    let mut next_page = VirtualAddress((addr.0 & !0xfff) + 0x1000);
+
+    loop {
+        let diff = (next_page - addr) as usize;
+
+        if diff >= buf.len() {
+            return read_memory(addr, buf);
+        }
+
+        let (start, end) = buf.split_at_mut(diff);
+        read_memory(addr, start)?;
+
+        buf = end;
+        addr = next_page;
+        next_page += 0x1000;
+    }
 }

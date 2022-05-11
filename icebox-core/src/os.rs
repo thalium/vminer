@@ -2,6 +2,9 @@ use crate::{IceResult, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct Module(pub VirtualAddress);
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Thread(pub VirtualAddress);
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -121,6 +124,11 @@ pub trait Os {
         self.process_for_each_thread(proc, &mut |t| Ok(threads.push(t)))?;
         Ok(threads)
     }
+    fn process_for_each_module(
+        &self,
+        proc: Process,
+        f: &mut dyn FnMut(Module) -> IceResult<()>,
+    ) -> IceResult<()>;
 
     fn for_each_process(&self, f: &mut dyn FnMut(Process) -> IceResult<()>) -> IceResult<()>;
     fn collect_processes(&self) -> IceResult<Vec<Process>> {
@@ -174,6 +182,14 @@ pub trait Os {
     fn vma_contains(&self, vma: Vma, addr: VirtualAddress) -> IceResult<bool> {
         Ok(self.vma_start(vma)? <= addr && addr < self.vma_end(vma)?)
     }
+
+    fn module_span(
+        &self,
+        module: Module,
+        proc: Process,
+    ) -> IceResult<(VirtualAddress, VirtualAddress)>;
+    fn module_name(&self, module: Module, proc: Process) -> IceResult<String>;
+    fn module_path(&self, module: Module, proc: Process) -> IceResult<String>;
 
     fn resolve_symbol_exact(
         &self,

@@ -394,6 +394,14 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Ok(())
     }
 
+    fn process_for_each_module(
+        &self,
+        _proc: ibc::Process,
+        _f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+    ) -> IceResult<()> {
+        Err(IceError::unimplemented())
+    }
+
     fn process_callstack(
         &self,
         proc: ice::Process,
@@ -446,6 +454,22 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn vma_offset(&self, vma: ice::Vma) -> IceResult<u64> {
         self.read_struct_pointer(vma.into(), |vma| vma.vm_pgoff)
             .map(|offset| offset * 4096)
+    }
+
+    fn module_span(
+        &self,
+        _module: ibc::Module,
+        _proc: ibc::Process,
+    ) -> IceResult<(VirtualAddress, VirtualAddress)> {
+        Err(IceError::unimplemented())
+    }
+
+    fn module_name(&self, _module: ibc::Module, _proc: ibc::Process) -> IceResult<String> {
+        Err(IceError::unimplemented())
+    }
+
+    fn module_path(&self, _module: ibc::Module, _proc: ibc::Process) -> IceResult<String> {
+        Err(IceError::unimplemented())
     }
 
     fn resolve_symbol_exact(
