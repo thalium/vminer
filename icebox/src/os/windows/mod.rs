@@ -404,6 +404,11 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Ok(())
     }
 
+    #[inline]
+    fn kernel_pgd(&self) -> PhysicalAddress {
+        self.kpgd
+    }
+
     fn init_process(&self) -> IceResult<ibc::Process> {
         Err(ibc::IceError::unimplemented())
     }

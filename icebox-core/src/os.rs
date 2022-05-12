@@ -80,6 +80,8 @@ pub trait Os {
         buf: &mut [u8],
     ) -> IceResult<()>;
 
+    fn kernel_pgd(&self) -> PhysicalAddress;
+
     fn init_process(&self) -> IceResult<Process>;
     fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
     fn current_process(&self, cpuid: usize) -> IceResult<Process> {

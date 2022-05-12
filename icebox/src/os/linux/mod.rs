@@ -297,6 +297,11 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Ok(())
     }
 
+    #[inline]
+    fn kernel_pgd(&self) -> PhysicalAddress {
+        self.kpgd
+    }
+
     fn init_process(&self) -> IceResult<ibc::Process> {
         Ok(ibc::Process(self.profile.fast_syms.init_task + self.kaslr))
     }
