@@ -49,14 +49,16 @@ mod seal {
     impl<T> Sealed for Option<T> {}
 }
 
-pub fn read_virtual_memory(
+#[inline]
+pub fn read_virtual_memory<E>(
     mut addr: VirtualAddress,
     mut buf: &mut [u8],
-    read_memory: impl Fn(VirtualAddress, &mut [u8]) -> TranslationResult<()>,
-) -> TranslationResult<()> {
-    let mut next_page = VirtualAddress((addr.0 & !0xfff) + 0x1000);
+    read_memory: impl Fn(VirtualAddress, &mut [u8]) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut next_page = VirtualAddress(addr.0 & !0xfff);
 
     loop {
+        next_page = VirtualAddress(next_page.0.wrapping_add(0x1000));
         let diff = (next_page - addr) as usize;
 
         if diff >= buf.len() {
@@ -68,6 +70,21 @@ pub fn read_virtual_memory(
 
         buf = end;
         addr = next_page;
-        next_page += 0x1000;
     }
+}
+
+#[inline]
+pub fn try_read_virtual_memory(
+    addr: VirtualAddress,
+    buf: &mut [u8],
+    read_memory: impl Fn(VirtualAddress, &mut [u8]) -> TranslationResult<()>,
+) -> MemoryAccessResult<()> {
+    read_virtual_memory(addr, buf, |addr, buf| match read_memory(addr, buf) {
+        Ok(()) => Ok(()),
+        Err(TranslationError::Invalid(mmu)) => {
+            log::debug!("Encountered unmapped page: 0x{addr:x} ({mmu:#x})");
+            Ok(())
+        }
+        Err(TranslationError::Memory(err)) => Err(err),
+    })
 }

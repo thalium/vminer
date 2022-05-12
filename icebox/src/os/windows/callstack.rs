@@ -1,7 +1,4 @@
-use ibc::{
-    Backend, IceError, IceResult, MemoryAccessResult, Os, PhysicalAddress, ResultExt,
-    TranslationResult, TranslationResultExt, VirtualAddress,
-};
+use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
 use once_cell::unsync::OnceCell;
 
 use super::Windows;
@@ -137,60 +134,8 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         Ok(Self { windows, pgd, vmas })
     }
 
-    fn virtual_to_physical(&self, addr: VirtualAddress) -> TranslationResult<PhysicalAddress> {
-        self.windows.backend.virtual_to_physical(self.pgd, addr)
-    }
-
-    #[allow(dead_code)]
-    fn is_valid(&self, addr: VirtualAddress) -> IceResult<bool> {
-        Ok(self.virtual_to_physical(addr).maybe_invalid()?.is_some())
-    }
-
-    // TODO: this should probably move to core
-    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        let mut offset = 0;
-
-        while offset < buf.len() {
-            let max = core::cmp::min(offset + 0x1000, buf.len());
-            let chunk = &mut buf[offset..max];
-
-            match self
-                .windows
-                .read_virtual_memory(self.pgd, addr + offset as u64, chunk)
-            {
-                Ok(()) => (),
-                Err(ibc::TranslationError::Invalid(mmu)) => {
-                    chunk.fill(0);
-                    log::debug!(
-                        "Encountered unmapped page: 0x{:x} ({mmu:#x})",
-                        addr + offset as u64
-                    );
-                }
-                Err(ibc::TranslationError::Memory(err)) => return Err(err),
-            }
-
-            offset += 0x1000;
-        }
-
-        Ok(())
-    }
-
-    fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> TranslationResult<T> {
-        let addr = self.virtual_to_physical(addr)?;
-        Ok(self.windows.backend.read_value(addr)?)
-    }
-
-    /// Read a whole mapping
-    fn read_range(
-        &self,
-        start: VirtualAddress,
-        end: VirtualAddress,
-        buf: &mut Vec<u8>,
-    ) -> MemoryAccessResult<()> {
-        assert!(start <= end);
-        let vma_size = (end - start) as usize;
-        buf.resize(vma_size, 0);
-        self.read_memory(start, buf)
+    fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
+        super::Readable::read(self.windows, self.pgd, addr)
     }
 
     fn find_vma_by_address(&self, addr: VirtualAddress) -> Option<&Vma> {
@@ -313,7 +258,8 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
 
     fn init_unwind_data(&self, vma: &Vma) -> IceResult<UnwindData> {
         let mut content = vec![0; (vma.end - vma.start) as usize];
-        self.read_range(vma.start, vma.end, &mut content)?;
+        self.windows
+            .try_read_virtual_memory(self.pgd, vma.start, &mut content)?;
 
         let pe = object::read::pe::PeFile64::parse(&*content).context("failed to parse PE")?;
         let directory = pe

@@ -66,6 +66,20 @@ pub struct StackFrame {
 }
 
 pub trait Os {
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()>;
+
+    fn try_read_virtual_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()>;
+
     fn init_process(&self) -> IceResult<Process>;
     fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
     fn current_process(&self, cpuid: usize) -> IceResult<Process> {

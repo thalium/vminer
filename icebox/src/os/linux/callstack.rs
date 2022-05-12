@@ -2,10 +2,7 @@ use alloc::{format, vec::Vec};
 
 use gimli::UnwindSection;
 use hashbrown::HashMap;
-use ibc::{
-    Architecture, Endianness, IceError, IceResult, MemoryAccessResult, Os, PhysicalAddress,
-    TranslationResult, TranslationResultExt, VirtualAddress,
-};
+use ibc::{Architecture, Endianness, IceError, IceResult, Os, PhysicalAddress, VirtualAddress};
 use once_cell::unsync::OnceCell;
 
 use super::Linux;
@@ -75,58 +72,11 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         })
     }
 
-    fn virtual_to_physical(&self, addr: VirtualAddress) -> TranslationResult<PhysicalAddress> {
-        self.linux.backend.virtual_to_physical(self.pgd, addr)
-    }
-
-    #[allow(dead_code)]
-    fn is_valid(&self, addr: VirtualAddress) -> IceResult<bool> {
-        Ok(self.virtual_to_physical(addr).maybe_invalid()?.is_some())
-    }
-
-    // TODO: this should probably move to core
-    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        let mut offset = 0;
-
-        while offset < buf.len() {
-            let max = core::cmp::min(offset + 0x1000, buf.len());
-            let chunk = &mut buf[offset..max];
-
-            match self
-                .virtual_to_physical(addr + offset as u64)
-                .maybe_invalid()?
-            {
-                Some(p_addr) => {
-                    self.linux.backend.read_memory(p_addr, chunk)?;
-                }
-                None => {
-                    chunk.fill(0);
-                    log::debug!("Encountered unmapped page: 0x{:x}", addr + offset as u64);
-                }
-            }
-
-            offset += 0x1000;
-        }
-
-        Ok(())
-    }
-
-    fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> TranslationResult<T> {
-        let addr = self.virtual_to_physical(addr)?;
-        Ok(self.linux.backend.read_value(addr)?)
-    }
-
-    /// Read a whole mapping
-    fn read_range(
-        &self,
-        start: VirtualAddress,
-        end: VirtualAddress,
-        buf: &mut Vec<u8>,
-    ) -> MemoryAccessResult<()> {
-        assert!(start <= end);
-        let vma_size = (end - start) as usize;
-        buf.resize(vma_size, 0);
-        self.read_memory(start, buf)
+    fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
+        let mut value = bytemuck::Zeroable::zeroed();
+        self.linux
+            .read_virtual_memory(self.pgd, addr, bytemuck::bytes_of_mut(&mut value))?;
+        Ok(value)
     }
 
     fn find_vma_by_address(&self, addr: VirtualAddress) -> Option<&Vma> {
@@ -171,7 +121,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             ibc::RuntimeEndian::Little => gimli::RunTimeEndian::Little,
             ibc::RuntimeEndian::Big => gimli::RunTimeEndian::Big,
         };
-        let mut vma_data = Vec::with_capacity(0x1000);
+        let mut vma_data = Vec::new();
 
         for vma in &self.vmas {
             if vma.file != exe_path {
@@ -179,7 +129,9 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             }
 
             log::trace!("Trying VMA starting at {:x}", vma.start);
-            self.read_range(vma.start, vma.end, &mut vma_data)?;
+            vma_data.resize((vma.end - vma.start) as usize, 0);
+            self.linux
+                .try_read_virtual_memory(self.pgd, vma.start, &mut vma_data)?;
 
             for i in memchr::memmem::find_iter(&vma_data, b"\x01") {
                 let header = gimli::EhFrameHdr::new(&vma_data[i..], endian);
@@ -192,9 +144,9 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                     Ok(hdr) => match hdr.eh_frame_ptr() {
                         gimli::Pointer::Direct(addr) => VirtualAddress(addr),
                         gimli::Pointer::Indirect(addr) => {
-                            match self.read_value(VirtualAddress(addr)).maybe_invalid()? {
-                                Some(addr) => addr,
-                                None => continue,
+                            match self.read_value(VirtualAddress(addr)) {
+                                Ok(addr) => addr,
+                                Err(_) => continue,
                             }
                         }
                     },

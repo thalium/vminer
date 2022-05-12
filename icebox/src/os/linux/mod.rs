@@ -1,7 +1,7 @@
 pub mod callstack;
 mod profile;
 
-use crate::core::{self as ice, IceError, IceResult, PhysicalAddress, VirtualAddress};
+use crate::core::{self as ice, IceError, IceResult, Os, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 use core::fmt;
 
@@ -72,11 +72,13 @@ impl<B: ice::Backend> Linux<B> {
     }
 
     fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
-        Ok(self.backend.read_value_virtual(self.kpgd, addr)?)
+        let mut value = bytemuck::Zeroable::zeroed();
+        self.read_virtual_memory(self.kpgd, addr, bytemuck::bytes_of_mut(&mut value))?;
+        Ok(value)
     }
 
     fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        Ok(self.backend.read_virtual_memory(self.kpgd, addr, buf)?)
+        Ok(self.read_virtual_memory(self.kpgd, addr, buf)?)
     }
 
     /// Converts a pointer to a struct to a pointer to a field
@@ -144,10 +146,7 @@ impl<B: ice::Backend> Linux<B> {
                 // FIXME: This will always yield the thread group leader instead
                 // of the current thread
 
-                use ibc::{
-                    arch::{Vcpu, Vcpus},
-                    Os,
-                };
+                use ibc::arch::{Vcpu, Vcpus};
 
                 let vcpu = self.backend.vcpus().get(cpuid);
                 let vcpu_pgd = vcpu.pgd();
@@ -274,6 +273,30 @@ impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {
 }
 
 impl<B: ice::Backend> ice::Os for Linux<B> {
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::read_virtual_memory(addr, buf, |addr, buf| {
+            self.backend.read_virtual_memory(mmu_addr, addr, buf)
+        })?;
+        Ok(())
+    }
+
+    fn try_read_virtual_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
+            self.backend.read_virtual_memory(mmu_addr, addr, buf)
+        })?;
+        Ok(())
+    }
+
     fn init_process(&self) -> IceResult<ibc::Process> {
         Ok(ibc::Process(self.profile.fast_syms.init_task + self.kaslr))
     }

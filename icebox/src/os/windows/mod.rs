@@ -1,7 +1,5 @@
 use core::{fmt, mem, str};
-use ibc::{
-    Backend, IceError, IceResult, PhysicalAddress, ResultExt, TranslationResultExt, VirtualAddress,
-};
+use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
 
 use self::profile::{Pointer, StructOffset};
 
@@ -166,16 +164,9 @@ fn pe_get_pdb_guid<B: Backend>(
         .get(object::endian::LittleEndian) as usize;
     buf.resize(size, 0);
 
-    for i in 1..(size / 0x1000) {
-        let _ = read_virtual_memory(
-            backend,
-            kpgd,
-            pgd,
-            addr + i as u64 * 0x1000,
-            &mut buf[i * 0x1000..(i + 1) * 0x1000],
-        )
-        .maybe_invalid()?;
-    }
+    ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
+        read_virtual_memory(backend, kpgd, pgd, addr, buf)
+    })?;
 
     let mut codeview: Codeview = bytemuck::Zeroable::zeroed();
     for index in memchr::memmem::find_iter(&buf, b"RSDS") {
@@ -226,17 +217,6 @@ impl<B: Backend> Windows<B> {
         };
 
         Ok(this)
-    }
-
-    fn read_virtual_memory(
-        &self,
-        mmu_addr: PhysicalAddress,
-        addr: VirtualAddress,
-        buf: &mut [u8],
-    ) -> ibc::TranslationResult<()> {
-        ibc::read_virtual_memory(addr, buf, |addr, buf| {
-            read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
-        })
     }
 
     /// Converts a pointer to a struct to a pointer to a field
@@ -400,6 +380,30 @@ impl<B: Backend> Windows<B> {
 }
 
 impl<B: Backend> ibc::Os for Windows<B> {
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::read_virtual_memory(addr, buf, |addr, buf| {
+            read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
+        })?;
+        Ok(())
+    }
+
+    fn try_read_virtual_memory(
+        &self,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
+            read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
+        })?;
+        Ok(())
+    }
+
     fn init_process(&self) -> IceResult<ibc::Process> {
         Err(ibc::IceError::unimplemented())
     }
