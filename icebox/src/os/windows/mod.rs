@@ -68,15 +68,17 @@ impl<Ctx: HasLayout<profile::UnicodeString>> Pointer<profile::UnicodeString, Ctx
     }
 }
 
-impl<Ctx: HasLayout<profile::ListEntry>> Pointer<profile::ListEntry, Ctx> {
+impl<T, Ctx> Pointer<profile::ListEntry<T>, Ctx>
+where
+    Ctx: HasLayout<profile::ListEntry> + HasLayout<T>,
+{
     /// Iterate a linked list, yielding elements of type `T`
-    fn iterate_list<T, O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
-        Ctx: HasLayout<T>,
-        O: FnOnce(&T) -> StructOffset<profile::ListEntry>,
+        O: FnOnce(&T) -> StructOffset<profile::ListEntry<T>>,
         F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
     {
-        let mut pos = self;
+        let mut pos: Pointer<profile::ListEntry, Ctx> = self.monomorphize();
         let offset = get_offset(self.ctx.get_layout()).offset;
 
         loop {
@@ -114,18 +116,17 @@ impl<Ctx: HasLayout<profile::RtlBalancedNode>> Pointer<profile::RtlBalancedNode,
     }
 }
 
-impl<Ctx> Pointer<profile::RtlAvlTree, Ctx>
+impl<T, Ctx> Pointer<profile::RtlAvlTree<T>, Ctx>
 where
-    Ctx: HasLayout<profile::RtlAvlTree> + HasLayout<profile::RtlBalancedNode>,
+    Ctx: HasLayout<profile::RtlAvlTree> + HasLayout<profile::RtlBalancedNode> + HasLayout<T>,
 {
     /// Iterate a kernel AVL tree, yielding elements of type `T`
-    fn iterate_tree<T, O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    fn iterate_tree<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
-        Ctx: HasLayout<T>,
-        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode>,
+        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode<T>>,
         F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
     {
-        let node = self.read_pointer_field(|tree| tree.Root)?;
+        let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
         let offset = get_offset(self.ctx.get_layout()).offset;
 
         if offset != 0 {
@@ -438,20 +439,14 @@ impl<B: Backend> ibc::Os for Windows<B> {
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|eproc| eproc.ThreadListHead)?
-            .iterate_list::<profile::Ethread, _, _>(
-                |ethread| ethread.ThreadListEntry,
-                |thread| f(thread.into()),
-            )
+            .iterate_list(|ethread| ethread.ThreadListEntry, |thread| f(thread.into()))
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
         let head = self.base_addr + self.profile.fast_syms.PsActiveProcessHead;
-        let head = Pointer::new(head, self);
+        let head: Pointer<profile::ListEntry<profile::Eprocess>, _> = Pointer::new(head, self);
 
-        head.iterate_list::<profile::Eprocess, _, _>(
-            |eproc| eproc.ActiveProcessLinks,
-            |proc| f(proc.into()),
-        )
+        head.iterate_list(|eproc| eproc.ActiveProcessLinks, |proc| f(proc.into()))
     }
 
     fn process_for_each_vma(
@@ -459,10 +454,9 @@ impl<B: Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Vma) -> IceResult<()>,
     ) -> IceResult<()> {
-        let vad_root = self.pointer_of(proc).field(|ep| ep.VadRoot)?;
-
-        vad_root
-            .iterate_tree::<profile::MmvadShort, _, _>(|vad| vad.VadNode, |mmvad| f(mmvad.into()))
+        self.pointer_of(proc)
+            .field(|ep| ep.VadRoot)?
+            .iterate_tree(|vad| vad.VadNode, |mmvad| f(mmvad.into()))
     }
 
     fn process_for_each_module(
@@ -478,10 +472,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         peb.switch_to_userspace(proc)?
             .read_pointer_field(|peb| peb.Ldr)?
             .field(|ldr| ldr.InLoadOrderModuleList)?
-            .iterate_list::<profile::LdrDataTableEntry, _, _>(
-                |entry| entry.InLoadOrderLinks,
-                |entry| f(entry.into()),
-            )
+            .iterate_list(|entry| entry.InLoadOrderLinks, |entry| f(entry.into()))
     }
 
     fn process_callstack(

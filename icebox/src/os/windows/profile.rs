@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use crate::os::pointer::{HasLayout, Pointer, StructOffset};
+use core::marker::PhantomData;
 use ibc::{IceResult, PhysicalAddress, VirtualAddress};
 
 pub(crate) struct FastSymbols {
@@ -24,7 +25,7 @@ macro_rules! define_structs {
             #[actual_name($kname:ident)]
             #[define_for( $( $space:tt ),+ )]
             $( #[ $attr:meta ] )*
-            struct $struct_name:ident {
+            struct $struct_name:ident $(<$gen:ident>)? {
                 $(
                     $( #[ $field_attr:meta ] )*
                     $field:ident : $typ:ty,
@@ -37,23 +38,35 @@ macro_rules! define_structs {
             #[non_exhaustive]
             #[allow(non_snake_case)]
             $( #[ $attr ] )*
-            pub(crate) struct $struct_name {
+            pub(crate) struct $struct_name $(<$gen = ()>)? {
                 $(
                     $( #[ $field_attr ] )*
                     pub $field: StructOffset<$typ>,
                 )*
+                $(
+                    _typ: PhantomData<$gen>,
+                )?
             }
 
             // Make a constructor
-            impl $struct_name {
+            impl $(<$gen>)? $struct_name $(<$gen>)? {
                 fn new(layout: ibc::symbols::Struct) -> IceResult<Self> {
                     Ok(Self {
                         $(
                             $field: StructOffset::new(layout, stringify!($field))?,
                         )*
+                        $(
+                            _typ: PhantomData::<$gen>,
+                        )?
                     })
                 }
             }
+
+            $(
+                impl<$gen> crate::os::pointer::Monomorphize for $struct_name<$gen> {
+                    type Mono = $struct_name;
+                }
+            )?
 
             $(
                 // Make the struct easily available
@@ -94,40 +107,18 @@ define_structs! {
         UniqueThread: u64,
     }
 
-    #[actual_name(_PEB)]
-    #[define_for(user)]
-    struct Peb {
-        Ldr: Pointer<PebLdrData>,
-    }
-
-    #[actual_name(_PEB_LDR_DATA)]
-    #[define_for(user)]
-    struct PebLdrData {
-        InLoadOrderModuleList: ListEntry,
-    }
-
-    #[actual_name(_LDR_DATA_TABLE_ENTRY)]
-    #[define_for(user, kernel)]
-    struct LdrDataTableEntry {
-        BaseDllName: UnicodeString,
-        DllBase: VirtualAddress,
-        FullDllName: UnicodeString,
-        InLoadOrderLinks: ListEntry,
-        SizeOfImage: u32,
-    }
-
     #[actual_name(_EPROCESS)]
     #[define_for(kernel)]
     struct Eprocess {
-        ActiveProcessLinks: ListEntry,
+        ActiveProcessLinks: ListEntry<Eprocess>,
         ImageFileName: [u8; 16],
         ImageFilePointer: Pointer<FileObject>,
         InheritedFromUniqueProcessId: u64,
         Pcb: Kprocess,
         Peb: Pointer<Peb>,
-        ThreadListHead: ListEntry,
+        ThreadListHead: ListEntry<Ethread>,
         UniqueProcessId: u64,
-        VadRoot: RtlAvlTree,
+        VadRoot: RtlAvlTree<MmvadShort>,
     }
 
     #[actual_name(_ETHREAD)]
@@ -135,7 +126,7 @@ define_structs! {
     struct Ethread {
         Tcb: Kthread,
         Cid: ClientId,
-        ThreadListEntry: ListEntry,
+        ThreadListEntry: ListEntry<Ethread>,
         ThreadName: Pointer<UnicodeString>,
     }
 
@@ -166,9 +157,25 @@ define_structs! {
         UserDirectoryTableBase: PhysicalAddress,
     }
 
+    #[actual_name(_KTHREAD)]
+    #[define_for(kernel)]
+    struct Kthread {
+        Process: Pointer<Eprocess>,
+    }
+
+    #[actual_name(_LDR_DATA_TABLE_ENTRY)]
+    #[define_for(user, kernel)]
+    struct LdrDataTableEntry {
+        BaseDllName: UnicodeString,
+        DllBase: VirtualAddress,
+        FullDllName: UnicodeString,
+        InLoadOrderLinks: ListEntry<LdrDataTableEntry>,
+        SizeOfImage: u32,
+    }
+
     #[actual_name(_LIST_ENTRY)]
     #[define_for(kernel, user)]
-    struct ListEntry {
+    struct ListEntry<T> {
         Flink: Pointer<ListEntry>,
         #[allow(dead_code)]
         Blink: Pointer<ListEntry>,
@@ -181,24 +188,30 @@ define_structs! {
         EndingVpnHigh: u8,
         StartingVpn: u32,
         StartingVpnHigh: u8,
-        VadNode: RtlBalancedNode,
+        VadNode: RtlBalancedNode<MmvadShort>,
     }
 
-    #[actual_name(_KTHREAD)]
-    #[define_for(kernel)]
-    struct Kthread {
-        Process: Pointer<Eprocess>,
+    #[actual_name(_PEB)]
+    #[define_for(user)]
+    struct Peb {
+        Ldr: Pointer<PebLdrData>,
+    }
+
+    #[actual_name(_PEB_LDR_DATA)]
+    #[define_for(user)]
+    struct PebLdrData {
+        InLoadOrderModuleList: ListEntry<LdrDataTableEntry>,
     }
 
     #[actual_name(_RTL_AVL_TREE)]
     #[define_for(kernel)]
-    struct RtlAvlTree {
-        Root: Pointer<RtlBalancedNode>,
+    struct RtlAvlTree<T> {
+        Root: Pointer<RtlBalancedNode<T>>,
     }
 
     #[actual_name(_RTL_BALANCED_NODE)]
     #[define_for(kernel)]
-    struct RtlBalancedNode {
+    struct RtlBalancedNode<T> {
         Left: Pointer<RtlBalancedNode>,
         Right: Pointer<RtlBalancedNode>,
     }

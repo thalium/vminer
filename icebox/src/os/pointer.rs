@@ -77,9 +77,9 @@ impl<T, Ctx: Copy> Clone for Pointer<T, Ctx> {
 
 impl<T, Ctx: Copy> Copy for Pointer<T, Ctx> {}
 
-impl<T, Ctx> PartialEq for Pointer<T, Ctx> {
+impl<T, U, Ctx> PartialEq<Pointer<U, Ctx>> for Pointer<T, Ctx> {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Pointer<U, Ctx>) -> bool {
         self.addr == other.addr
     }
 }
@@ -110,6 +110,14 @@ impl<T, Ctx> Pointer<T, Ctx> {
     #[inline]
     pub fn switch_context<N: Context>(self, ctx: N) -> Pointer<T, N> {
         Pointer::new(self.addr, ctx)
+    }
+
+    #[inline]
+    pub fn monomorphize(self) -> Pointer<T::Mono, Ctx>
+    where
+        T: Monomorphize,
+    {
+        Pointer::new(self.addr, self.ctx)
     }
 }
 
@@ -154,4 +162,8 @@ impl<T, Ctx: Context> Pointer<T, Ctx> {
         let addr = VirtualAddress::read(self.ctx, self.addr + offset)?;
         Ok(Pointer::new(addr, self.ctx))
     }
+}
+
+pub trait Monomorphize {
+    type Mono;
 }

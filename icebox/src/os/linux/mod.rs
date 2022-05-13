@@ -43,15 +43,17 @@ pointer_defs! {
     ibc::Vma = profile::VmAreaStruct;
 }
 
-impl<Ctx: HasLayout<profile::ListHead>> Pointer<profile::ListHead, Ctx> {
+impl<T, Ctx> Pointer<profile::ListHead<T>, Ctx>
+where
+    Ctx: HasLayout<profile::ListHead> + HasLayout<T>,
+{
     /// Iterate a linked list, yielding elements of type `T`
-    fn iterate_list<T, O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
-        Ctx: HasLayout<T>,
-        O: FnOnce(&T) -> StructOffset<profile::ListHead>,
+        O: FnOnce(&T) -> StructOffset<profile::ListHead<T>>,
         F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
     {
-        let mut pos = self;
+        let mut pos = self.monomorphize();
         let offset = get_offset(self.ctx.get_layout()).offset;
 
         loop {
@@ -342,7 +344,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|ts| ts.children)?
-            .iterate_list::<profile::TaskStruct, _, _>(|ts| ts.sibling, |child| f(child.into()))
+            .iterate_list(|ts| ts.sibling, |child| f(child.into()))
     }
 
     fn process_for_each_thread(
@@ -352,17 +354,14 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|ts| ts.thread_group)?
-            .iterate_list::<profile::TaskStruct, _, _>(
-                |ts| ts.thread_group,
-                |thread| f(thread.into()),
-            )
+            .iterate_list(|ts| ts.thread_group, |thread| f(thread.into()))
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
         let init = self.init_process()?;
         self.pointer_of(init)
             .field(|ts| ts.tasks)?
-            .iterate_list::<profile::TaskStruct, _, _>(|ts| ts.tasks, |proc| f(proc.into()))
+            .iterate_list(|ts| ts.tasks, |proc| f(proc.into()))
     }
 
     fn process_for_each_vma(

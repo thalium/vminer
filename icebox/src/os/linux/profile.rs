@@ -1,5 +1,6 @@
 use crate::core::{self as ice, IceResult, VirtualAddress};
 use crate::os::pointer::{HasLayout, Pointer, StructOffset};
+use core::marker::PhantomData;
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_offset: VirtualAddress,
@@ -20,7 +21,7 @@ macro_rules! define_kernel_structs {
             // struct and the fields it wants to access
             #[kernel_name($kname:ident)]
             $( #[ $attr:meta ] )*
-            struct $struct_name:ident {
+            struct $struct_name:ident $(<$gen:ident>)? {
                 $(
                     $( #[ $field_attr:meta ] )*
                     $field:ident : $typ:ty,
@@ -32,23 +33,35 @@ macro_rules! define_kernel_structs {
             // First, redefine all fields within `StructOffset`s
             #[non_exhaustive]
             $( #[ $attr ] )*
-            pub(crate) struct $struct_name {
+            pub(crate) struct $struct_name $(<$gen = ()>)? {
                 $(
                     $( #[ $field_attr ] )*
                     pub $field: StructOffset<$typ>,
                 )*
+                $(
+                    _typ: PhantomData<$gen>,
+                )?
             }
 
             // Make a constructor
-            impl $struct_name {
+            impl $(<$gen>)? $struct_name $(<$gen>)? {
                 fn new(layout: ice::symbols::Struct) -> IceResult<Self> {
                     Ok(Self {
                         $(
                             $field: StructOffset::new(layout, stringify!($field))?,
                         )*
+                        $(
+                            _typ: PhantomData::<$gen>,
+                        )?
                     })
                 }
             }
+
+            $(
+                impl<$gen> crate::os::pointer::Monomorphize for $struct_name<$gen> {
+                    type Mono = $struct_name;
+                }
+            )?
 
             // Make the struct easily available
             impl<B: ice::Backend> HasLayout<$struct_name> for &super::Linux<B> {
@@ -93,7 +106,7 @@ define_kernel_structs! {
     }
 
     #[kernel_name(list_head)]
-    struct ListHead {
+    struct ListHead<T> {
         next: Pointer<ListHead>,
         #[allow(dead_code)]
         prev: Pointer<ListHead>,
@@ -119,17 +132,17 @@ define_kernel_structs! {
     #[kernel_name(task_struct)]
     struct TaskStruct {
         active_mm: Pointer<MmStruct>,
-        children: ListHead,
+        children: ListHead<TaskStruct>,
         comm: [u8; 16],
         flags: u32,
         group_leader: Pointer<TaskStruct>,
         mm: Pointer<MmStruct>,
         pid: u32,
         real_parent: Pointer<TaskStruct>,
-        sibling: ListHead,
-        tasks: ListHead,
+        sibling: ListHead<TaskStruct>,
+        tasks: ListHead<TaskStruct>,
         tgid: u32,
-        thread_group: ListHead,
+        thread_group: ListHead<TaskStruct>,
     }
 
     #[kernel_name(vm_area_struct)]
