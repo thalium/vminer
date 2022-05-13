@@ -358,8 +358,8 @@ impl<B: Backend> ibc::Os for Windows<B> {
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
         let thread = self
             .kpcr(cpuid)?
-            .field(|k| k.Prcb)?
-            .read_pointer_field(|k| k.CurrentThread)?;
+            .field(|kpcr| kpcr.Prcb)?
+            .read_pointer_field(|kprcb| kprcb.CurrentThread)?;
         Ok(thread.into())
     }
 
@@ -450,7 +450,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         f: &mut dyn FnMut(ibc::Vma) -> IceResult<()>,
     ) -> IceResult<()> {
         self.pointer_of(proc)
-            .field(|ep| ep.VadRoot)?
+            .field(|eproc| eproc.VadRoot)?
             .iterate_tree(|vad| vad.VadNode, |mmvad| f(mmvad.into()))
     }
 
@@ -467,7 +467,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         peb.switch_to_userspace(proc)?
             .read_pointer_field(|peb| peb.Ldr)?
             .field(|ldr| ldr.InLoadOrderModuleList)?
-            .iterate_list(|entry| entry.InLoadOrderLinks, |entry| f(entry.into()))
+            .iterate_list(|module| module.InLoadOrderLinks, |module| f(module.into()))
     }
 
     fn process_callstack(
@@ -494,7 +494,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn thread_name(&self, thread: ibc::Thread) -> IceResult<Option<String>> {
         self.pointer_of(thread)
-            .read_pointer_field(|et| et.ThreadName)?
+            .read_pointer_field(|ethread| ethread.ThreadName)?
             .map_non_null(|name| name.read_unicode_string())
     }
 
@@ -536,22 +536,22 @@ impl<B: Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
     ) -> IceResult<(VirtualAddress, VirtualAddress)> {
         let module = self.pointer_of(module).switch_to_userspace(proc)?;
-        let dll_base = module.read_field(|entry| entry.DllBase)?;
-        let size = module.read_field(|entry| entry.SizeOfImage)?;
+        let dll_base = module.read_field(|module| module.DllBase)?;
+        let size = module.read_field(|module| module.SizeOfImage)?;
         Ok((dll_base, dll_base + size as u64))
     }
 
     fn module_name(&self, module: ibc::Module, proc: ibc::Process) -> IceResult<String> {
         self.pointer_of(module)
             .switch_to_userspace(proc)?
-            .field(|entry| entry.BaseDllName)?
+            .field(|module| module.BaseDllName)?
             .read_unicode_string()
     }
 
     fn module_path(&self, module: ibc::Module, proc: ibc::Process) -> IceResult<String> {
         self.pointer_of(module)
             .switch_to_userspace(proc)?
-            .field(|entry| entry.FullDllName)?
+            .field(|module| module.FullDllName)?
             .read_unicode_string()
     }
 
