@@ -1,18 +1,25 @@
 #[cfg(any(feature = "linux", feature = "windows"))]
+mod pointer;
+
+#[cfg(any(feature = "linux", feature = "windows"))]
 macro_rules! pointer_defs {
-    ( $( $core_ty:ty = $ptr:ty; )* ) => {
+    ( $( $core_ty:path = $ptr:ty; )* ) => {
+        trait AsPointer<T> {
+            fn as_pointer<Ctx>(self, ctx: Ctx) -> Pointer<T, Ctx>;
+        }
+
         $(
-            impl From<$core_ty> for Pointer<$ptr> {
+            impl AsPointer<$ptr> for $core_ty {
                 #[inline]
-                fn from(val: $core_ty) -> Self {
-                    Self::new(val.0)
+                fn as_pointer<Ctx>(self, ctx: Ctx) -> Pointer<$ptr, Ctx> {
+                    Pointer::new(self.0, ctx)
                 }
             }
 
-            impl From<Pointer<$ptr>> for $core_ty {
+            impl<Ctx> From<Pointer<$ptr, Ctx>> for $core_ty {
                 #[inline]
-                fn from(ptr: Pointer<$ptr>) -> Self {
-                    Self(ptr.addr)
+                fn from(ptr: Pointer<$ptr, Ctx>) -> $core_ty {
+                    $core_ty(ptr.addr)
                 }
             }
         )*

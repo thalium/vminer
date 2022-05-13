@@ -1,5 +1,5 @@
 use crate::core::{self as ice, IceResult, VirtualAddress};
-use core::marker::PhantomData;
+use crate::os::pointer::{HasLayout, Pointer, StructOffset};
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_offset: VirtualAddress,
@@ -8,73 +8,6 @@ pub(crate) struct FastSymbols {
     pub(super) init_task: ice::VirtualAddress,
     pub linux_banner: ice::VirtualAddress,
 }
-
-pub struct StructOffset<T> {
-    pub offset: u64,
-    _type: PhantomData<T>,
-}
-
-impl<T> Clone for StructOffset<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for StructOffset<T> {}
-
-impl<T> StructOffset<T> {
-    fn new(layout: ice::symbols::Struct, field_name: &str) -> IceResult<Self> {
-        let offset = layout.find_offset(field_name)?;
-        Ok(Self::from_offset(offset))
-    }
-
-    #[inline]
-    const fn from_offset(offset: u64) -> Self {
-        Self {
-            offset,
-            _type: PhantomData,
-        }
-    }
-}
-
-pub(crate) struct Pointer<T> {
-    pub addr: VirtualAddress,
-    _typ: PhantomData<T>,
-}
-
-impl<T> Pointer<T> {
-    #[inline]
-    pub const fn new(addr: VirtualAddress) -> Self {
-        Self {
-            addr,
-            _typ: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub const fn is_null(self) -> bool {
-        self.addr.is_null()
-    }
-}
-
-impl<T> Clone for Pointer<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for Pointer<T> {}
-
-impl<T> PartialEq for Pointer<T> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.addr == other.addr
-    }
-}
-
-impl<T> Eq for Pointer<T> {}
 
 /// This macro defines Rust types to access kernel structures with type checking
 macro_rules! define_kernel_structs {
@@ -118,8 +51,8 @@ macro_rules! define_kernel_structs {
             }
 
             // Make the struct easily available
-            impl<B: ice::Backend> super::HasStruct<$struct_name> for super::Linux<B> {
-                fn get_struct_layout(&self) -> &$struct_name {
+            impl<B: ice::Backend> HasLayout<$struct_name> for &super::Linux<B> {
+                fn get_layout(&self) -> &$struct_name {
                     &self.profile.layouts.$kname
                 }
             }

@@ -1,47 +1,43 @@
+use super::pointer::{Context, HasLayout, Pointer, StructOffset};
 use core::{fmt, mem, str};
 use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
-
-use self::profile::{Pointer, StructOffset};
 
 mod callstack;
 mod profile;
 
-/// Values that we can read from guest memory
-trait Readable: Sized {
-    fn read<B: ibc::Backend>(
-        windows: &Windows<B>,
-        pgd: PhysicalAddress,
-        addr: VirtualAddress,
-    ) -> IceResult<Self>;
+struct ProcSpace<'a, B: Backend> {
+    os: &'a Windows<B>,
+    pgd: ibc::PhysicalAddress,
 }
 
-impl<T: bytemuck::Pod> Readable for T {
+impl<B: Backend> Clone for ProcSpace<'_, B> {
     #[inline]
-    fn read<B: ibc::Backend>(
-        windows: &Windows<B>,
-        pgd: PhysicalAddress,
-        addr: VirtualAddress,
-    ) -> IceResult<Self> {
-        let mut value = bytemuck::Zeroable::zeroed();
-        windows.read_virtual_memory(pgd, addr, bytemuck::bytes_of_mut(&mut value))?;
-        Ok(value)
+    fn clone(&self) -> Self {
+        *self
     }
 }
 
-impl<T> Readable for Pointer<T> {
+impl<B: Backend> Copy for ProcSpace<'_, B> {}
+
+impl<B: Backend> Context for ProcSpace<'_, B> {
     #[inline]
-    fn read<B: ibc::Backend>(
-        windows: &Windows<B>,
-        pgd: PhysicalAddress,
-        addr: VirtualAddress,
-    ) -> IceResult<Self> {
-        let addr = VirtualAddress::read(windows, pgd, addr)?;
-        Ok(Pointer::new(addr))
+    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+        self.os.read_virtual_memory(self.pgd, addr, buf)
     }
 }
 
-trait HasStruct<Layout> {
-    fn get_struct_layout(&self) -> &Layout;
+impl<B: Backend> ProcSpace<'_, B> {
+    #[inline]
+    fn profile(&self) -> &profile::Profile {
+        &self.os.profile
+    }
+}
+
+impl<B: Backend> Context for &Windows<B> {
+    #[inline]
+    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+        self.read_virtual_memory(self.kpgd, addr, buf)
+    }
 }
 
 pointer_defs! {
@@ -50,6 +46,94 @@ pointer_defs! {
     ibc::Process = profile::Eprocess;
     ibc::Thread = profile::Ethread;
     ibc::Vma = profile::MmvadShort;
+}
+
+impl<'a, T, B: Backend> Pointer<T, &'a Windows<B>> {
+    fn switch_to_userspace(self, proc: ibc::Process) -> IceResult<Pointer<T, ProcSpace<'a, B>>> {
+        let pgd = self.ctx.process_pgd(proc)?;
+        let proc_space = ProcSpace { os: self.ctx, pgd };
+        Ok(self.switch_context(proc_space))
+    }
+}
+
+impl<Ctx: HasLayout<profile::UnicodeString>> Pointer<profile::UnicodeString, Ctx> {
+    fn read_unicode_string(self) -> IceResult<String> {
+        let buffer = self.read_field(|str| str.Buffer)?;
+        let len = self.read_field(|str| str.Length)?;
+
+        let mut name = vec![0u16; len as usize / 2];
+        self.ctx
+            .read_memory(buffer, bytemuck::cast_slice_mut(&mut name))?;
+        Ok(String::from_utf16_lossy(&name))
+    }
+}
+
+impl<Ctx: HasLayout<profile::ListEntry>> Pointer<profile::ListEntry, Ctx> {
+    /// Iterate a linked list, yielding elements of type `T`
+    fn iterate_list<T, O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    where
+        Ctx: HasLayout<T>,
+        O: FnOnce(&T) -> StructOffset<profile::ListEntry>,
+        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+    {
+        let mut pos = self;
+        let offset = get_offset(self.ctx.get_layout()).offset;
+
+        loop {
+            pos = pos.read_pointer_field(|list| list.Flink)?;
+
+            if pos == self {
+                break;
+            }
+
+            f(Pointer::new(pos.addr - offset, self.ctx))?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<Ctx: HasLayout<profile::RtlBalancedNode>> Pointer<profile::RtlBalancedNode, Ctx> {
+    fn _iterate_tree<T, F>(self, f: &mut F) -> IceResult<()>
+    where
+        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+    {
+        let left = self.read_pointer_field(|node| node.Left)?;
+        if !left.is_null() {
+            left._iterate_tree(f)?;
+        }
+
+        f(Pointer::new(self.addr, self.ctx))?;
+
+        let right = self.read_pointer_field(|node| node.Right)?;
+        if !right.is_null() {
+            right._iterate_tree(f)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<Ctx> Pointer<profile::RtlAvlTree, Ctx>
+where
+    Ctx: HasLayout<profile::RtlAvlTree> + HasLayout<profile::RtlBalancedNode>,
+{
+    /// Iterate a kernel AVL tree, yielding elements of type `T`
+    fn iterate_tree<T, O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    where
+        Ctx: HasLayout<T>,
+        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode>,
+        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+    {
+        let node = self.read_pointer_field(|tree| tree.Root)?;
+        let offset = get_offset(self.ctx.get_layout()).offset;
+
+        if offset != 0 {
+            return Err(IceError::new("Unsupported structure layout"));
+        }
+
+        node._iterate_tree(&mut f)
+    }
 }
 
 fn read_virtual_memory<B: Backend>(
@@ -219,163 +303,20 @@ impl<B: Backend> Windows<B> {
         Ok(this)
     }
 
-    /// Converts a pointer to a struct to a pointer to a field
-    ///
-    /// Generic parameters ensure that the conversion is valid.
-    fn read_struct<L, T>(
-        &self,
-        pointer: Pointer<L>,
-        get_offset: impl FnOnce(&L) -> StructOffset<T>,
-    ) -> IceResult<Pointer<T>>
-    where
-        Self: HasStruct<L>,
-    {
-        if pointer.is_null() {
-            return Err(IceError::deref_null_ptr());
-        }
-        let offset = get_offset(self.get_struct_layout());
-        Ok(Pointer::new(pointer.addr + offset.offset))
+    #[inline]
+    fn profile(&self) -> &profile::Profile {
+        &self.profile
     }
 
-    /// Reads a field from a struct pointer
-    fn read_struct_pointer<L, T: Readable>(
-        &self,
-        pointer: Pointer<L>,
-        get_offset: impl FnOnce(&L) -> StructOffset<T>,
-    ) -> IceResult<T>
-    where
-        Self: HasStruct<L>,
-    {
-        self.read_struct_pointer_with_pgd(self.kpgd, pointer, get_offset)
+    #[inline]
+    fn pointer_of<'a, T: AsPointer<U>, U>(&'a self, ptr: T) -> Pointer<U, &'a Self> {
+        ptr.as_pointer(self)
     }
 
-    /// Reads a field from a struct pointer
-    fn read_struct_pointer_with_pgd<L, T: Readable>(
-        &self,
-        pgd: PhysicalAddress,
-        pointer: Pointer<L>,
-        get_offset: impl FnOnce(&L) -> StructOffset<T>,
-    ) -> IceResult<T>
-    where
-        Self: HasStruct<L>,
-    {
-        if pointer.is_null() {
-            return Err(IceError::deref_null_ptr());
-        }
-        let offset = get_offset(self.get_struct_layout());
-        T::read(self, pgd, pointer.addr + offset.offset)
-    }
-
-    /// Iterate a kernel linked list, yielding elements of type `T`
-    fn iterate_list<T, O, F>(
-        &self,
-        head: Pointer<profile::ListEntry>,
-        get_offset: O,
-        f: F,
-    ) -> IceResult<()>
-    where
-        Self: HasStruct<T> + HasStruct<profile::ListEntry>,
-        O: FnOnce(&T) -> StructOffset<profile::ListEntry>,
-        F: FnMut(Pointer<T>) -> IceResult<()>,
-    {
-        self.iterate_list_with_pgd(self.kpgd, head, get_offset, f)
-    }
-
-    /// Iterate a linked list, yielding elements of type `T`
-    fn iterate_list_with_pgd<T, O, F>(
-        &self,
-        pgd: PhysicalAddress,
-        head: Pointer<profile::ListEntry>,
-        get_offset: O,
-        mut f: F,
-    ) -> IceResult<()>
-    where
-        Self: HasStruct<T> + HasStruct<profile::ListEntry>,
-        O: FnOnce(&T) -> StructOffset<profile::ListEntry>,
-        F: FnMut(Pointer<T>) -> IceResult<()>,
-    {
-        let mut pos = head;
-        let offset = get_offset(self.get_struct_layout()).offset;
-
-        loop {
-            pos = self.read_struct_pointer_with_pgd(pgd, pos, |list| list.Flink)?;
-
-            if pos == head {
-                break;
-            }
-
-            f(Pointer::new(pos.addr - offset))?;
-        }
-
-        Ok(())
-    }
-
-    fn _iterate_tree<T, F>(
-        &self,
-        node: Pointer<profile::RtlBalancedNode>,
-        f: &mut F,
-    ) -> IceResult<()>
-    where
-        F: FnMut(Pointer<T>) -> IceResult<()>,
-    {
-        let left = self.read_struct_pointer(node, |node| node.Left)?;
-        if !left.is_null() {
-            self._iterate_tree(left, f)?;
-        }
-
-        f(Pointer::new(node.addr))?;
-
-        let right = self.read_struct_pointer(node, |node| node.Right)?;
-        if !right.is_null() {
-            self._iterate_tree(right, f)?;
-        }
-
-        Ok(())
-    }
-
-    /// Iterate a kernel AVL tree, yielding elements of type `T`
-    fn iterate_tree<T, O, F>(
-        &self,
-        root: Pointer<profile::RtlAvlTree>,
-        get_offset: O,
-        mut f: F,
-    ) -> IceResult<()>
-    where
-        Self: HasStruct<T> + HasStruct<profile::RtlAvlTree> + HasStruct<profile::RtlBalancedNode>,
-        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode>,
-        F: FnMut(Pointer<T>) -> IceResult<()>,
-    {
-        let node = self.read_struct_pointer(root, |tree| tree.Root)?;
-        let offset = get_offset(self.get_struct_layout()).offset;
-
-        if offset != 0 {
-            return Err(IceError::new("Unsupported structure layout"));
-        }
-
-        self._iterate_tree(node, &mut f)
-    }
-
-    fn read_unicode_string(&self, ptr: Pointer<profile::UnicodeString>) -> IceResult<String> {
-        self.read_unicode_string_with_pgd(self.kpgd, ptr)
-    }
-
-    fn read_unicode_string_with_pgd(
-        &self,
-        pgd: PhysicalAddress,
-        ptr: Pointer<profile::UnicodeString>,
-    ) -> IceResult<String> {
-        let len = self.read_struct_pointer_with_pgd(pgd, ptr, |str| str.Length)?;
-        let mut name = vec![0u16; len as usize / 2];
-
-        let buffer = self.read_struct_pointer_with_pgd(pgd, ptr, |str| str.Buffer)?;
-        self.read_virtual_memory(pgd, buffer, bytemuck::cast_slice_mut(&mut name))?;
-
-        Ok(String::from_utf16_lossy(&name))
-    }
-
-    fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr>> {
+    #[inline]
+    fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr, &Self>> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
-        Ok(Pointer::new(per_cpu))
+        Ok(Pointer::new(per_cpu, self))
     }
 }
 
@@ -414,9 +355,10 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
-        let kpcr = self.kpcr(cpuid)?;
-        let kprcb = self.read_struct(kpcr, |k| k.Prcb)?;
-        let thread = self.read_struct_pointer(kprcb, |k| k.CurrentThread)?;
+        let thread = self
+            .kpcr(cpuid)?
+            .field(|k| k.Prcb)?
+            .read_pointer_field(|k| k.CurrentThread)?;
         Ok(thread.into())
     }
 
@@ -424,12 +366,15 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn process_pid(&self, _proc: ibc::Process) -> IceResult<u64> {
-        self.read_struct_pointer(_proc.into(), |eprocess| eprocess.UniqueProcessId)
+    fn process_pid(&self, proc: ibc::Process) -> IceResult<u64> {
+        self.pointer_of(proc)
+            .read_field(|eproc| eproc.UniqueProcessId)
     }
 
-    fn process_name(&self, _proc: ibc::Process) -> IceResult<String> {
-        let name = self.read_struct_pointer(_proc.into(), |eprocess| eprocess.ImageFileName)?;
+    fn process_name(&self, proc: ibc::Process) -> IceResult<String> {
+        let name = self
+            .pointer_of(proc)
+            .read_field(|eproc| eproc.ImageFileName)?;
 
         let name = match memchr::memchr(0, &name) {
             Some(i) => &name[..i],
@@ -440,19 +385,20 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn process_pgd(&self, proc: ibc::Process) -> IceResult<ibc::PhysicalAddress> {
-        let kproc = self.read_struct(proc.into(), |eproc| eproc.Pcb)?;
+        let kproc = self.pointer_of(proc).field(|eproc| eproc.Pcb)?;
 
-        let dtb = self.read_struct_pointer(kproc, |kproc| kproc.UserDirectoryTableBase)?;
-
+        let dtb = kproc.read_field(|kproc| kproc.UserDirectoryTableBase)?;
         if dtb.0 != 0 && dtb.0 != 1 {
             return Ok(dtb);
         }
 
-        self.read_struct_pointer(kproc, |kproc| kproc.DirectoryTableBase)
+        kproc.read_field(|kproc| kproc.DirectoryTableBase)
     }
 
     fn process_exe(&self, proc: ibc::Process) -> IceResult<Option<ibc::Path>> {
-        let path = self.read_struct_pointer(proc.into(), |e| e.ImageFilePointer)?;
+        let path = self
+            .pointer_of(proc)
+            .read_pointer_field(|e| e.ImageFilePointer)?;
         Ok(if path.is_null() {
             None
         } else {
@@ -466,7 +412,8 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn process_parent_id(&self, proc: ibc::Process) -> IceResult<u64> {
-        self.read_struct_pointer(proc.into(), |e| e.InheritedFromUniqueProcessId)
+        self.pointer_of(proc)
+            .read_field(|eproc| eproc.InheritedFromUniqueProcessId)
     }
 
     fn process_for_each_child(
@@ -476,9 +423,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
     ) -> IceResult<()> {
         let pid = self.process_pid(proc)?;
         self.for_each_process(&mut |proc| {
-            let parent_pid =
-                self.read_struct_pointer(proc.into(), |e| e.InheritedFromUniqueProcessId)?;
-            if parent_pid == pid {
+            if self.process_parent_id(proc)? == pid {
                 f(proc)
             } else {
                 Ok(())
@@ -491,20 +436,20 @@ impl<B: Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Thread) -> IceResult<()>,
     ) -> IceResult<()> {
-        let thread_list = self.read_struct(proc.into(), |eproc| eproc.ThreadListHead)?;
-        self.iterate_list::<profile::Ethread, _, _>(
-            thread_list,
-            |ethread| ethread.ThreadListEntry,
-            |thread| f(thread.into()),
-        )
+        self.pointer_of(proc)
+            .field(|eproc| eproc.ThreadListHead)?
+            .iterate_list::<profile::Ethread, _, _>(
+                |ethread| ethread.ThreadListEntry,
+                |thread| f(thread.into()),
+            )
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
         let head = self.base_addr + self.profile.fast_syms.PsActiveProcessHead;
+        let head = Pointer::new(head, self);
 
-        self.iterate_list::<profile::Eprocess, _, _>(
-            Pointer::new(head),
-            |ep| ep.ActiveProcessLinks,
+        head.iterate_list::<profile::Eprocess, _, _>(
+            |eproc| eproc.ActiveProcessLinks,
             |proc| f(proc.into()),
         )
     }
@@ -514,13 +459,10 @@ impl<B: Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Vma) -> IceResult<()>,
     ) -> IceResult<()> {
-        let vad_root = self.read_struct(proc.into(), |ep| ep.VadRoot)?;
+        let vad_root = self.pointer_of(proc).field(|ep| ep.VadRoot)?;
 
-        self.iterate_tree::<profile::MmvadShort, _, _>(
-            vad_root,
-            |vad| vad.VadNode,
-            |mmvad| f(mmvad.into()),
-        )
+        vad_root
+            .iterate_tree::<profile::MmvadShort, _, _>(|vad| vad.VadNode, |mmvad| f(mmvad.into()))
     }
 
     fn process_for_each_module(
@@ -528,22 +470,18 @@ impl<B: Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
     ) -> IceResult<()> {
-        let pgd = self.process_pgd(proc)?;
-
-        let peb = self.read_struct_pointer(proc.into(), |e| e.Peb)?;
+        let peb = self.pointer_of(proc).read_pointer_field(|e| e.Peb)?;
         if peb.is_null() {
             return Ok(());
         }
 
-        let ldr = self.read_struct_pointer_with_pgd(pgd, peb, |peb| peb.Ldr)?;
-        let ldr_table = self.read_struct(ldr, |ldr| ldr.InLoadOrderModuleList)?;
-
-        self.iterate_list_with_pgd::<profile::LdrDataTableEntry, _, _>(
-            pgd,
-            ldr_table,
-            |entry| entry.InLoadOrderLinks,
-            |entry| f(entry.into()),
-        )
+        peb.switch_to_userspace(proc)?
+            .read_pointer_field(|peb| peb.Ldr)?
+            .field(|ldr| ldr.InLoadOrderModuleList)?
+            .iterate_list::<profile::LdrDataTableEntry, _, _>(
+                |entry| entry.InLoadOrderLinks,
+                |entry| f(entry.into()),
+            )
     }
 
     fn process_callstack(
@@ -555,27 +493,33 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn thread_process(&self, thread: ibc::Thread) -> IceResult<ibc::Process> {
-        let tcb = self.read_struct(thread.into(), |k| k.Tcb)?;
-        let proc = self.read_struct_pointer(tcb, |k| k.Process)?;
+        let proc = self
+            .pointer_of(thread)
+            .field(|ethread| ethread.Tcb)?
+            .read_pointer_field(|kthread| kthread.Process)?;
         Ok(proc.into())
     }
 
     fn thread_id(&self, thread: ibc::Thread) -> IceResult<u64> {
-        let cid = self.read_struct(thread.into(), |ethread| ethread.Cid)?;
-        self.read_struct_pointer(cid, |cid| cid.UniqueThread)
+        self.pointer_of(thread)
+            .field(|ethread| ethread.Cid)?
+            .read_field(|cid| cid.UniqueThread)
     }
 
     fn thread_name(&self, thread: ibc::Thread) -> IceResult<Option<String>> {
-        let name = self.read_struct_pointer(thread.into(), |et| et.ThreadName)?;
+        let name = self
+            .pointer_of(thread)
+            .read_pointer_field(|et| et.ThreadName)?;
         if name.is_null() {
             return Ok(None);
         }
-        self.read_unicode_string(name).map(Some)
+        name.read_unicode_string().map(Some)
     }
 
     fn path_to_string(&self, path: ibc::Path) -> IceResult<String> {
-        let path = self.read_struct(path.into(), |fo| fo.FileName)?;
-        self.read_unicode_string(path)
+        self.pointer_of(path)
+            .field(|file_object| file_object.FileName)?
+            .read_unicode_string()
     }
 
     fn vma_file(&self, _vma: ibc::Vma) -> IceResult<Option<ibc::Path>> {
@@ -583,16 +527,16 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn vma_start(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
-        let vma = vma.into();
-        let low = self.read_struct_pointer(vma, |mmvad| mmvad.StartingVpn)? as u64;
-        let high = self.read_struct_pointer(vma, |mmvad| mmvad.StartingVpnHigh)? as u64;
+        let vma = self.pointer_of(vma);
+        let low = vma.read_field(|mmvad| mmvad.StartingVpn)? as u64;
+        let high = vma.read_field(|mmvad| mmvad.StartingVpnHigh)? as u64;
         Ok(VirtualAddress(((high << 32) + low) << 12))
     }
 
     fn vma_end(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
-        let vma = vma.into();
-        let low = self.read_struct_pointer(vma, |mmvad| mmvad.EndingVpn)? as u64;
-        let high = self.read_struct_pointer(vma, |mmvad| mmvad.EndingVpnHigh)? as u64;
+        let vma = self.pointer_of(vma);
+        let low = vma.read_field(|mmvad| mmvad.EndingVpn)? as u64;
+        let high = vma.read_field(|mmvad| mmvad.EndingVpnHigh)? as u64;
         Ok(VirtualAddress(((high << 32) + low + 1) << 12))
     }
 
@@ -609,26 +553,24 @@ impl<B: Backend> ibc::Os for Windows<B> {
         module: ibc::Module,
         proc: ibc::Process,
     ) -> IceResult<(VirtualAddress, VirtualAddress)> {
-        let pgd = self.process_pgd(proc)?;
-
-        let module = module.into();
-        let dll_base = self.read_struct_pointer_with_pgd(pgd, module, |e| e.DllBase)?;
-        let size = self.read_struct_pointer_with_pgd(pgd, module, |e| e.SizeOfImage)?;
+        let module = self.pointer_of(module).switch_to_userspace(proc)?;
+        let dll_base = module.read_field(|entry| entry.DllBase)?;
+        let size = module.read_field(|entry| entry.SizeOfImage)?;
         Ok((dll_base, dll_base + size as u64))
     }
 
     fn module_name(&self, module: ibc::Module, proc: ibc::Process) -> IceResult<String> {
-        let pgd = self.process_pgd(proc)?;
-
-        let name = self.read_struct(module.into(), |e| e.BaseDllName)?;
-        self.read_unicode_string_with_pgd(pgd, name)
+        self.pointer_of(module)
+            .switch_to_userspace(proc)?
+            .field(|entry| entry.BaseDllName)?
+            .read_unicode_string()
     }
 
     fn module_path(&self, module: ibc::Module, proc: ibc::Process) -> IceResult<String> {
-        let pgd = self.process_pgd(proc)?;
-
-        let name = self.read_struct(module.into(), |e| e.FullDllName)?;
-        self.read_unicode_string_with_pgd(pgd, name)
+        self.pointer_of(module)
+            .switch_to_userspace(proc)?
+            .field(|entry| entry.FullDllName)?
+            .read_unicode_string()
     }
 
     fn resolve_symbol_exact(

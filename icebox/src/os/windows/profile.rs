@@ -1,83 +1,19 @@
 #![allow(non_snake_case)]
 
-use ice::PhysicalAddress;
-
-use crate::core::{self as ice, IceResult, VirtualAddress};
-use core::marker::PhantomData;
+use crate::os::pointer::{HasLayout, Pointer, StructOffset};
+use ibc::{IceResult, PhysicalAddress, VirtualAddress};
 
 pub(crate) struct FastSymbols {
     pub PsActiveProcessHead: u64,
 }
 
-pub struct StructOffset<T> {
-    pub offset: u64,
-    _type: PhantomData<T>,
-}
-
-impl<T> Clone for StructOffset<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for StructOffset<T> {}
-
-impl<T> StructOffset<T> {
-    fn new(layout: ice::symbols::Struct, field_name: &str) -> IceResult<Self> {
-        let offset = layout.find_offset(field_name)?;
-        Ok(Self::from_offset(offset))
-    }
-
-    fn from_offset(offset: u64) -> Self {
-        Self {
-            offset,
-            _type: PhantomData,
-        }
-    }
-}
-
-pub(crate) struct Pointer<T> {
-    pub addr: VirtualAddress,
-    _typ: PhantomData<T>,
-}
-
-impl<T> Pointer<T> {
-    pub const fn new(addr: VirtualAddress) -> Self {
-        Self {
-            addr,
-            _typ: PhantomData,
-        }
-    }
-
-    pub const fn is_null(self) -> bool {
-        self.addr.is_null()
-    }
-}
-
-impl<T> Clone for Pointer<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for Pointer<T> {}
-
-impl<T> PartialEq for Pointer<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.addr == other.addr
-    }
-}
-
-impl<T> Eq for Pointer<T> {}
-
-impl<T> std::fmt::Debug for Pointer<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Pointer").field("addr", &self.addr).finish()
-    }
+macro_rules! types {
+    (kernel) => { &super::Windows<B> };
+    (user) => { super::ProcSpace<'_, B> };
 }
 
 /// This macro defines Rust types to access kernel structures with type checking
-macro_rules! define_kernel_structs {
+macro_rules! define_structs {
     (
         // The structure to store all layouts
         struct $layouts:ident { .. }
@@ -85,7 +21,8 @@ macro_rules! define_kernel_structs {
         $(
             // Each structure has to define the name of the matching kernel
             // struct and the fields it wants to access
-            #[kernel_name($kname:ident)]
+            #[actual_name($kname:ident)]
+            #[define_for( $( $space:tt ),+ )]
             $( #[ $attr:meta ] )*
             struct $struct_name:ident {
                 $(
@@ -109,7 +46,7 @@ macro_rules! define_kernel_structs {
 
             // Make a constructor
             impl $struct_name {
-                fn new(layout: ice::symbols::Struct) -> IceResult<Self> {
+                fn new(layout: ibc::symbols::Struct) -> IceResult<Self> {
                     Ok(Self {
                         $(
                             $field: StructOffset::new(layout, stringify!($field))?,
@@ -118,12 +55,14 @@ macro_rules! define_kernel_structs {
                 }
             }
 
-            // Make the struct easily available
-            impl<B: ice::Backend> super::HasStruct<$struct_name> for super::Windows<B> {
-                fn get_struct_layout(&self) -> &$struct_name {
-                    &self.profile.layouts.$kname
+            $(
+                // Make the struct easily available
+                impl<B: ibc::Backend> HasLayout<$struct_name> for types!($space) {
+                    fn get_layout(&self) -> &$struct_name {
+                        &self.profile().layouts.$kname
+                    }
                 }
-            }
+            )+
         )*
 
         // Then put all layouts in a single structure
@@ -133,8 +72,8 @@ macro_rules! define_kernel_structs {
             )*
         }
 
-        impl Layouts {
-            fn new(syms: &ice::ModuleSymbols) -> IceResult<Self> {
+        impl $layouts {
+            fn new(syms: &ibc::ModuleSymbols) -> IceResult<Self> {
                 Ok(Self {
                     $(
                         $kname: $struct_name::new(syms.get_struct(stringify!($kname))?)?,
@@ -146,25 +85,29 @@ macro_rules! define_kernel_structs {
 }
 
 // Please keep all these lists in alphetical order
-define_kernel_structs! {
+define_structs! {
     struct Layouts { .. }
 
-    #[kernel_name(_CLIENT_ID)]
+    #[actual_name(_CLIENT_ID)]
+    #[define_for(kernel)]
     struct ClientId {
         UniqueThread: u64,
     }
 
-    #[kernel_name(_PEB)]
+    #[actual_name(_PEB)]
+    #[define_for(user)]
     struct Peb {
         Ldr: Pointer<PebLdrData>,
     }
 
-    #[kernel_name(_PEB_LDR_DATA)]
+    #[actual_name(_PEB_LDR_DATA)]
+    #[define_for(user)]
     struct PebLdrData {
         InLoadOrderModuleList: ListEntry,
     }
 
-    #[kernel_name(_LDR_DATA_TABLE_ENTRY)]
+    #[actual_name(_LDR_DATA_TABLE_ENTRY)]
+    #[define_for(user, kernel)]
     struct LdrDataTableEntry {
         BaseDllName: UnicodeString,
         DllBase: VirtualAddress,
@@ -173,7 +116,8 @@ define_kernel_structs! {
         SizeOfImage: u32,
     }
 
-    #[kernel_name(_EPROCESS)]
+    #[actual_name(_EPROCESS)]
+    #[define_for(kernel)]
     struct Eprocess {
         ActiveProcessLinks: ListEntry,
         ImageFileName: [u8; 16],
@@ -186,7 +130,8 @@ define_kernel_structs! {
         VadRoot: RtlAvlTree,
     }
 
-    #[kernel_name(_ETHREAD)]
+    #[actual_name(_ETHREAD)]
+    #[define_for(kernel)]
     struct Ethread {
         Tcb: Kthread,
         Cid: ClientId,
@@ -194,37 +139,43 @@ define_kernel_structs! {
         ThreadName: Pointer<UnicodeString>,
     }
 
-    #[kernel_name(_FILE_OBJECT)]
+    #[actual_name(_FILE_OBJECT)]
+    #[define_for(kernel)]
     struct FileObject {
         FileName: UnicodeString,
     }
 
-    #[kernel_name(_KPCR)]
+    #[actual_name(_KPCR)]
+    #[define_for(kernel)]
     struct Kpcr {
         Prcb: Kprcb,
     }
 
-    #[kernel_name(_KPRCB)]
+    #[actual_name(_KPRCB)]
+    #[define_for(kernel)]
     struct Kprcb {
         CurrentThread: Pointer<Ethread>,
         #[allow(dead_code)]
         KernelDirectoryTableBase: PhysicalAddress,
     }
 
-    #[kernel_name(_KPROCESS)]
+    #[actual_name(_KPROCESS)]
+    #[define_for(kernel)]
     struct Kprocess {
         DirectoryTableBase: PhysicalAddress,
         UserDirectoryTableBase: PhysicalAddress,
     }
 
-    #[kernel_name(_LIST_ENTRY)]
+    #[actual_name(_LIST_ENTRY)]
+    #[define_for(kernel, user)]
     struct ListEntry {
         Flink: Pointer<ListEntry>,
         #[allow(dead_code)]
         Blink: Pointer<ListEntry>,
     }
 
-    #[kernel_name(_MMVAD_SHORT)]
+    #[actual_name(_MMVAD_SHORT)]
+    #[define_for(kernel)]
     struct MmvadShort {
         EndingVpn: u32,
         EndingVpnHigh: u8,
@@ -233,52 +184,42 @@ define_kernel_structs! {
         VadNode: RtlBalancedNode,
     }
 
-    #[kernel_name(_KTHREAD)]
+    #[actual_name(_KTHREAD)]
+    #[define_for(kernel)]
     struct Kthread {
         Process: Pointer<Eprocess>,
     }
 
-    #[kernel_name(_RTL_AVL_TREE)]
+    #[actual_name(_RTL_AVL_TREE)]
+    #[define_for(kernel)]
     struct RtlAvlTree {
         Root: Pointer<RtlBalancedNode>,
     }
 
-    #[kernel_name(_RTL_BALANCED_NODE)]
+    #[actual_name(_RTL_BALANCED_NODE)]
+    #[define_for(kernel)]
     struct RtlBalancedNode {
         Left: Pointer<RtlBalancedNode>,
         Right: Pointer<RtlBalancedNode>,
     }
 
-    #[kernel_name(_UNICODE_STRING)]
+    #[actual_name(_UNICODE_STRING)]
+    #[define_for(kernel, user)]
     struct UnicodeString {
         Length: u16,
         Buffer: VirtualAddress,
     }
 }
 
-impl From<Pointer<Ethread>> for Pointer<Kthread> {
-    fn from(p: Pointer<Ethread>) -> Self {
-        Pointer::new(p.addr)
-    }
-}
-
-impl From<Pointer<Eprocess>> for Pointer<Kprocess> {
-    fn from(p: Pointer<Eprocess>) -> Self {
-        Pointer::new(p.addr)
-    }
-}
-
 pub struct Profile {
-    #[allow(unused)]
-    pub(crate) syms: ice::SymbolsIndexer,
-    #[allow(dead_code)]
+    pub(crate) syms: ibc::SymbolsIndexer,
     pub(crate) fast_syms: FastSymbols,
 
     pub(super) layouts: Layouts,
 }
 
 impl Profile {
-    pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
+    pub fn new(syms: ibc::SymbolsIndexer) -> IceResult<Self> {
         let kernel = syms.get_lib("ntkrnlmp.pdb")?;
         let layouts = Layouts::new(&kernel)?;
         let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;

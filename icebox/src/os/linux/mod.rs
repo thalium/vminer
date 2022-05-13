@@ -1,35 +1,39 @@
 pub mod callstack;
 mod profile;
 
+use super::pointer::{Context, HasLayout, Pointer, StructOffset};
 use crate::core::{self as ice, IceError, IceResult, Os, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 use core::fmt;
 
 pub use profile::Profile;
 
-use self::profile::{Pointer, StructOffset};
-
-/// Values that we can read from guest memory
-trait Readable: Sized {
-    fn read<B: ice::Backend>(linux: &Linux<B>, addr: VirtualAddress) -> IceResult<Self>;
+struct ProcSpace<'a, B: ice::Backend> {
+    os: &'a Linux<B>,
+    pgd: ibc::PhysicalAddress,
 }
 
-impl<T: bytemuck::Pod> Readable for T {
-    fn read<B: ice::Backend>(linux: &Linux<B>, addr: VirtualAddress) -> IceResult<Self> {
-        let val = linux.read_kernel_value(addr)?;
-        Ok(val)
+impl<B: ice::Backend> Clone for ProcSpace<'_, B> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
     }
 }
 
-impl<T> Readable for Pointer<T> {
-    fn read<B: ice::Backend>(linux: &Linux<B>, addr: VirtualAddress) -> IceResult<Self> {
-        let addr = VirtualAddress(linux.read_kernel_value(addr)?);
-        Ok(Pointer::new(addr))
+impl<B: ice::Backend> Copy for ProcSpace<'_, B> {}
+
+impl<B: ice::Backend> Context for ProcSpace<'_, B> {
+    #[inline]
+    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+        self.os.read_virtual_memory(self.pgd, addr, buf)
     }
 }
 
-trait HasStruct<Layout> {
-    fn get_struct_layout(&self) -> &Layout;
+impl<B: ice::Backend> Context for &Linux<B> {
+    #[inline]
+    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+        self.read_virtual_memory(self.kpgd, addr, buf)
+    }
 }
 
 pointer_defs! {
@@ -37,6 +41,66 @@ pointer_defs! {
     ibc::Process = profile::TaskStruct;
     ibc::Thread = profile::TaskStruct;
     ibc::Vma = profile::VmAreaStruct;
+}
+
+impl<Ctx: HasLayout<profile::ListHead>> Pointer<profile::ListHead, Ctx> {
+    /// Iterate a linked list, yielding elements of type `T`
+    fn iterate_list<T, O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    where
+        Ctx: HasLayout<T>,
+        O: FnOnce(&T) -> StructOffset<profile::ListHead>,
+        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+    {
+        let mut pos = self;
+        let offset = get_offset(self.ctx.get_layout()).offset;
+
+        loop {
+            pos = pos.read_pointer_field(|list| list.next)?;
+
+            if pos == self {
+                break;
+            }
+
+            f(Pointer::new(pos.addr - offset, self.ctx))?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<Ctx> Pointer<profile::Dentry, Ctx>
+where
+    Ctx: HasLayout<profile::Dentry> + HasLayout<profile::Qstr>,
+{
+    fn build_path(self, buf: &mut Vec<u8>) -> IceResult<()> {
+        // Paths start with the last components in the kernel but we want them
+        // to start by the root, so we call ourselves recursively to build the
+        // beginning first
+
+        let parent = self.read_pointer_field(|d| d.d_parent)?;
+        if parent != self {
+            parent.build_path(buf)?;
+        }
+
+        let qstr = self.field(|d| d.d_name)?;
+        let name = qstr.read_field(|qstr| qstr.name)?;
+
+        // TODO: use qstr.len here
+        let mut len = buf.len();
+        buf.extend_from_slice(&[0; 256]);
+        if len > 0 && buf[len - 1] != b'/' {
+            buf[len] = b'/';
+            len += 1;
+        }
+        self.ctx.read_memory(name, &mut buf[len..])?;
+
+        match memchr::memchr(0, &buf[len..]) {
+            Some(i) => buf.truncate(len + i),
+            None => todo!(),
+        }
+
+        Ok(())
+    }
 }
 
 pub struct Linux<B> {
@@ -77,162 +141,14 @@ impl<B: ice::Backend> Linux<B> {
         Ok(value)
     }
 
-    fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        Ok(self.read_virtual_memory(self.kpgd, addr, buf)?)
-    }
-
-    /// Converts a pointer to a struct to a pointer to a field
-    ///
-    /// Generic parameters ensure that the conversion is valid.
-    fn read_struct<L, T>(
-        &self,
-        pointer: Pointer<L>,
-        get_offset: impl FnOnce(&L) -> StructOffset<T>,
-    ) -> IceResult<Pointer<T>>
-    where
-        Self: HasStruct<L>,
-    {
-        if pointer.is_null() {
-            return Err(IceError::deref_null_ptr());
-        }
-        let offset = get_offset(self.get_struct_layout());
-        Ok(Pointer::new(pointer.addr + offset.offset))
-    }
-
-    /// Reads a field from a struct pointer
-    fn read_struct_pointer<L, T: Readable>(
-        &self,
-        pointer: Pointer<L>,
-        get_offset: impl FnOnce(&L) -> StructOffset<T>,
-    ) -> IceResult<T>
-    where
-        Self: HasStruct<L>,
-    {
-        if pointer.is_null() {
-            return Err(IceError::deref_null_ptr());
-        }
-        let offset = get_offset(self.get_struct_layout());
-        T::read(self, pointer.addr + offset.offset)
-    }
-
-    /// Reads a value behind a pointer
-    #[allow(dead_code)]
-    fn read_pointer<T: Readable>(&self, pointer: Pointer<T>) -> IceResult<T> {
-        if pointer.is_null() {
-            return Err(IceError::deref_null_ptr());
-        }
-        T::read(self, pointer.addr)
+    #[inline]
+    fn pointer_of<'a, T: AsPointer<U>, U>(&'a self, ptr: T) -> Pointer<U, &'a Self> {
+        ptr.as_pointer(self)
     }
 
     pub fn per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
         let per_cpu_offset = self.profile.fast_syms.per_cpu_offset + self.kaslr;
         self.read_kernel_value(per_cpu_offset + 8 * cpuid as u64)
-    }
-
-    fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
-        match self.profile.fast_syms.current_task {
-            Some(current_task) => {
-                let current_task = self.per_cpu(cpuid)? + current_task;
-                let addr = self.read_kernel_value(current_task)?;
-                Ok(ibc::Thread(addr))
-            }
-            None => {
-                // The symbol `current_task` may not exist (eg on Aach64, where
-                // Linux gets it from register `sp_el0`, which is not valid for
-                // this if the current process is a userspace one.
-                // In this case we find it the poor man's way: we iterate the
-                // process list and find a matching PGD.
-                //
-                // FIXME: This will always yield the thread group leader instead
-                // of the current thread
-
-                use ibc::arch::{Vcpu, Vcpus};
-
-                let vcpu = self.backend.vcpus().get(cpuid);
-                let vcpu_pgd = vcpu.pgd();
-
-                match vcpu.into_runtime() {
-                    ice::arch::runtime::Vcpu::Aarch64(vcpu) => {
-                        if vcpu.instruction_pointer().is_kernel() {
-                            let current_task = VirtualAddress(vcpu.registers.sp);
-                            return Ok(ibc::Thread(current_task));
-                        }
-                    }
-                    _ => (),
-                };
-
-                log::debug!("Using fallback to get current task");
-
-                let mut current_task = None;
-                self.for_each_process(&mut |proc| {
-                    let proc_pgd = self.process_pgd(proc)?;
-                    if proc_pgd == vcpu_pgd {
-                        current_task = Some(ibc::Thread(proc.0));
-                    }
-                    Ok(())
-                })?;
-
-                current_task.ok_or_else(|| ibc::IceError::new("cannot find current thread"))
-            }
-        }
-    }
-
-    /// Iterate a kernel linked list, yielding elements of type `T`
-    fn iterate_list<T, O, F>(
-        &self,
-        head: Pointer<profile::ListHead>,
-        get_offset: O,
-        mut f: F,
-    ) -> IceResult<()>
-    where
-        Self: HasStruct<T> + HasStruct<profile::ListHead>,
-        O: FnOnce(&T) -> StructOffset<profile::ListHead>,
-        F: FnMut(Pointer<T>) -> IceResult<()>,
-    {
-        let mut pos = head;
-        let offset = get_offset(self.get_struct_layout()).offset;
-
-        loop {
-            pos = self.read_struct_pointer(pos, |list| list.next)?;
-
-            if pos == head {
-                break;
-            }
-
-            f(Pointer::new(pos.addr - offset))?;
-        }
-
-        Ok(())
-    }
-
-    fn build_path(&self, dentry: Pointer<profile::Dentry>, buf: &mut Vec<u8>) -> IceResult<()> {
-        // Paths start with the last components in the kernel but we want them
-        // to start by the root, so we call ourselves recursively to build the
-        // beginning first
-
-        let parent = self.read_struct_pointer(dentry, |d| d.d_parent)?;
-        if parent != dentry {
-            self.build_path(parent, buf)?;
-        }
-
-        let qstr = self.read_struct(dentry, |d| d.d_name)?;
-        let name = self.read_struct_pointer(qstr, |qstr| qstr.name)?;
-
-        // TODO: use qstr.len here
-        let mut len = buf.len();
-        buf.extend_from_slice(&[0; 256]);
-        if len > 0 && buf[len - 1] != b'/' {
-            buf[len] = b'/';
-            len += 1;
-        }
-        self.read_kernel_memory(name, &mut buf[len..])?;
-
-        match memchr::memchr(0, &buf[len..]) {
-            Some(i) => buf.truncate(len + i),
-            None => todo!(),
-        }
-
-        Ok(())
     }
 
     pub fn find_symbol(&self, lib: &str, addr: VirtualAddress) -> Option<&str> {
@@ -245,13 +161,13 @@ impl<B: ice::Backend> Linux<B> {
         lib.get_symbol_inexact(addr)
     }
 
-    fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct>> {
-        let proc = proc.into();
-        let mut mm = self.read_struct_pointer(proc, |ts| ts.mm)?;
+    fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct, &Self>> {
+        let proc = self.pointer_of(proc);
+        let mut mm = proc.read_pointer_field(|ts| ts.mm)?;
 
         // Kernel processes use this instead. This is NULL too on aarch64 though
         if mm.is_null() {
-            mm = self.read_struct_pointer(proc, |ts| ts.active_mm)?;
+            mm = proc.read_pointer_field(|ts| ts.active_mm)?;
         }
 
         Ok(mm)
@@ -307,26 +223,73 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
-        self.current_thread(cpuid)
+        match self.profile.fast_syms.current_task {
+            Some(current_task) => {
+                let current_task = self.per_cpu(cpuid)? + current_task;
+                let addr = self.read_kernel_value(current_task)?;
+                Ok(ibc::Thread(addr))
+            }
+            None => {
+                // The symbol `current_task` may not exist (eg on Aach64, where
+                // Linux gets it from register `sp_el0`, which is not valid for
+                // this if the current process is a userspace one.
+                // In this case we find it the poor man's way: we iterate the
+                // process list and find a matching PGD.
+                //
+                // FIXME: This will always yield the thread group leader instead
+                // of the current thread
+
+                use ibc::arch::{Vcpu, Vcpus};
+
+                let vcpu = self.backend.vcpus().get(cpuid);
+                let vcpu_pgd = vcpu.pgd();
+
+                match vcpu.into_runtime() {
+                    ice::arch::runtime::Vcpu::Aarch64(vcpu) => {
+                        if vcpu.instruction_pointer().is_kernel() {
+                            let current_task = VirtualAddress(vcpu.registers.sp);
+                            return Ok(ibc::Thread(current_task));
+                        }
+                    }
+                    _ => (),
+                };
+
+                log::debug!("Using fallback to get current task");
+
+                let mut current_task = None;
+                self.for_each_process(&mut |proc| {
+                    let proc_pgd = self.process_pgd(proc)?;
+                    if proc_pgd == vcpu_pgd {
+                        current_task = Some(ibc::Thread(proc.0));
+                    }
+                    Ok(())
+                })?;
+
+                current_task.ok_or_else(|| ibc::IceError::new("cannot find current thread"))
+            }
+        }
     }
 
     fn thread_process(&self, thread: ibc::Thread) -> IceResult<ibc::Process> {
-        let pointer = self.read_struct_pointer(thread.into(), |ts| ts.group_leader)?;
+        let pointer = self
+            .pointer_of(thread)
+            .read_pointer_field(|ts| ts.group_leader)?;
         Ok(pointer.into())
     }
 
     fn process_is_kernel(&self, proc: ibc::Process) -> IceResult<bool> {
-        let flags = self.read_struct_pointer(proc.into(), |ts| ts.flags)?;
+        let flags = self.pointer_of(proc).read_field(|ts| ts.flags)?;
         Ok(flags & 0x200000 != 0)
     }
 
     fn process_pid(&self, proc: ibc::Process) -> IceResult<u64> {
-        self.read_struct_pointer(proc.into(), |ts| ts.tgid)
+        self.pointer_of(proc)
+            .read_field(|ts| ts.tgid)
             .map(|pid| pid as u64)
     }
 
     fn process_name(&self, proc: ice::Process) -> IceResult<String> {
-        let comm = self.read_struct_pointer(proc.into(), |ts| ts.comm)?;
+        let comm = self.pointer_of(proc).read_field(|ts| ts.comm)?;
 
         let buf = match memchr::memchr(0, &comm) {
             Some(i) => &comm[..i],
@@ -345,7 +308,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
                 Err(ibc::IceError::new("process has NULL mm"))
             }
         } else {
-            let pgd = self.read_struct_pointer(mm, |mms| mms.pgd)?;
+            let pgd = mm.read_field(|mms| mms.pgd)?;
             Ok(self.backend.virtual_to_physical(self.kpgd, pgd)?)
         }
     }
@@ -353,16 +316,18 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn process_exe(&self, proc: ice::Process) -> IceResult<Option<ibc::Path>> {
         let mm = self.process_mm(proc)?;
 
-        let file = self.read_struct_pointer(mm, |mm| mm.exe_file)?;
+        let file = mm.read_pointer_field(|mm| mm.exe_file)?;
         if file.is_null() {
             return Ok(None);
         }
-        let path = self.read_struct(file, |file| file.f_path)?;
+        let path = file.field(|file| file.f_path)?;
         Ok(Some(path.into()))
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
-        let proc = self.read_struct_pointer(proc.into(), |ts| ts.real_parent)?;
+        let proc = self
+            .pointer_of(proc)
+            .read_pointer_field(|ts| ts.real_parent)?;
         Ok(proc.into())
     }
 
@@ -375,12 +340,9 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
     ) -> IceResult<()> {
-        let children = self.read_struct(proc.into(), |ts| ts.children)?;
-        self.iterate_list::<profile::TaskStruct, _, _>(
-            children,
-            |ts| ts.sibling,
-            |child| f(child.into()),
-        )
+        self.pointer_of(proc)
+            .field(|ts| ts.children)?
+            .iterate_list::<profile::TaskStruct, _, _>(|ts| ts.sibling, |child| f(child.into()))
     }
 
     fn process_for_each_thread(
@@ -388,22 +350,19 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ice::Process,
         f: &mut dyn FnMut(ice::Thread) -> IceResult<()>,
     ) -> IceResult<()> {
-        let thread_group = self.read_struct(proc.into(), |ts| ts.thread_group)?;
-        self.iterate_list::<profile::TaskStruct, _, _>(
-            thread_group,
-            |ts| ts.thread_group,
-            |thread| f(thread.into()),
-        )
+        self.pointer_of(proc)
+            .field(|ts| ts.thread_group)?
+            .iterate_list::<profile::TaskStruct, _, _>(
+                |ts| ts.thread_group,
+                |thread| f(thread.into()),
+            )
     }
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
         let init = self.init_process()?;
-
-        self.iterate_list::<profile::TaskStruct, _, _>(
-            self.read_struct(init.into(), |ts| ts.tasks)?,
-            |ts| ts.tasks,
-            |proc| f(proc.into()),
-        )
+        self.pointer_of(init)
+            .field(|ts| ts.tasks)?
+            .iterate_list::<profile::TaskStruct, _, _>(|ts| ts.tasks, |proc| f(proc.into()))
     }
 
     fn process_for_each_vma(
@@ -412,11 +371,11 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         f: &mut dyn FnMut(ice::Vma) -> IceResult<()>,
     ) -> IceResult<()> {
         let mm = self.process_mm(proc)?;
-        let mut cur_vma = self.read_struct_pointer(mm, |mm| mm.mmap)?;
+        let mut cur_vma = mm.read_pointer_field(|mm| mm.mmap)?;
 
         while !cur_vma.is_null() {
             f(cur_vma.into())?;
-            cur_vma = self.read_struct_pointer(cur_vma, |vma| vma.vm_next)?;
+            cur_vma = cur_vma.read_pointer_field(|vma| vma.vm_next)?;
         }
 
         Ok(())
@@ -439,7 +398,8 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn thread_id(&self, thread: ice::Thread) -> IceResult<u64> {
-        self.read_struct_pointer(thread.into(), |ts| ts.pid)
+        self.pointer_of(thread)
+            .read_field(|ts| ts.pid)
             .map(|pid| pid as u64)
     }
 
@@ -448,39 +408,38 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn path_to_string(&self, path: ice::Path) -> IceResult<String> {
-        let dentry = self.read_struct_pointer(path.into(), |p| p.dentry)?;
         let mut buf = Vec::new();
-
-        self.build_path(dentry, &mut buf)?;
-
+        self.pointer_of(path)
+            .read_pointer_field(|p| p.dentry)?
+            .build_path(&mut buf)?;
         String::from_utf8(buf).map_err(ice::IceError::new)
     }
 
     fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<ibc::Path>> {
-        let file = self.read_struct_pointer(vma.into(), |vma| vma.vm_file)?;
-
+        let file = self.pointer_of(vma).read_pointer_field(|vma| vma.vm_file)?;
         if file.is_null() {
             return Ok(None);
         }
-        let path = self.read_struct(file, |file| file.f_path)?;
+        let path = file.field(|file| file.f_path)?;
         Ok(Some(path.into()))
     }
 
     fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
-        self.read_struct_pointer(vma.into(), |vma| vma.vm_start)
+        self.pointer_of(vma).read_field(|vma| vma.vm_start)
     }
 
     fn vma_end(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
-        self.read_struct_pointer(vma.into(), |vma| vma.vm_end)
+        self.pointer_of(vma).read_field(|vma| vma.vm_end)
     }
 
     fn vma_flags(&self, vma: ice::Vma) -> IceResult<ibc::VmaFlags> {
-        let flags: u64 = self.read_struct_pointer(vma.into(), |vma| vma.vm_flags)?;
+        let flags = self.pointer_of(vma).read_field(|vma| vma.vm_flags)?;
         Ok(ibc::VmaFlags(flags))
     }
 
     fn vma_offset(&self, vma: ice::Vma) -> IceResult<u64> {
-        self.read_struct_pointer(vma.into(), |vma| vma.vm_pgoff)
+        self.pointer_of(vma)
+            .read_field(|vma| vma.vm_pgoff)
             .map(|offset| offset * 4096)
     }
 

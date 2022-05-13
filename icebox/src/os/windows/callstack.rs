@@ -135,7 +135,10 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     }
 
     fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
-        super::Readable::read(self.windows, self.pgd, addr)
+        let mut value = bytemuck::Zeroable::zeroed();
+        self.windows
+            .read_virtual_memory(self.pgd, addr, bytemuck::bytes_of_mut(&mut value))?;
+        Ok(value)
     }
 
     fn find_vma_by_address(&self, addr: VirtualAddress) -> Option<&Vma> {
