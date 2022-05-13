@@ -108,6 +108,15 @@ impl<T, Ctx> Pointer<T, Ctx> {
     }
 
     #[inline]
+    pub fn map_non_null<U>(self, f: impl FnOnce(Self) -> IceResult<U>) -> IceResult<Option<U>> {
+        if self.addr.is_null() {
+            Ok(None)
+        } else {
+            Some(f(self)).transpose()
+        }
+    }
+
+    #[inline]
     pub fn switch_context<N: Context>(self, ctx: N) -> Pointer<T, N> {
         Pointer::new(self.addr, ctx)
     }

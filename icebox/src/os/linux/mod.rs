@@ -316,14 +316,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_exe(&self, proc: ice::Process) -> IceResult<Option<ibc::Path>> {
-        let mm = self.process_mm(proc)?;
-
-        let file = mm.read_pointer_field(|mm| mm.exe_file)?;
-        if file.is_null() {
-            return Ok(None);
-        }
-        let path = file.field(|file| file.f_path)?;
-        Ok(Some(path.into()))
+        self.process_mm(proc)?
+            .read_pointer_field(|mm| mm.exe_file)?
+            .map_non_null(|file| {
+                let path = file.field(|file| file.f_path)?;
+                Ok(path.into())
+            })
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
@@ -415,12 +413,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<ibc::Path>> {
-        let file = self.pointer_of(vma).read_pointer_field(|vma| vma.vm_file)?;
-        if file.is_null() {
-            return Ok(None);
-        }
-        let path = file.field(|file| file.f_path)?;
-        Ok(Some(path.into()))
+        self.pointer_of(vma)
+            .read_pointer_field(|vma| vma.vm_file)?
+            .map_non_null(|file| {
+                let path = file.field(|file| file.f_path)?;
+                Ok(path.into())
+            })
     }
 
     fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {

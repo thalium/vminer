@@ -397,14 +397,9 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn process_exe(&self, proc: ibc::Process) -> IceResult<Option<ibc::Path>> {
-        let path = self
-            .pointer_of(proc)
-            .read_pointer_field(|e| e.ImageFilePointer)?;
-        Ok(if path.is_null() {
-            None
-        } else {
-            Some(path.into())
-        })
+        self.pointer_of(proc)
+            .read_pointer_field(|e| e.ImageFilePointer)?
+            .map_non_null(|path| Ok(path.into()))
     }
 
     fn process_parent(&self, proc: ibc::Process) -> IceResult<ibc::Process> {
@@ -498,13 +493,9 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn thread_name(&self, thread: ibc::Thread) -> IceResult<Option<String>> {
-        let name = self
-            .pointer_of(thread)
-            .read_pointer_field(|et| et.ThreadName)?;
-        if name.is_null() {
-            return Ok(None);
-        }
-        name.read_unicode_string().map(Some)
+        self.pointer_of(thread)
+            .read_pointer_field(|et| et.ThreadName)?
+            .map_non_null(|name| name.read_unicode_string())
     }
 
     fn path_to_string(&self, path: ibc::Path) -> IceResult<String> {
