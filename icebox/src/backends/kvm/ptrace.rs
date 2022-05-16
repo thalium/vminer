@@ -40,9 +40,8 @@ impl RawTracee {
                 self.pid,
                 ptr::null_mut::<libc::c_void>(),
                 0usize,
-            ))?;
+            ))
         }
-        Ok(())
     }
 
     #[allow(dead_code)]
@@ -53,10 +52,8 @@ impl RawTracee {
                 self.pid,
                 ptr::null_mut::<libc::c_void>(),
                 0usize
-            ))?;
+            ))
         }
-        self.wait()?;
-        Ok(())
     }
 
     fn detach(&self) -> io::Result<()> {
@@ -125,6 +122,7 @@ pub struct Tracee {
     mem: fs::File,
     registers: arch::Registers,
     instrs: [u8; arch::INSTRUCTIONS.len()],
+    instrs_addr: u64,
 }
 
 impl Tracee {
@@ -142,19 +140,21 @@ impl Tracee {
         // Save remote registers
         let mut registers = bytemuck::Zeroable::zeroed();
         raw.get_registers(&mut registers)?;
-        let ip = registers.instruction_pointer();
 
-        // Save current instructions and replace them with an indirect call and
-        // a trap
+        // Save instructions and replace them with an indirect call and a trap
+        // We don't take current instructions as they may called by our payload
+        // (eg some syscall from libc).
+        let instrs_addr = super::find_lib(pid, "/")?;
         let mut instrs = [0; arch::INSTRUCTIONS.len()];
-        mem.read_exact_at(&mut instrs, ip)?;
-        mem.write_all_at(&arch::INSTRUCTIONS, ip)?;
+        mem.read_exact_at(&mut instrs, instrs_addr)?;
+        mem.write_all_at(&arch::INSTRUCTIONS, instrs_addr)?;
 
         Ok(Self {
             raw,
             mem,
             registers,
             instrs,
+            instrs_addr,
         })
     }
 
@@ -167,11 +167,18 @@ impl Tracee {
     }
 
     fn do_funcall(&self, registers: &mut arch::Registers) -> IceResult<u64> {
-        registers.move_stack(0x100);
+        registers.move_stack();
+        registers.set_instruction_pointer(self.instrs_addr);
         self.raw.set_registers(registers)?;
         self.raw.continu()?;
         self.raw.wait()?;
         self.raw.get_registers(registers)?;
+
+        let ip = registers.instruction_pointer();
+        if ip != self.instrs_addr + arch::INSTRUCTIONS.len() as u64 {
+            return Err(IceError::new(format!("unexpected return address: {ip:#x}")));
+        }
+
         Ok(registers.return_value())
     }
 
@@ -213,8 +220,7 @@ impl Drop for Tracee {
     fn drop(&mut self) {
         // Restore modified data
         let res: IceResult<()> = (|| {
-            let ip = self.registers.instruction_pointer();
-            self.poke_data(ip, &self.instrs)?;
+            self.poke_data(self.instrs_addr, &self.instrs)?;
             self.raw.set_registers(&self.registers)?;
             Ok(())
         })();

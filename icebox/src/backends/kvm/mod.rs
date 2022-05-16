@@ -161,7 +161,7 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
     let _do_dlclose = OnDrop(|| {
         // dlclose(handle);
         match tracee.funcall1(their_dlclose, handle) {
-            Ok(0) => (),
+            Ok(0) => log::trace!("dlclose"),
             Ok(_) => {
                 let err = get_dlerror(&tracee, their_dlerror);
                 log::error!("Remote dlclose failed: {err}");

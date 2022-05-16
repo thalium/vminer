@@ -18,8 +18,13 @@ impl Registers {
         self.0.rip
     }
 
-    pub fn move_stack(&mut self, amount: u64) {
-        self.0.rsp -= amount;
+    pub fn set_instruction_pointer(&mut self, addr: u64) {
+        self.0.rip = addr;
+    }
+
+    pub fn move_stack(&mut self) {
+        self.0.rsp -= 0x100;
+        self.0.rsp &= !0xf;
     }
 
     pub fn prepare_funcall0(&mut self, addr: u64) {
