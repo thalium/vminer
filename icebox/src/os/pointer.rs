@@ -146,6 +146,10 @@ impl<T, Ctx: Context> Pointer<T, Ctx> {
         F: FnOnce(&T) -> StructOffset<U>,
         Ctx: HasLayout<T>,
     {
+        if self.addr.is_null() {
+            return Err(ibc::IceError::deref_null_ptr());
+        }
+
         let offset = get_offset(self.ctx.get_layout()).offset;
         Ok(Pointer::new(self.addr + offset, self.ctx))
     }
@@ -157,6 +161,10 @@ impl<T, Ctx: Context> Pointer<T, Ctx> {
         U: Readable,
         Ctx: HasLayout<T>,
     {
+        if self.addr.is_null() {
+            return Err(ibc::IceError::deref_null_ptr());
+        }
+
         let offset = get_offset(self.ctx.get_layout()).offset;
         U::read(self.ctx, self.addr + offset)
     }
@@ -167,6 +175,10 @@ impl<T, Ctx: Context> Pointer<T, Ctx> {
         F: FnOnce(&T) -> StructOffset<Pointer<U>>,
         Ctx: HasLayout<T>,
     {
+        if self.addr.is_null() {
+            return Err(ibc::IceError::deref_null_ptr());
+        }
+
         let offset = get_offset(self.ctx.get_layout()).offset;
         let addr = VirtualAddress::read(self.ctx, self.addr + offset)?;
         Ok(Pointer::new(addr, self.ctx))
