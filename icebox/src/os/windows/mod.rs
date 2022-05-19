@@ -50,7 +50,11 @@ pointer_defs! {
 
 impl<'a, T, B: Backend> Pointer<T, &'a Windows<B>> {
     fn switch_to_userspace(self, proc: ibc::Process) -> IceResult<Pointer<T, ProcSpace<'a, B>>> {
-        let pgd = self.ctx.process_pgd(proc)?;
+        let pgd = if proc.0.is_null() {
+            self.ctx.kernel_pgd()
+        } else {
+            self.ctx.process_pgd(proc)?
+        };
         let proc_space = ProcSpace { os: self.ctx, pgd };
         Ok(self.switch_context(proc_space))
     }
@@ -318,6 +322,17 @@ impl<B: Backend> Windows<B> {
     fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr, &Self>> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
         Ok(Pointer::new(per_cpu, self))
+    }
+
+    pub fn for_each_kernel_module(
+        &self,
+        mut f: impl FnMut(ibc::Module) -> IceResult<()>,
+    ) -> IceResult<()> {
+        let head = self.base_addr + self.profile.fast_syms.PsLoadedModuleList;
+        let head: Pointer<profile::ListEntry<profile::LdrDataTableEntry>, _> =
+            Pointer::new(head, self);
+
+        head.iterate_list(|entry| entry.InLoadOrderLinks, |module| f(module.into()))
     }
 }
 

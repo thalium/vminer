@@ -6,6 +6,7 @@ use ibc::{IceResult, PhysicalAddress, VirtualAddress};
 
 pub(crate) struct FastSymbols {
     pub PsActiveProcessHead: u64,
+    pub PsLoadedModuleList: u64,
 }
 
 macro_rules! types {
@@ -236,11 +237,13 @@ impl Profile {
         let kernel = syms.get_lib("ntkrnlmp.pdb")?;
         let layouts = Layouts::new(&kernel)?;
         let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;
+        let PsLoadedModuleList = kernel.get_address("PsLoadedModuleList")?.0;
 
         Ok(Self {
             syms,
             fast_syms: FastSymbols {
                 PsActiveProcessHead,
+                PsLoadedModuleList,
             },
             layouts,
         })
