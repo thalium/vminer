@@ -26,15 +26,17 @@ struct RuntimeFunction {
 
 #[derive(Debug)]
 struct FunctionEntry {
-    start: u32,
-    end: u32,
+    runtime_function: RuntimeFunction,
     stack_frame_size: u32,
+    fp_offset: Option<u32>,
+    frame_register_offset: Option<u8>,
+    machframe_offset: Option<u32>,
     mother: Option<RuntimeFunction>,
 }
 
 impl FunctionEntry {
     fn contains(&self, addr: u32) -> bool {
-        self.start <= addr && addr < self.end
+        self.runtime_function.start <= addr && addr < self.runtime_function.end
     }
 }
 
@@ -50,7 +52,10 @@ impl UnwindData {
     }
 
     fn find_by_offset(&self, offset: u32) -> Option<&FunctionEntry> {
-        match self.functions.binary_search_by_key(&offset, |e| e.start) {
+        match self
+            .functions
+            .binary_search_by_key(&offset, |e| e.runtime_function.start)
+        {
             Ok(index) => Some(&self.functions[index]),
             Err(index) => {
                 let function = &self.functions[index.checked_sub(1)?];
@@ -131,13 +136,39 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             Ok(())
         })?;
 
+        windows.for_each_kernel_module(|module| {
+            let proc = ibc::Process(VirtualAddress(0));
+            let (start, end) = windows.module_span(module, proc)?;
+            let vma = ibc::Vma(VirtualAddress(0));
+            vmas.push(Vma {
+                start,
+                end,
+                vma,
+                unwind_data: OnceCell::new(),
+            });
+            Ok(())
+        })?;
+
+        vmas.sort_unstable_by_key(|v| v.start);
+
+        // println!("{:#x?}", vmas);
+
         Ok(Self { windows, pgd, vmas })
+    }
+
+    fn pgd_for(&self, addr: VirtualAddress) -> ibc::PhysicalAddress {
+        if addr.is_kernel() {
+            self.windows.kpgd
+        } else {
+            self.pgd
+        }
     }
 
     fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
         let mut value = bytemuck::Zeroable::zeroed();
+        let pgd = self.pgd_for(addr);
         self.windows
-            .read_virtual_memory(self.pgd, addr, bytemuck::bytes_of_mut(&mut value))?;
+            .read_virtual_memory(pgd, addr, bytemuck::bytes_of_mut(&mut value))?;
         Ok(value)
     }
 
@@ -156,8 +187,16 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             .get_or_try_init(|| self.init_unwind_data(vma))
     }
 
-    fn parse_unwind_codes(&self, mut codes: &[u8], version: u8) -> Option<u32> {
+    fn parse_unwind_codes(
+        &self,
+        mut codes: &[u8],
+        version: u8,
+    ) -> Option<(u32, Option<u32>, Option<u32>)> {
+        const RSP: u8 = 5;
+
         let mut stack_frame_size = 0;
+        let mut fp_offset = None;
+        let mut machframe_offset = None;
 
         let codes = &mut codes;
 
@@ -171,8 +210,12 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             let op_info = op >> 4;
 
             match op_code {
-                UWOP_PUSH_NONVOL => stack_frame_size += 8,
-
+                UWOP_PUSH_NONVOL => {
+                    if op_info == RSP {
+                        fp_offset = Some(stack_frame_size);
+                    }
+                    stack_frame_size += 8;
+                }
                 UWOP_ALLOC_LARGE => match op_info {
                     0 => stack_frame_size += read_u16(codes)? as u32 * 8,
                     1 => stack_frame_size += read_u32(codes)?,
@@ -181,10 +224,16 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 UWOP_ALLOC_SMALL => stack_frame_size += op_info as u32 * 8 + 8,
                 UWOP_SET_FPREG => (),
                 UWOP_SAVE_NONVOL => {
-                    read_u16(codes)?;
+                    let offset = read_u16(codes)? as u32 * 8;
+                    if op_info == RSP {
+                        fp_offset = Some(offset);
+                    }
                 }
                 UWOP_SAVE_NONVOL_FAR => {
-                    read_u32(codes)?;
+                    let offset = read_u32(codes)?;
+                    if op_info == RSP {
+                        fp_offset = Some(offset);
+                    }
                 }
                 UWOP_EPILOG if version == 2 => {
                     // TODO: Handle this better. There is very few documentation
@@ -197,17 +246,21 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 UWOP_SAVE_XMM128_FAR => {
                     read_u32(codes)?;
                 }
-                UWOP_PUSH_MACHFRAME => match op_info {
-                    0 => stack_frame_size += 0x28,
-                    1 => stack_frame_size += 0x30,
-                    _ => return None,
-                },
+                UWOP_PUSH_MACHFRAME => {
+                    match op_info {
+                        0 => stack_frame_size += 0,
+                        1 => stack_frame_size += 8,
+                        _ => return None,
+                    }
+                    machframe_offset = Some(stack_frame_size);
+                    stack_frame_size += 28;
+                }
 
                 _ => return None,
             }
         }
 
-        Some(stack_frame_size)
+        Some((stack_frame_size, fp_offset, machframe_offset))
     }
 
     fn parse_directory_range(
@@ -233,12 +286,13 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             let is_chained = version_flags & 0x20 != 0;
             let _prolog_size = read_u8(unwind_data)?;
             let unwind_code_count = read_u8(unwind_data)?;
+
             let frame_infos = read_u8(unwind_data)?;
-            let _frame_register = (frame_infos & 0x0f) as u32;
-            let _frame_register_offset = (frame_infos & 0xf0) as u32;
+            let frame_register = frame_infos & 0x0f;
+            let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
 
             let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
-            let stack_frame_size = self
+            let (stack_frame_size, fp_offset, machframe_offset) = self
                 .parse_unwind_codes(unwind_codes, version)
                 .expect("bad unwind");
 
@@ -250,9 +304,11 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             };
 
             entries.push(FunctionEntry {
-                start: runtime_function.start,
-                end: runtime_function.end,
+                runtime_function,
                 stack_frame_size,
+                fp_offset,
+                frame_register_offset,
+                machframe_offset,
                 mother,
             });
         }
@@ -261,8 +317,9 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
 
     fn init_unwind_data(&self, vma: &Vma) -> IceResult<UnwindData> {
         let mut content = vec![0; (vma.end - vma.start) as usize];
+        let pgd = self.pgd_for(vma.start);
         self.windows
-            .try_read_virtual_memory(self.pgd, vma.start, &mut content)?;
+            .try_read_virtual_memory(pgd, vma.start, &mut content)?;
 
         let pe = object::read::pe::PeFile64::parse(&*content).context("failed to parse PE")?;
         let directory = pe
@@ -315,7 +372,7 @@ impl<B: Backend> Windows<B> {
         f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<()>,
         instruction_pointer: VirtualAddress,
         stack_pointer: VirtualAddress,
-        _base_pointer: Option<VirtualAddress>,
+        mut base_pointer: Option<VirtualAddress>,
     ) -> IceResult<()> {
         let ctx = Context::new(self, proc)?;
 
@@ -329,9 +386,15 @@ impl<B: Backend> Windows<B> {
         };
 
         loop {
-            if frame.instruction_pointer.is_kernel() {
-                return Err(IceError::new("encountered kernel IP"));
-            }
+            // println!("\n--- IP: {:#x} ---", frame.instruction_pointer);
+
+            // println!("Stack pointer: {:#x}", frame.stack_pointer);
+
+            // let stack: IceResult<[u64; 64]> = ctx.read_value(frame.stack_pointer);
+            // println!("Stack: {stack:#x?}");
+
+            // let instrs: [u8; 1024] = ctx.read_value(frame.instruction_pointer - 256)?;
+            // println!("{instrs:?}");
 
             // Where are we ?
             let vma = ctx
@@ -346,18 +409,41 @@ impl<B: Backend> Windows<B> {
 
             // Move stack pointer to the upper frame
             let caller_sp = match function {
-                Some(function) => {
-                    let mut sp = frame.stack_pointer + function.stack_frame_size as u64;
+                Some(mut function) => {
+                    let frame_pointer = match function.frame_register_offset {
+                        None => frame.stack_pointer,
+                        Some(offset) => {
+                            base_pointer.context("missing required frame pointer")? - offset as u64
+                        }
+                    };
 
-                    if let Some(mother) = function.mother {
-                        let mother = unwind_data
-                            .find_by_offset(mother.start)
-                            .context("cannot find mother function")?;
-
-                        sp += mother.stack_frame_size as u64;
+                    if let Some(offset) = function.machframe_offset {
+                        let machinst = frame_pointer + offset;
+                        frame.instruction_pointer = ctx.read_value(machinst)?;
+                        frame.stack_pointer = ctx.read_value(machinst + 0x18)?;
+                        base_pointer = None;
+                        continue;
                     }
 
-                    sp
+                    if let Some(offset) = function.fp_offset {
+                        base_pointer = Some(ctx.read_value(frame_pointer + offset)?);
+                    }
+
+                    let mut next_sp = frame_pointer;
+                    loop {
+                        next_sp += function.stack_frame_size as u64;
+
+                        match function.mother {
+                            Some(mother) => {
+                                function = unwind_data
+                                    .find_by_offset(mother.start)
+                                    .context("cannot find mother function")?;
+                            }
+                            None => break,
+                        }
+                    }
+
+                    next_sp
                 }
 
                 // This is a leaf function
