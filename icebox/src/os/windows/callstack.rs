@@ -386,16 +386,6 @@ impl<B: Backend> Windows<B> {
         };
 
         loop {
-            // println!("\n--- IP: {:#x} ---", frame.instruction_pointer);
-
-            // println!("Stack pointer: {:#x}", frame.stack_pointer);
-
-            // let stack: IceResult<[u64; 64]> = ctx.read_value(frame.stack_pointer);
-            // println!("Stack: {stack:#x?}");
-
-            // let instrs: [u8; 1024] = ctx.read_value(frame.instruction_pointer - 256)?;
-            // println!("{instrs:?}");
-
             // Where are we ?
             let vma = ctx
                 .find_vma_by_address(frame.instruction_pointer)
@@ -421,16 +411,15 @@ impl<B: Backend> Windows<B> {
                         let machinst = frame_pointer + offset;
                         frame.instruction_pointer = ctx.read_value(machinst)?;
                         frame.stack_pointer = ctx.read_value(machinst + 0x18)?;
-                        base_pointer = None;
                         continue;
-                    }
-
-                    if let Some(offset) = function.fp_offset {
-                        base_pointer = Some(ctx.read_value(frame_pointer + offset)?);
                     }
 
                     let mut next_sp = frame_pointer;
                     loop {
+                        if let Some(offset) = function.fp_offset {
+                            base_pointer = Some(ctx.read_value(frame_pointer + offset)?);
+                        }
+
                         next_sp += function.stack_frame_size as u64;
 
                         match function.mother {
