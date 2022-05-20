@@ -37,6 +37,7 @@ impl<B: ice::Backend> Context for &Linux<B> {
 }
 
 pointer_defs! {
+    ibc::Module = profile::VmAreaStruct;
     ibc::Path = profile::Path;
     ibc::Process = profile::TaskStruct;
     ibc::Thread = profile::TaskStruct;
@@ -84,6 +85,10 @@ where
             parent.build_path(buf)?;
         }
 
+        self._read_file_name(buf)
+    }
+
+    fn _read_file_name(self, buf: &mut Vec<u8>) -> IceResult<()> {
         let qstr = self.field(|d| d.d_name)?;
         let name = qstr.read_field(|qstr| qstr.name)?;
 
@@ -102,6 +107,25 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<Ctx> Pointer<profile::Path, Ctx>
+where
+    Ctx: HasLayout<profile::Path> + HasLayout<profile::Dentry> + HasLayout<profile::Qstr>,
+{
+    fn read_file_name(self) -> IceResult<String> {
+        let mut buf = Vec::new();
+        self.read_pointer_field(|p| p.dentry)?
+            ._read_file_name(&mut buf)?;
+        String::from_utf8(buf).map_err(IceError::new)
+    }
+
+    fn read_file_path(self) -> IceResult<String> {
+        let mut buf = Vec::new();
+        self.read_pointer_field(|p| p.dentry)?
+            .build_path(&mut buf)?;
+        String::from_utf8(buf).map_err(IceError::new)
     }
 }
 
@@ -380,10 +404,16 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn process_for_each_module(
         &self,
-        _proc: ibc::Process,
-        _f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
     ) -> IceResult<()> {
-        Err(IceError::unimplemented())
+        self.process_for_each_vma(proc, &mut |vma| {
+            if self.vma_offset(vma)? == 0 && self.vma_file(vma)?.is_some() {
+                f(ibc::Module(vma.0))
+            } else {
+                Ok(())
+            }
+        })
     }
 
     fn process_callstack(
@@ -405,11 +435,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn path_to_string(&self, path: ice::Path) -> IceResult<String> {
-        let mut buf = Vec::new();
-        self.pointer_of(path)
-            .read_pointer_field(|p| p.dentry)?
-            .build_path(&mut buf)?;
-        String::from_utf8(buf).map_err(ice::IceError::new)
+        self.pointer_of(path).read_file_path()
     }
 
     fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<ibc::Path>> {
@@ -442,18 +468,40 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn module_span(
         &self,
-        _module: ibc::Module,
+        module: ibc::Module,
         _proc: ibc::Process,
     ) -> IceResult<(VirtualAddress, VirtualAddress)> {
-        Err(IceError::unimplemented())
+        let module = self.pointer_of(module);
+
+        let file = module.read_pointer_field(|vma| vma.vm_file)?;
+        let start = module.read_field(|vma| vma.vm_start)?;
+
+        let mut current = module;
+
+        loop {
+            let next = current.read_pointer_field(|vma| vma.vm_next)?;
+
+            if next.is_null() || next.read_pointer_field(|vma| vma.vm_file)? != file {
+                let end = current.read_field(|vma| vma.vm_end)?;
+                break Ok((start, end));
+            }
+
+            current = next;
+        }
     }
 
-    fn module_name(&self, _module: ibc::Module, _proc: ibc::Process) -> IceResult<String> {
-        Err(IceError::unimplemented())
+    fn module_name(&self, module: ibc::Module, _proc: ibc::Process) -> IceResult<String> {
+        self.pointer_of(module)
+            .read_pointer_field(|vma| vma.vm_file)?
+            .field(|file| file.f_path)?
+            .read_file_name()
     }
 
-    fn module_path(&self, _module: ibc::Module, _proc: ibc::Process) -> IceResult<String> {
-        Err(IceError::unimplemented())
+    fn module_path(&self, module: ibc::Module, _proc: ibc::Process) -> IceResult<String> {
+        self.pointer_of(module)
+            .read_pointer_field(|vma| vma.vm_file)?
+            .field(|file| file.f_path)?
+            .read_file_path()
     }
 
     fn resolve_symbol_exact(
