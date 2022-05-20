@@ -136,7 +136,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             Ok(())
         })?;
 
-        windows.for_each_kernel_module(|module| {
+        windows.for_each_kernel_module(&mut |module| {
             let proc = ibc::Process(VirtualAddress(0));
             let (start, end) = windows.module_span(module, proc)?;
             let vma = ibc::Vma(VirtualAddress(0));

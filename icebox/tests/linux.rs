@@ -221,13 +221,13 @@ fn callstack(arch: Arch) {
             let (start, size, symbol) = match range {
                 Some((start, end)) => {
                     let symbol = linux
-                        .resolve_symbol_exact(start, proc, frame.vma)?
+                        .resolve_symbol_exact(start, proc)?
                         .map(|sym| ibc::symbols::demangle(sym).into_owned());
                     (Some(start), Some(end), symbol)
                 }
                 None => {
                     let symbol = linux
-                        .resolve_symbol(instruction_pointer, proc, frame.vma)?
+                        .resolve_symbol(instruction_pointer, proc)?
                         .map(|(sym, _)| ibc::symbols::demangle(sym).into_owned());
                     (None, None, symbol)
                 }

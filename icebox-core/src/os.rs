@@ -82,6 +82,8 @@ pub trait Os {
 
     fn kernel_pgd(&self) -> PhysicalAddress;
 
+    fn for_each_kernel_module(&self, f: &mut dyn FnMut(Module) -> IceResult<()>) -> IceResult<()>;
+
     fn init_process(&self) -> IceResult<Process>;
     fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
     fn current_process(&self, cpuid: usize) -> IceResult<Process> {
@@ -204,19 +206,70 @@ pub trait Os {
         module: Module,
         proc: Process,
     ) -> IceResult<(VirtualAddress, VirtualAddress)>;
+
+    #[inline]
+    fn module_contains(
+        &self,
+        module: Module,
+        proc: Process,
+        addr: VirtualAddress,
+    ) -> IceResult<bool> {
+        let (start, end) = self.module_span(module, proc)?;
+        Ok((start..end).contains(&addr))
+    }
     fn module_name(&self, module: Module, proc: Process) -> IceResult<String>;
     fn module_path(&self, module: Module, proc: Process) -> IceResult<String>;
+    fn find_module_by_address(
+        &self,
+        proc: Process,
+        addr: VirtualAddress,
+    ) -> IceResult<Option<Module>> {
+        let mut result = None;
 
-    fn resolve_symbol_exact(
+        let mut find = |module| {
+            if self.module_contains(module, proc, addr)? {
+                result = Some(module);
+            }
+            Ok(())
+        };
+
+        if addr.is_kernel() {
+            self.for_each_kernel_module(&mut find)?;
+        } else {
+            self.process_for_each_module(proc, &mut find)?;
+        }
+
+        Ok(result)
+    }
+
+    fn module_resolve_symbol_exact(
         &self,
         addr: VirtualAddress,
         proc: Process,
-        vma: Vma,
+        module: Module,
     ) -> IceResult<Option<&str>>;
+    fn module_resolve_symbol(
+        &self,
+        addr: VirtualAddress,
+        proc: Process,
+        module: Module,
+    ) -> IceResult<Option<(&str, u64)>>;
+
+    fn resolve_symbol_exact(&self, addr: VirtualAddress, proc: Process) -> IceResult<Option<&str>> {
+        match self.find_module_by_address(proc, addr)? {
+            Some(module) => self.module_resolve_symbol_exact(addr, proc, module),
+            None => Ok(None),
+        }
+    }
+
     fn resolve_symbol(
         &self,
         addr: VirtualAddress,
         proc: Process,
-        vma: Vma,
-    ) -> IceResult<Option<(&str, u64)>>;
+    ) -> IceResult<Option<(&str, u64)>> {
+        match self.find_module_by_address(proc, addr)? {
+            Some(module) => self.module_resolve_symbol(addr, proc, module),
+            None => Ok(None),
+        }
+    }
 }

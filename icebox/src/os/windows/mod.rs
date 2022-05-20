@@ -22,7 +22,11 @@ impl<B: Backend> Copy for ProcSpace<'_, B> {}
 impl<B: Backend> Context for ProcSpace<'_, B> {
     #[inline]
     fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        self.os.read_virtual_memory(self.pgd, addr, buf)
+        if addr.is_kernel() {
+            self.os.read_virtual_memory(self.os.kernel_pgd(), addr, buf)
+        } else {
+            self.os.read_virtual_memory(self.pgd, addr, buf)
+        }
     }
 }
 
@@ -50,11 +54,7 @@ pointer_defs! {
 
 impl<'a, T, B: Backend> Pointer<T, &'a Windows<B>> {
     fn switch_to_userspace(self, proc: ibc::Process) -> IceResult<Pointer<T, ProcSpace<'a, B>>> {
-        let pgd = if proc.0.is_null() {
-            self.ctx.kernel_pgd()
-        } else {
-            self.ctx.process_pgd(proc)?
-        };
+        let pgd = self.ctx.process_pgd(proc)?;
         let proc_space = ProcSpace { os: self.ctx, pgd };
         Ok(self.switch_context(proc_space))
     }
@@ -323,17 +323,6 @@ impl<B: Backend> Windows<B> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
         Ok(Pointer::new(per_cpu, self))
     }
-
-    pub fn for_each_kernel_module(
-        &self,
-        mut f: impl FnMut(ibc::Module) -> IceResult<()>,
-    ) -> IceResult<()> {
-        let head = self.base_addr + self.profile.fast_syms.PsLoadedModuleList;
-        let head: Pointer<profile::ListEntry<profile::LdrDataTableEntry>, _> =
-            Pointer::new(head, self);
-
-        head.iterate_list(|entry| entry.InLoadOrderLinks, |module| f(module.into()))
-    }
 }
 
 impl<B: Backend> ibc::Os for Windows<B> {
@@ -370,6 +359,17 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Err(ibc::IceError::unimplemented())
     }
 
+    fn for_each_kernel_module(
+        &self,
+        f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+    ) -> IceResult<()> {
+        let head = self.base_addr + self.profile.fast_syms.PsLoadedModuleList;
+        let head: Pointer<profile::ListEntry<profile::LdrDataTableEntry>, _> =
+            Pointer::new(head, self);
+
+        head.iterate_list(|entry| entry.InLoadOrderLinks, |module| f(module.into()))
+    }
+
     fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
         let thread = self
             .kpcr(cpuid)?
@@ -401,6 +401,10 @@ impl<B: Backend> ibc::Os for Windows<B> {
     }
 
     fn process_pgd(&self, proc: ibc::Process) -> IceResult<ibc::PhysicalAddress> {
+        if proc.0.is_null() {
+            return Ok(self.kpgd);
+        }
+
         let kproc = self.pointer_of(proc).field(|eproc| eproc.Pcb)?;
 
         let dtb = kproc.read_field(|kproc| kproc.UserDirectoryTableBase)?;
@@ -570,21 +574,24 @@ impl<B: Backend> ibc::Os for Windows<B> {
             .read_unicode_string()
     }
 
-    fn resolve_symbol_exact(
+    fn module_resolve_symbol_exact(
         &self,
         addr: VirtualAddress,
         proc: ibc::Process,
-        vma: ibc::Vma,
+        module: ibc::Module,
     ) -> IceResult<Option<&str>> {
-        let vma_start = self.vma_start(vma)?;
-        let vma_end = self.vma_end(vma)?;
-        if !(vma_start..vma_end).contains(&addr) {
-            return Err(IceError::new("address not in VMA"));
+        let (mod_start, mod_end) = self.module_span(module, proc)?;
+        if !(mod_start..mod_end).contains(&addr) {
+            return Err(IceError::new("address not in module"));
         }
 
-        let pgd = self.process_pgd(proc)?;
+        let pgd = if addr.is_kernel() {
+            self.kernel_pgd()
+        } else {
+            self.process_pgd(proc)?
+        };
 
-        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, vma_start, &mut Vec::new())?;
+        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, mod_start, &mut Vec::new())?;
         let codeview = match codeview {
             Some(codeview) => codeview,
             None => return Ok(None),
@@ -592,28 +599,31 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
         match self.profile.syms.get_lib(codeview.name().unwrap()) {
             Ok(lib) => {
-                let addr = VirtualAddress((addr - vma_start) as u64);
+                let addr = VirtualAddress((addr - mod_start) as u64);
                 Ok(lib.get_symbol(addr))
             }
             Err(_) => Ok(None),
         }
     }
 
-    fn resolve_symbol(
+    fn module_resolve_symbol(
         &self,
         addr: VirtualAddress,
         proc: ibc::Process,
-        vma: ibc::Vma,
+        module: ibc::Module,
     ) -> IceResult<Option<(&str, u64)>> {
-        let vma_start = self.vma_start(vma)?;
-        let vma_end = self.vma_end(vma)?;
-        if !(vma_start..vma_end).contains(&addr) {
-            return Err(IceError::new("address not in VMA"));
+        let (mod_start, mod_end) = self.module_span(module, proc)?;
+        if !(mod_start..mod_end).contains(&addr) {
+            return Err(IceError::new("address not in module"));
         }
 
-        let pgd = self.process_pgd(proc)?;
+        let pgd = if addr.is_kernel() {
+            self.kernel_pgd()
+        } else {
+            self.process_pgd(proc)?
+        };
 
-        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, vma_start, &mut Vec::new())?;
+        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, mod_start, &mut Vec::new())?;
         let codeview = match codeview {
             Some(codeview) => codeview,
             None => return Ok(None),
@@ -621,7 +631,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
         match self.profile.syms.get_lib(codeview.name().unwrap()) {
             Ok(lib) => {
-                let addr = VirtualAddress((addr - vma_start) as u64);
+                let addr = VirtualAddress((addr - mod_start) as u64);
                 Ok(lib.get_symbol_inexact(addr))
             }
             Err(_) => Ok(None),

@@ -244,6 +244,13 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         self.kpgd
     }
 
+    fn for_each_kernel_module(
+        &self,
+        _f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+    ) -> IceResult<()> {
+        Ok(())
+    }
+
     fn init_process(&self) -> IceResult<ibc::Process> {
         Ok(ibc::Process(self.profile.fast_syms.init_task + self.kaslr))
     }
@@ -504,56 +511,36 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             .read_file_path()
     }
 
-    fn resolve_symbol_exact(
+    fn module_resolve_symbol_exact(
         &self,
         addr: VirtualAddress,
-        _proc: ibc::Process,
-        vma: ibc::Vma,
+        proc: ibc::Process,
+        module: ibc::Module,
     ) -> IceResult<Option<&str>> {
-        let vma_start = self.vma_start(vma)?;
-        let vma_end = self.vma_end(vma)?;
-        if !(vma_start..vma_end).contains(&addr) {
-            return Err(IceError::new("address not in VMA"));
+        let (mod_start, mod_end) = self.module_span(module, proc)?;
+        if !(mod_start..mod_end).contains(&addr) {
+            return Err(IceError::new("address not in module"));
         }
 
-        let offset = addr - (vma_start - self.vma_offset(vma)?);
-        let addr = VirtualAddress(offset as u64);
-
-        let module = match self.vma_file(vma)? {
-            Some(path) => self.path_to_string(path)?,
-            None => return Ok(None),
-        };
-        let module = match module.rsplit_once('/') {
-            Some((_, module)) => module,
-            None => return Ok(None),
-        };
+        let addr = VirtualAddress((addr - mod_start) as u64);
+        let module = self.module_name(module, proc)?;
 
         Ok(self.find_symbol(&module, addr))
     }
 
-    fn resolve_symbol(
+    fn module_resolve_symbol(
         &self,
         addr: VirtualAddress,
-        _proc: ibc::Process,
-        vma: ibc::Vma,
+        proc: ibc::Process,
+        module: ibc::Module,
     ) -> IceResult<Option<(&str, u64)>> {
-        let vma_start = self.vma_start(vma)?;
-        let vma_end = self.vma_end(vma)?;
-        if !(vma_start..vma_end).contains(&addr) {
-            return Err(IceError::new("address not in VMA"));
+        let (mod_start, mod_end) = self.module_span(module, proc)?;
+        if !(mod_start..mod_end).contains(&addr) {
+            return Err(IceError::new("address not in module"));
         }
 
-        let offset = addr - (vma_start - self.vma_offset(vma)?);
-        let addr = VirtualAddress(offset as u64);
-
-        let module = match self.vma_file(vma)? {
-            Some(path) => self.path_to_string(path)?,
-            None => return Ok(None),
-        };
-        let module = match module.rsplit_once('/') {
-            Some((_, module)) => module,
-            None => return Ok(None),
-        };
+        let addr = VirtualAddress((addr - mod_start) as u64);
+        let module = self.module_name(module, proc)?;
 
         Ok(self.find_symbol_inexact(&module, addr))
     }
