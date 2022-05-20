@@ -131,6 +131,24 @@ impl Add<u64> for VirtualAddress {
     }
 }
 
+impl Add<i32> for VirtualAddress {
+    type Output = VirtualAddress;
+
+    #[inline]
+    fn add(self, rhs: i32) -> Self::Output {
+        self + rhs as i64
+    }
+}
+
+impl Add<u32> for VirtualAddress {
+    type Output = VirtualAddress;
+
+    #[inline]
+    fn add(self, rhs: u32) -> Self::Output {
+        Self(self.0 + rhs as u64)
+    }
+}
+
 impl AddAssign<u64> for VirtualAddress {
     #[inline]
     fn add_assign(&mut self, rhs: u64) {
