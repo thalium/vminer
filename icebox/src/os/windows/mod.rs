@@ -118,6 +118,33 @@ impl<Ctx: HasLayout<profile::RtlBalancedNode>> Pointer<profile::RtlBalancedNode,
 
         Ok(())
     }
+
+    fn _find_in_tree<T, F>(self, f: &mut F) -> IceResult<Option<Pointer<T, Ctx>>>
+    where
+        F: FnMut(Pointer<T, Ctx>) -> IceResult<core::cmp::Ordering>,
+    {
+        let ptr = Pointer::new(self.addr, self.ctx);
+
+        match f(ptr)? {
+            core::cmp::Ordering::Less => {
+                let right = self.read_pointer_field(|node| node.Right)?;
+                if right.is_null() {
+                    Ok(None)
+                } else {
+                    right._find_in_tree(f)
+                }
+            }
+            core::cmp::Ordering::Equal => Ok(Some(ptr)),
+            core::cmp::Ordering::Greater => {
+                let left = self.read_pointer_field(|node| node.Left)?;
+                if left.is_null() {
+                    Ok(None)
+                } else {
+                    left._find_in_tree(f)
+                }
+            }
+        }
+    }
 }
 
 impl<T, Ctx> Pointer<profile::RtlAvlTree<T>, Ctx>
@@ -138,6 +165,21 @@ where
         }
 
         node._iterate_tree(&mut f)
+    }
+
+    fn find_in_tree<O, F>(self, get_offset: O, mut f: F) -> IceResult<Option<Pointer<T, Ctx>>>
+    where
+        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode<T>>,
+        F: FnMut(Pointer<T, Ctx>) -> IceResult<core::cmp::Ordering>,
+    {
+        let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
+        let offset = get_offset(self.ctx.get_layout()).offset;
+
+        if offset != 0 {
+            return Err(IceError::new("Unsupported structure layout"));
+        }
+
+        node._find_in_tree(&mut f)
     }
 }
 
@@ -471,6 +513,31 @@ impl<B: Backend> ibc::Os for Windows<B> {
         self.pointer_of(proc)
             .field(|eproc| eproc.VadRoot)?
             .iterate_tree(|vad| vad.VadNode, |mmvad| f(mmvad.into()))
+    }
+
+    fn process_find_vma_by_address(
+        &self,
+        proc: ibc::Process,
+        addr: VirtualAddress,
+    ) -> IceResult<Option<ibc::Vma>> {
+        let mmvad = self
+            .pointer_of(proc)
+            .field(|eproc| eproc.VadRoot)?
+            .find_in_tree(
+                |vad| vad.VadNode,
+                |mmvad| {
+                    let vma = mmvad.into();
+
+                    Ok(if addr < self.vma_start(vma)? {
+                        std::cmp::Ordering::Greater
+                    } else if addr < self.vma_end(vma)? {
+                        std::cmp::Ordering::Equal
+                    } else {
+                        std::cmp::Ordering::Less
+                    })
+                },
+            )?;
+        Ok(mmvad.map(|m| m.into()))
     }
 
     fn process_for_each_module(
