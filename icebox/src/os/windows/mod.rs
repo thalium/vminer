@@ -3,10 +3,12 @@ use core::{fmt, mem, str};
 use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
 
 mod callstack;
+mod memory;
 mod profile;
 
 struct ProcSpace<'a, B: Backend> {
     os: &'a Windows<B>,
+    proc: ibc::Process,
     pgd: ibc::PhysicalAddress,
 }
 
@@ -25,7 +27,8 @@ impl<B: Backend> Context for ProcSpace<'_, B> {
         if addr.is_kernel() {
             self.os.read_virtual_memory(self.os.kernel_pgd(), addr, buf)
         } else {
-            self.os.read_virtual_memory(self.pgd, addr, buf)
+            self.os
+                .read_virtual_memory_with_proc(self.pgd, self.proc, addr, buf)
         }
     }
 }
@@ -55,7 +58,11 @@ pointer_defs! {
 impl<'a, T, B: Backend> Pointer<T, &'a Windows<B>> {
     fn switch_to_userspace(self, proc: ibc::Process) -> IceResult<Pointer<T, ProcSpace<'a, B>>> {
         let pgd = self.ctx.process_pgd(proc)?;
-        let proc_space = ProcSpace { os: self.ctx, pgd };
+        let proc_space = ProcSpace {
+            os: self.ctx,
+            proc,
+            pgd,
+        };
         Ok(self.switch_context(proc_space))
     }
 }
@@ -183,41 +190,6 @@ where
     }
 }
 
-fn read_virtual_memory<B: Backend>(
-    backend: &B,
-    kpgd: PhysicalAddress,
-    mmu_addr: PhysicalAddress,
-    addr: VirtualAddress,
-    buf: &mut [u8],
-) -> ibc::TranslationResult<()> {
-    let entry = match backend.read_virtual_memory(mmu_addr, addr, buf) {
-        Ok(()) => return Ok(()),
-        Err(ibc::TranslationError::Invalid(entry)) => entry,
-        Err(ibc::TranslationError::Memory(err)) => return Err(err.into()),
-    };
-
-    let offset = addr.0 & ibc::mask(12);
-
-    if entry & (1 << 10) != 0 {
-        let entry: u64 = backend.read_value_virtual(kpgd, VirtualAddress(entry >> 16))?;
-        if entry & 0x1 != 0 {
-            let addr_base = PhysicalAddress(entry & ibc::mask_range(12, 48));
-            backend.read_memory(addr_base + offset, buf)?;
-            return Ok(());
-        } else if entry & (1 << 10) == 0 && entry & (1 << 11) != 0 {
-            let addr_base = PhysicalAddress(entry & ibc::mask_range(12, 40));
-            backend.read_memory(addr_base + offset, buf)?;
-            return Ok(());
-        }
-    } else if entry & (1 << 11) != 0 {
-        let addr_base = PhysicalAddress(entry & ibc::mask_range(12, 40));
-        backend.read_memory(addr_base + offset, buf)?;
-        return Ok(());
-    }
-
-    Err(ibc::TranslationError::Invalid(entry))
-}
-
 const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
 
 pub struct Windows<B> {
@@ -225,6 +197,8 @@ pub struct Windows<B> {
     kpgd: PhysicalAddress,
     base_addr: VirtualAddress,
     profile: profile::Profile,
+
+    unswizzle_mask: u64,
 }
 
 #[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
@@ -273,15 +247,16 @@ impl Codeview {
     }
 }
 
-fn pe_get_pdb_guid<B: Backend>(
-    backend: &B,
-    kpgd: PhysicalAddress,
-    pgd: PhysicalAddress,
+fn pe_get_pdb_guid<E>(
     addr: VirtualAddress,
     buf: &mut Vec<u8>,
-) -> IceResult<Option<Codeview>> {
+    try_read_memory: impl Fn(VirtualAddress, &mut [u8]) -> Result<(), E>,
+) -> IceResult<Option<Codeview>>
+where
+    IceError: From<E>,
+{
     buf.resize(0x1000, 0);
-    read_virtual_memory(backend, kpgd, pgd, addr, buf)?;
+    try_read_memory(addr, buf)?;
 
     if !buf.starts_with(b"MZ") {
         return Ok(None);
@@ -295,9 +270,7 @@ fn pe_get_pdb_guid<B: Backend>(
         .get(object::endian::LittleEndian) as usize;
     buf.resize(size, 0);
 
-    ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
-        read_virtual_memory(backend, kpgd, pgd, addr, buf)
-    })?;
+    try_read_memory(addr, buf)?;
 
     let mut codeview: Codeview = bytemuck::Zeroable::zeroed();
     for index in memchr::memmem::find_iter(&buf, b"RSDS") {
@@ -323,7 +296,12 @@ fn find_kernel<B: Backend>(
         .map_while(|addr| addr.ok())
         .filter(|addr| addr.0 & 0xfff == 0)
     {
-        if let Ok(Some(codeview)) = pe_get_pdb_guid(backend, kpgd, kpgd, addr, &mut buf) {
+        let codeview = pe_get_pdb_guid(addr, &mut buf, |addr, buf| {
+            ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
+                backend.read_virtual_memory(kpgd, addr, buf)
+            })
+        });
+        if let Ok(Some(codeview)) = codeview {
             if &codeview.name[..KERNEL_PDB.len()] == KERNEL_PDB {
                 return Ok(Some((codeview.pdb_id(), addr)));
             }
@@ -340,11 +318,18 @@ impl<B: Backend> Windows<B> {
         let (pdb_id, base_addr) =
             find_kernel(&backend, kpgd)?.context("failed to find kernel data")?;
         log::info!("Found kernel at 0x{base_addr:x} (PDB: {pdb_id})");
+
+        let bits = base_addr + profile.fast_syms.KiImplementedPhysicalBits;
+        let bits: u64 = backend.read_value_virtual(kpgd, bits)?;
+        let unswizzle_mask = !(1 << (bits - 1));
+
         let this = Self {
             backend,
             kpgd,
             base_addr,
             profile,
+
+            unswizzle_mask,
         };
 
         Ok(this)
@@ -365,6 +350,32 @@ impl<B: Backend> Windows<B> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
         Ok(Pointer::new(per_cpu, self))
     }
+
+    fn read_virtual_memory_with_proc(
+        &self,
+        mmu_addr: PhysicalAddress,
+        proc: ibc::Process,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::read_virtual_memory(addr, buf, |addr, buf| {
+            self.read_virtual_memory_raw(mmu_addr, addr, buf, Some(proc))
+        })?;
+        Ok(())
+    }
+
+    fn try_read_virtual_memory_with_proc(
+        &self,
+        mmu_addr: PhysicalAddress,
+        proc: ibc::Process,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
+            self.read_virtual_memory_raw(mmu_addr, addr, buf, Some(proc))
+        })?;
+        Ok(())
+    }
 }
 
 impl<B: Backend> ibc::Os for Windows<B> {
@@ -375,7 +386,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         buf: &mut [u8],
     ) -> IceResult<()> {
         ibc::read_virtual_memory(addr, buf, |addr, buf| {
-            read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
+            self.read_virtual_memory_raw(mmu_addr, addr, buf, None)
         })?;
         Ok(())
     }
@@ -387,7 +398,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         buf: &mut [u8],
     ) -> IceResult<()> {
         ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
-            read_virtual_memory(&self.backend, self.kpgd, mmu_addr, addr, buf)
+            self.read_virtual_memory_raw(mmu_addr, addr, buf, None)
         })?;
         Ok(())
     }
@@ -658,7 +669,9 @@ impl<B: Backend> ibc::Os for Windows<B> {
             self.process_pgd(proc)?
         };
 
-        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, mod_start, &mut Vec::new())?;
+        let codeview = pe_get_pdb_guid(mod_start, &mut Vec::new(), |addr, buf| {
+            self.try_read_virtual_memory_with_proc(pgd, proc, addr, buf)
+        })?;
         let codeview = match codeview {
             Some(codeview) => codeview,
             None => return Ok(None),
@@ -690,7 +703,9 @@ impl<B: Backend> ibc::Os for Windows<B> {
             self.process_pgd(proc)?
         };
 
-        let codeview = pe_get_pdb_guid(&self.backend, self.kpgd, pgd, mod_start, &mut Vec::new())?;
+        let codeview = pe_get_pdb_guid(mod_start, &mut Vec::new(), |addr, buf| {
+            self.try_read_virtual_memory_with_proc(pgd, proc, addr, buf)
+        })?;
         let codeview = match codeview {
             Some(codeview) => codeview,
             None => return Ok(None),

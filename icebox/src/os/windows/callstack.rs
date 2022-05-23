@@ -115,6 +115,7 @@ const UWOP_PUSH_MACHFRAME: u8 = 10;
 
 struct Context<'a, B: ibc::Backend> {
     windows: &'a super::Windows<B>,
+    proc: ibc::Process,
     pgd: PhysicalAddress,
 
     /// This is sorted by growing address so we can do binary searches
@@ -153,7 +154,12 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
 
         // println!("{:#x?}", vmas);
 
-        Ok(Self { windows, pgd, vmas })
+        Ok(Self {
+            windows,
+            proc,
+            pgd,
+            vmas,
+        })
     }
 
     fn pgd_for(&self, addr: VirtualAddress) -> ibc::PhysicalAddress {
@@ -167,8 +173,12 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
         let mut value = bytemuck::Zeroable::zeroed();
         let pgd = self.pgd_for(addr);
-        self.windows
-            .read_virtual_memory(pgd, addr, bytemuck::bytes_of_mut(&mut value))?;
+        self.windows.read_virtual_memory_with_proc(
+            pgd,
+            self.proc,
+            addr,
+            bytemuck::bytes_of_mut(&mut value),
+        )?;
         Ok(value)
     }
 
@@ -319,7 +329,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         let mut content = vec![0; (vma.end - vma.start) as usize];
         let pgd = self.pgd_for(vma.start);
         self.windows
-            .try_read_virtual_memory(pgd, vma.start, &mut content)?;
+            .try_read_virtual_memory_with_proc(pgd, self.proc, vma.start, &mut content)?;
 
         let pe = object::read::pe::PeFile64::parse(&*content).context("failed to parse PE")?;
         let directory = pe

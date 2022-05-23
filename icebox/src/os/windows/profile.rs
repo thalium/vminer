@@ -5,6 +5,7 @@ use core::marker::PhantomData;
 use ibc::{IceResult, PhysicalAddress, VirtualAddress};
 
 pub(crate) struct FastSymbols {
+    pub KiImplementedPhysicalBits: u64,
     pub PsActiveProcessHead: u64,
     pub PsLoadedModuleList: u64,
 }
@@ -192,6 +193,12 @@ define_structs! {
         VadNode: RtlBalancedNode<MmvadShort>,
     }
 
+    #[actual_name(_MMVAD)]
+    #[define_for(kernel)]
+    struct Mmvad {
+        FirstPrototypePte: Pointer<super::memory::MmPte>,
+    }
+
     #[actual_name(_PEB)]
     #[define_for(user)]
     struct Peb {
@@ -236,12 +243,14 @@ impl Profile {
     pub fn new(syms: ibc::SymbolsIndexer) -> IceResult<Self> {
         let kernel = syms.get_lib("ntkrnlmp.pdb")?;
         let layouts = Layouts::new(&kernel)?;
+        let KiImplementedPhysicalBits = kernel.get_address("KiImplementedPhysicalBits")?.0;
         let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;
         let PsLoadedModuleList = kernel.get_address("PsLoadedModuleList")?.0;
 
         Ok(Self {
             syms,
             fast_syms: FastSymbols {
+                KiImplementedPhysicalBits,
                 PsActiveProcessHead,
                 PsLoadedModuleList,
             },
