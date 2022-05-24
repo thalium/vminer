@@ -148,6 +148,11 @@ pub trait Os {
         f: &mut dyn FnMut(Module) -> IceResult<()>,
     ) -> IceResult<()>;
 
+    fn process_collect_modules(&self, proc: Process) -> IceResult<Vec<Module>> {
+        let mut modules = Vec::new();
+        self.process_for_each_module(proc, &mut |m| Ok(modules.push(m)))?;
+        Ok(modules)
+    }
     fn for_each_process(&self, f: &mut dyn FnMut(Process) -> IceResult<()>) -> IceResult<()>;
     fn collect_processes(&self) -> IceResult<Vec<Process>> {
         let mut procs = Vec::new();

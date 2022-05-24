@@ -4,6 +4,7 @@ use ibc::{IceError, IceResult};
 use icebox::os::OsBuilder;
 use pyo3::{
     exceptions,
+    once_cell::GILOnceCell,
     prelude::*,
     types::{PyBytes, PyString},
 };
@@ -49,6 +50,28 @@ struct PhysicalAddress(u64);
 impl From<PhysicalAddress> for ibc::PhysicalAddress {
     fn from(addr: PhysicalAddress) -> Self {
         Self(addr.0)
+    }
+}
+
+// TODO: Remove this once https://github.com/PyO3/pyo3/pull/2398 is merged
+trait GILOnceCellExt<T> {
+    fn get_or_try_init<F, E>(&self, py: Python, f: F) -> Result<&T, E>
+    where
+        F: FnOnce() -> Result<T, E>;
+}
+
+impl<T> GILOnceCellExt<T> for GILOnceCell<T> {
+    fn get_or_try_init<F, E>(&self, py: Python, f: F) -> Result<&T, E>
+    where
+        F: FnOnce() -> Result<T, E>,
+    {
+        if let Some(value) = self.get(py) {
+            return Ok(value);
+        }
+
+        let value = f()?;
+        let _ = self.set(py, value);
+        Ok(self.get(py).unwrap())
     }
 }
 
@@ -348,6 +371,20 @@ impl Process {
         })
     }
 
+    fn modules(&self, py: Python) -> PyResult<ModuleIter> {
+        let os = self.os.borrow(py)?;
+        let modules =
+            os.0.process_collect_modules(self.proc)
+                .convert_err()?
+                .into_iter();
+
+        Ok(ModuleIter {
+            modules,
+            proc: self.proc,
+            os: self.os.clone_ref(py),
+        })
+    }
+
     fn vmas(&self, py: Python) -> PyResult<VmaIter> {
         let os = self.os.borrow(py)?;
         let vmas =
@@ -366,11 +403,12 @@ impl Process {
 
         let mut frames = Vec::new();
         os.0.process_callstack(self.proc, &mut |frame| {
-            let path = os.0.module_path(frame.module, self.proc)?;
-
             frames.push(StackFrame {
                 frame: frame.clone(),
-                file: PyString::new(py, &path).into(),
+
+                os: self.os.clone_ref(py),
+                proc: self.proc,
+                module: GILOnceCell::new(),
             });
             Ok(())
         })
@@ -472,9 +510,58 @@ impl Vma {
 }
 
 #[pyclass]
+struct Module {
+    start: ibc::VirtualAddress,
+    end: ibc::VirtualAddress,
+
+    #[pyo3(get)]
+    name: Py<PyString>,
+
+    #[pyo3(get)]
+    path: Py<PyString>,
+}
+
+impl Module {
+    fn new(py: Python, module: ibc::Module, proc: ibc::Process, os: &RawOs) -> IceResult<Self> {
+        let (start, end) = os.0.module_span(module, proc)?;
+
+        let name = PyString::new(py, &os.0.module_name(module, proc)?).into();
+        let path = PyString::new(py, &os.0.module_path(module, proc)?).into();
+
+        Ok(Self {
+            start,
+            end,
+
+            name,
+            path,
+        })
+    }
+}
+
+#[pymethods]
+impl Module {
+    #[getter]
+    fn start(&self) -> u64 {
+        self.start.0
+    }
+
+    #[getter]
+    fn end(&self) -> u64 {
+        self.end.0
+    }
+
+    fn __contains__(&self, addr: u64) -> bool {
+        (self.start.0..self.end.0).contains(&addr)
+    }
+}
+
+#[pyclass]
 struct StackFrame {
     frame: ibc::StackFrame,
-    file: Py<PyString>,
+
+    os: PyOwned<RawOs>,
+    proc: ibc::Process,
+    module: GILOnceCell<Py<Module>>,
 }
 
 #[pymethods]
@@ -500,8 +587,12 @@ impl StackFrame {
     }
 
     #[getter]
-    fn file(&self) -> &Py<PyString> {
-        &self.file
+    fn module(&self, py: Python) -> PyResult<&Py<Module>> {
+        self.module.get_or_try_init(py, || {
+            let os = &self.os.borrow(py)?;
+            let module = Module::new(py, self.frame.module, self.proc, os).convert_err()?;
+            Py::new(py, module)
+        })
     }
 }
 
@@ -538,6 +629,30 @@ impl ThreadIter {
     fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Thread>> {
         let thread = this.threads.next();
         Ok(thread.map(|thread| Thread::new(this.py(), thread, &this.os)))
+    }
+}
+
+#[pyclass]
+struct ModuleIter {
+    modules: std::vec::IntoIter<ibc::Module>,
+    proc: ibc::Process,
+    os: PyOwned<RawOs>,
+}
+
+#[pymethods]
+impl ModuleIter {
+    fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
+        this
+    }
+
+    fn __next__(mut this: PyRefMut<Self>, py: Python) -> PyResult<Option<Module>> {
+        Ok(match this.modules.next() {
+            Some(module) => {
+                let os = &this.os.borrow(py)?;
+                Some(Module::new(py, module, this.proc, os).convert_err()?)
+            }
+            None => None,
+        })
     }
 }
 
@@ -591,8 +706,12 @@ fn icebox(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Dump>()?;
     m.add_class::<Kvm>()?;
 
+    m.add_class::<Module>()?;
     m.add_class::<Os>()?;
     m.add_class::<Process>()?;
+    m.add_class::<StackFrame>()?;
+    m.add_class::<Thread>()?;
+    m.add_class::<Vma>()?;
 
     Ok(())
 }
