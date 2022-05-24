@@ -35,9 +35,7 @@ impl MmPte {
     fn classify(self) -> MmPteKind {
         let pte = self.0;
 
-        if pte & MMPTE_TRANSITION_BIT != 0 {
-            MmPteKind::Transition
-        } else if pte & MMPTE_SOFTWARE_BIT != 0 {
+        if pte & MMPTE_SOFTWARE_BIT != 0 {
             if pte & VAD_MASK == VAD_MASK {
                 MmPteKind::Vad
             } else {
@@ -45,6 +43,8 @@ impl MmPte {
             }
         } else if pte == 0 {
             MmPteKind::Vad
+        } else if pte & MMPTE_TRANSITION_BIT != 0 {
+            MmPteKind::Transition
         } else if pte >> 32 == 0 {
             MmPteKind::Zero
         } else {
