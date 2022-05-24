@@ -212,25 +212,20 @@ fn callstack(arch: Arch) {
     linux
         .process_callstack(proc, &mut |frame| {
             let &ibc::StackFrame {
-                range,
+                start,
+                size,
                 stack_pointer,
                 instruction_pointer,
                 ..
             } = frame;
 
-            let (start, size, symbol) = match range {
-                Some((start, end)) => {
-                    let symbol = linux
-                        .resolve_symbol_exact(start, proc)?
-                        .map(|sym| ibc::symbols::demangle(sym).into_owned());
-                    (Some(start), Some(end), symbol)
-                }
-                None => {
-                    let symbol = linux
-                        .resolve_symbol(instruction_pointer, proc)?
-                        .map(|(sym, _)| ibc::symbols::demangle(sym).into_owned());
-                    (None, None, symbol)
-                }
+            let symbol = match start {
+                Some(start) => linux
+                    .resolve_symbol_exact(start, proc)?
+                    .map(|sym| ibc::symbols::demangle(sym).into_owned()),
+                None => linux
+                    .resolve_symbol(instruction_pointer, proc)?
+                    .map(|(sym, _)| ibc::symbols::demangle(sym).into_owned()),
             };
 
             frames.push(StackFrame {

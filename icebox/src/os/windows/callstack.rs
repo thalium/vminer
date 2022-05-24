@@ -347,6 +347,71 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     }
 }
 
+struct UnwindResult {
+    next_sp: VirtualAddress,
+    next_ip: VirtualAddress,
+    fun_start: Option<VirtualAddress>,
+}
+
+fn unwind_function<B: Backend>(
+    ctx: &Context<B>,
+    vma: &Vma,
+    frame: &ibc::StackFrame,
+    base_pointer: &mut Option<VirtualAddress>,
+) -> IceResult<UnwindResult> {
+    let unwind_data = ctx.get_unwind_data(vma).context("cannot get unwind data")?;
+
+    let (caller_sp, fun_start) = match unwind_data.find_by_address(frame.instruction_pointer) {
+        Some(mut function) => {
+            let frame_pointer = match function.frame_register_offset {
+                None => frame.stack_pointer,
+                Some(offset) => {
+                    base_pointer.context("missing required frame pointer")? - offset as u64
+                }
+            };
+
+            if let Some(offset) = function.machframe_offset {
+                let machinst = frame_pointer + offset;
+                return Ok(UnwindResult {
+                    next_ip: ctx.read_value(machinst)?,
+                    next_sp: ctx.read_value(machinst + 0x18)?,
+                    fun_start: Some(unwind_data.offset + function.runtime_function.start),
+                });
+            }
+
+            let mut next_sp = frame_pointer;
+            loop {
+                if let Some(offset) = function.fp_offset {
+                    *base_pointer = Some(ctx.read_value(frame_pointer + offset)?);
+                }
+
+                next_sp += function.stack_frame_size as u64;
+
+                match function.mother {
+                    Some(mother) => {
+                        function = unwind_data
+                            .find_by_offset(mother.start)
+                            .context("cannot find mother function")?;
+                    }
+                    None => break,
+                }
+            }
+
+            let fun_start = unwind_data.offset + function.runtime_function.start;
+            (next_sp, Some(fun_start))
+        }
+
+        // This is a leaf function
+        None => (frame.stack_pointer, None),
+    };
+
+    Ok(UnwindResult {
+        next_ip: ctx.read_value(caller_sp)?,
+        next_sp: caller_sp + 8u64,
+        fun_start,
+    })
+}
+
 impl<B: Backend> Windows<B> {
     pub fn iter_process_callstack(
         &self,
@@ -390,7 +455,8 @@ impl<B: Backend> Windows<B> {
         let mut frame = ibc::StackFrame {
             instruction_pointer,
             stack_pointer,
-            range: None,
+            start: None,
+            size: None,
             vma: ibc::Vma(VirtualAddress(0)),
             file: None,
         };
@@ -402,55 +468,23 @@ impl<B: Backend> Windows<B> {
                 .ok_or("encountered unmapped page")?;
             frame.vma = vma.vma;
 
-            f(&frame)?;
-
-            let unwind_data = ctx.get_unwind_data(vma).context("cannot get unwind data")?;
-            let function = unwind_data.find_by_address(frame.instruction_pointer);
-
             // Move stack pointer to the upper frame
-            let caller_sp = match function {
-                Some(mut function) => {
-                    let frame_pointer = match function.frame_register_offset {
-                        None => frame.stack_pointer,
-                        Some(offset) => {
-                            base_pointer.context("missing required frame pointer")? - offset as u64
-                        }
-                    };
+            let unwind_result = unwind_function(&ctx, vma, &frame, &mut base_pointer);
 
-                    if let Some(offset) = function.machframe_offset {
-                        let machinst = frame_pointer + offset;
-                        frame.instruction_pointer = ctx.read_value(machinst)?;
-                        frame.stack_pointer = ctx.read_value(machinst + 0x18)?;
-                        continue;
-                    }
+            match unwind_result {
+                Ok(infos) => {
+                    frame.start = infos.fun_start;
+                    f(&frame)?;
 
-                    let mut next_sp = frame_pointer;
-                    loop {
-                        if let Some(offset) = function.fp_offset {
-                            base_pointer = Some(ctx.read_value(frame_pointer + offset)?);
-                        }
-
-                        next_sp += function.stack_frame_size as u64;
-
-                        match function.mother {
-                            Some(mother) => {
-                                function = unwind_data
-                                    .find_by_offset(mother.start)
-                                    .context("cannot find mother function")?;
-                            }
-                            None => break,
-                        }
-                    }
-
-                    next_sp
+                    frame.instruction_pointer = infos.next_ip;
+                    frame.stack_pointer = infos.next_sp;
                 }
-
-                // This is a leaf function
-                None => frame.stack_pointer,
-            };
-
-            frame.instruction_pointer = ctx.read_value(caller_sp)?;
-            frame.stack_pointer = caller_sp + 8u64;
+                Err(err) => {
+                    frame.start = None;
+                    f(&frame)?;
+                    return Err(err);
+                }
+            }
 
             if frame.instruction_pointer.is_null() {
                 break Ok(());

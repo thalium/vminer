@@ -485,12 +485,12 @@ struct StackFrame {
 impl StackFrame {
     #[getter]
     fn start(&self) -> Option<u64> {
-        self.frame.range.map(|(start, _)| start.0)
+        self.frame.start.map(|start| start.0)
     }
 
     #[getter]
     fn size(&self) -> Option<u64> {
-        self.frame.range.map(|(_, size)| size)
+        self.frame.size
     }
 
     #[getter]

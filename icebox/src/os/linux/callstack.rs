@@ -231,7 +231,8 @@ pub fn iter<B: ibc::Backend>(
     let mut frame = ibc::StackFrame {
         instruction_pointer,
         stack_pointer,
-        range: None,
+        start: None,
+        size: None,
         vma: ibc::Vma(VirtualAddress(0)),
         file: None,
     };
@@ -268,7 +269,8 @@ pub fn iter<B: ibc::Backend>(
                 // Even without the FDE, we can still send the incomplete frame
                 // we got with the previous one
                 log::debug!("Cannot get FDE: {err:?}");
-                frame.range = None;
+                frame.start = None;
+                frame.size = None;
                 f(&frame)?;
                 return Ok(());
             }
@@ -276,7 +278,8 @@ pub fn iter<B: ibc::Backend>(
 
         // Warning: `gimli::UnwindTableRow` gives similar infos but slightly
         // different
-        frame.range = Some((VirtualAddress(fde.initial_address()), fde.len()));
+        frame.start = Some(VirtualAddress(fde.initial_address()));
+        frame.size = Some(fde.len());
 
         // Now the frame is complete, we can "send" it before starting again
         f(&frame)?;
