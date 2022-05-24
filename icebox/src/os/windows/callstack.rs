@@ -3,14 +3,14 @@ use once_cell::unsync::OnceCell;
 
 use super::Windows;
 
-struct Vma {
+struct Module {
     start: VirtualAddress,
     end: VirtualAddress,
-    vma: ibc::Vma,
+    module: ibc::Module,
     unwind_data: OnceCell<UnwindData>,
 }
 
-impl Vma {
+impl Module {
     fn contains(&self, addr: VirtualAddress) -> bool {
         self.start <= addr && addr < self.end
     }
@@ -119,7 +119,7 @@ struct Context<'a, B: ibc::Backend> {
     pgd: PhysicalAddress,
 
     /// This is sorted by growing address so we can do binary searches
-    vmas: Vec<Vma>,
+    modules: Vec<Module>,
 }
 
 impl<'a, B: ibc::Backend> Context<'a, B> {
@@ -127,11 +127,12 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         let pgd = windows.process_pgd(proc)?;
         let mut vmas = Vec::new();
 
-        windows.process_for_each_vma(proc, &mut |vma| {
-            vmas.push(Vma {
-                start: windows.vma_start(vma)?,
-                end: windows.vma_end(vma)?,
-                vma,
+        windows.process_for_each_module(proc, &mut |module| {
+            let (start, end) = windows.module_span(module, proc)?;
+            vmas.push(Module {
+                start,
+                end,
+                module,
                 unwind_data: OnceCell::new(),
             });
             Ok(())
@@ -140,11 +141,10 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         windows.for_each_kernel_module(&mut |module| {
             let proc = ibc::Process(VirtualAddress(0));
             let (start, end) = windows.module_span(module, proc)?;
-            let vma = ibc::Vma(VirtualAddress(0));
-            vmas.push(Vma {
+            vmas.push(Module {
                 start,
                 end,
-                vma,
+                module,
                 unwind_data: OnceCell::new(),
             });
             Ok(())
@@ -158,7 +158,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             windows,
             proc,
             pgd,
-            vmas,
+            modules: vmas,
         })
     }
 
@@ -182,19 +182,20 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         Ok(value)
     }
 
-    fn find_vma_by_address(&self, addr: VirtualAddress) -> Option<&Vma> {
-        match self.vmas.binary_search_by_key(&addr, |vma| vma.start) {
-            Ok(i) => Some(&self.vmas[i]),
+    fn find_module_by_address(&self, addr: VirtualAddress) -> Option<&Module> {
+        match self.modules.binary_search_by_key(&addr, |m| m.start) {
+            Ok(i) => Some(&self.modules[i]),
             Err(i) => {
-                let vma = &self.vmas[i.checked_sub(1)?];
+                let vma = &self.modules[i.checked_sub(1)?];
                 vma.contains(addr).then(|| vma)
             }
         }
     }
 
-    fn get_unwind_data<'v>(&self, vma: &'v Vma) -> IceResult<&'v UnwindData> {
-        vma.unwind_data
-            .get_or_try_init(|| self.init_unwind_data(vma))
+    fn get_unwind_data<'v>(&self, module: &'v Module) -> IceResult<&'v UnwindData> {
+        module
+            .unwind_data
+            .get_or_try_init(|| self.init_unwind_data(module))
     }
 
     fn parse_unwind_codes(
@@ -325,11 +326,15 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         Some(entries)
     }
 
-    fn init_unwind_data(&self, vma: &Vma) -> IceResult<UnwindData> {
-        let mut content = vec![0; (vma.end - vma.start) as usize];
-        let pgd = self.pgd_for(vma.start);
-        self.windows
-            .try_read_virtual_memory_with_proc(pgd, self.proc, vma.start, &mut content)?;
+    fn init_unwind_data(&self, module: &Module) -> IceResult<UnwindData> {
+        let mut content = vec![0; (module.end - module.start) as usize];
+        let pgd = self.pgd_for(module.start);
+        self.windows.try_read_virtual_memory_with_proc(
+            pgd,
+            self.proc,
+            module.start,
+            &mut content,
+        )?;
 
         let pe = object::read::pe::PeFile64::parse(&*content).context("failed to parse PE")?;
         let directory = pe
@@ -341,7 +346,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             .ok_or("invalid debug directory")?;
 
         Ok(UnwindData {
-            offset: vma.start,
+            offset: module.start,
             functions,
         })
     }
@@ -355,11 +360,13 @@ struct UnwindResult {
 
 fn unwind_function<B: Backend>(
     ctx: &Context<B>,
-    vma: &Vma,
+    module: &Module,
     frame: &ibc::StackFrame,
     base_pointer: &mut Option<VirtualAddress>,
 ) -> IceResult<UnwindResult> {
-    let unwind_data = ctx.get_unwind_data(vma).context("cannot get unwind data")?;
+    let unwind_data = ctx
+        .get_unwind_data(module)
+        .context("cannot get unwind data")?;
 
     let (caller_sp, fun_start) = match unwind_data.find_by_address(frame.instruction_pointer) {
         Some(mut function) => {
@@ -457,19 +464,18 @@ impl<B: Backend> Windows<B> {
             stack_pointer,
             start: None,
             size: None,
-            vma: ibc::Vma(VirtualAddress(0)),
-            file: None,
+            module: ibc::Module(VirtualAddress(0)),
         };
 
         loop {
             // Where are we ?
-            let vma = ctx
-                .find_vma_by_address(frame.instruction_pointer)
+            let module = ctx
+                .find_module_by_address(frame.instruction_pointer)
                 .ok_or("encountered unmapped page")?;
-            frame.vma = vma.vma;
+            frame.module = module.module;
 
             // Move stack pointer to the upper frame
-            let unwind_result = unwind_function(&ctx, vma, &frame, &mut base_pointer);
+            let unwind_result = unwind_function(&ctx, module, &frame, &mut base_pointer);
 
             match unwind_result {
                 Ok(infos) => {

@@ -62,8 +62,7 @@ pub struct StackFrame {
     pub size: Option<u64>,
     pub stack_pointer: VirtualAddress,
     pub instruction_pointer: VirtualAddress,
-    pub vma: Vma,
-    pub file: Option<Path>,
+    pub module: Module,
 }
 
 pub trait Os {

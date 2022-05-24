@@ -6,14 +6,13 @@ use once_cell::unsync::OnceCell;
 
 use super::Linux;
 
-struct Vma {
+struct Module {
     start: VirtualAddress,
     end: VirtualAddress,
-    vma: ibc::Vma,
-    file: ibc::Path,
+    module: ibc::Module,
 }
 
-impl Vma {
+impl Module {
     fn contains(&self, addr: VirtualAddress) -> bool {
         self.start <= addr && addr < self.end
     }
@@ -34,40 +33,40 @@ impl UnwindData {
 
 struct Context<'a, B: ibc::Backend> {
     linux: &'a super::Linux<B>,
+    proc: ibc::Process,
     pgd: PhysicalAddress,
 
     /// Finding `.eh_frame` sections is generally costly, so we definitly want
     /// to cache this information
-    eh_frames: HashMap<ibc::Path, OnceCell<UnwindData>>,
+    eh_frames: HashMap<ibc::Module, OnceCell<UnwindData>>,
 
     /// This is sorted by growing address so we can do binary searches
-    vmas: Vec<Vma>,
+    modules: Vec<Module>,
 }
 
 impl<'a, B: ibc::Backend> Context<'a, B> {
     fn new(linux: &'a super::Linux<B>, proc: ibc::Process) -> IceResult<Self> {
         let pgd = linux.process_pgd(proc)?;
-        let mut vmas = Vec::new();
+        let mut modules = Vec::new();
 
-        linux.process_for_each_vma(proc, &mut |vma| {
-            if let Some(file) = linux.vma_file(vma)? {
-                vmas.push(Vma {
-                    start: linux.vma_start(vma)?,
-                    end: linux.vma_end(vma)?,
-                    vma,
-                    file,
-                });
-            }
+        linux.process_for_each_module(proc, &mut |module| {
+            let (start, end) = linux.module_span(module, proc)?;
+            modules.push(Module { start, end, module });
             Ok(())
         })?;
 
-        let eh_frames = vmas.iter().map(|vma| (vma.file, OnceCell::new())).collect();
+        let eh_frames = modules
+            .iter()
+            .map(|m| (m.module, OnceCell::new()))
+            .collect();
 
         Ok(Self {
             linux,
-            eh_frames,
+            proc,
             pgd,
-            vmas,
+
+            eh_frames,
+            modules,
         })
     }
 
@@ -78,22 +77,22 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         Ok(value)
     }
 
-    fn find_vma_by_address(&self, addr: VirtualAddress) -> Option<&Vma> {
-        match self.vmas.binary_search_by_key(&addr, |vma| vma.start) {
-            Ok(i) => Some(&self.vmas[i]),
+    fn find_module_by_address(&self, addr: VirtualAddress) -> Option<&Module> {
+        match self.modules.binary_search_by_key(&addr, |m| m.start) {
+            Ok(i) => Some(&self.modules[i]),
             Err(i) => {
-                let vma = &self.vmas[i.checked_sub(1)?];
-                vma.contains(addr).then(|| vma)
+                let module = &self.modules[i.checked_sub(1)?];
+                module.contains(addr).then(|| module)
             }
         }
     }
 
-    fn get_unwind_data(&self, exe_path: ibc::Path, ip: VirtualAddress) -> IceResult<&UnwindData> {
+    fn get_unwind_data(&self, module: &Module, ip: VirtualAddress) -> IceResult<&UnwindData> {
         let cell = self
             .eh_frames
-            .get(&exe_path)
+            .get(&module.module)
             .ok_or_else(|| IceError::new("unknown file"))?;
-        cell.get_or_try_init(|| self.discover_sections(exe_path, ip))
+        cell.get_or_try_init(|| self.discover_sections(module, ip))
     }
 
     /// This is where things get difficult
@@ -110,9 +109,9 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     ///
     /// So to get `eh_frame`, we iterate over all the mappings of the file, look
     /// for `\x01` bytes and try to parse `.eh_frame_hdr` from there.
-    fn discover_sections(&self, exe_path: ibc::Path, ip: VirtualAddress) -> IceResult<UnwindData> {
+    fn discover_sections(&self, module: &Module, ip: VirtualAddress) -> IceResult<UnwindData> {
         if log::log_enabled!(log::Level::Debug) {
-            let path = self.linux.path_to_string(exe_path)?;
+            let path = self.linux.module_path(module.module, self.proc)?;
             log::debug!("Looking for .eh_frame for {}", path);
         }
 
@@ -120,67 +119,55 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             ibc::RuntimeEndian::Little => gimli::RunTimeEndian::Little,
             ibc::RuntimeEndian::Big => gimli::RunTimeEndian::Big,
         };
-        let mut vma_data = Vec::new();
 
-        for vma in &self.vmas {
-            if vma.file != exe_path {
+        let mut vma_data = vec![0; (module.end - module.start) as usize];
+        self.linux
+            .try_read_virtual_memory(self.pgd, module.start, &mut vma_data)?;
+
+        for i in memchr::memmem::find_iter(&vma_data, b"\x01") {
+            let header = gimli::EhFrameHdr::new(&vma_data[i..], endian);
+            let eh_frame_hdr = module.start + i as u64;
+            let mut bases = gimli::BaseAddresses::default().set_eh_frame_hdr(eh_frame_hdr.0);
+
+            // We found a `\x01` ! If parsing from there gives an error, it was not the good one
+
+            let eh_frame_addr = match header.parse(&bases, 8) {
+                Ok(hdr) => match hdr.eh_frame_ptr() {
+                    gimli::Pointer::Direct(addr) => VirtualAddress(addr),
+                    gimli::Pointer::Indirect(addr) => match self.read_value(VirtualAddress(addr)) {
+                        Ok(addr) => addr,
+                        Err(_) => continue,
+                    },
+                },
+                Err(_) => continue,
+            };
+
+            if !module.contains(eh_frame_addr) {
                 continue;
             }
 
-            log::trace!("Trying VMA starting at {:x}", vma.start);
-            vma_data.resize((vma.end - vma.start) as usize, 0);
-            self.linux
-                .try_read_virtual_memory(self.pgd, vma.start, &mut vma_data)?;
+            let eh_frame_offset = (eh_frame_addr - module.start) as usize;
+            bases = bases.set_eh_frame(eh_frame_addr.0);
 
-            for i in memchr::memmem::find_iter(&vma_data, b"\x01") {
-                let header = gimli::EhFrameHdr::new(&vma_data[i..], endian);
-                let eh_frame_hdr = vma.start + i as u64;
-                let mut bases = gimli::BaseAddresses::default().set_eh_frame_hdr(eh_frame_hdr.0);
+            // Ok we managed to get a pointer for `.eh_frame`. Make sure
+            // that it actually means something and was not not pure luck.
 
-                // We found a `\x01` ! If parsing from there gives an error, it was not ths good one
-
-                let eh_frame_addr = match header.parse(&bases, 8) {
-                    Ok(hdr) => match hdr.eh_frame_ptr() {
-                        gimli::Pointer::Direct(addr) => VirtualAddress(addr),
-                        gimli::Pointer::Indirect(addr) => {
-                            match self.read_value(VirtualAddress(addr)) {
-                                Ok(addr) => addr,
-                                Err(_) => continue,
-                            }
-                        }
-                    },
-                    Err(_) => continue,
-                };
-
-                if !vma.contains(eh_frame_addr) {
-                    continue;
-                }
-
-                // Hopefully `.eh_frame` and `.eh_frame_hdr` are in the same segment
-                let eh_frame_offset = (eh_frame_addr - vma.start) as usize;
-                bases = bases.set_eh_frame(eh_frame_addr.0);
-
-                // Ok we managed to get a pointer for `.eh_frame`. Make sure
-                // that it actually means something and was not not pure luck.
-
-                let eh_frame = gimli::EhFrame::new(&vma_data[eh_frame_offset..], endian);
-                let fde =
-                    eh_frame.fde_for_address(&bases, ip.0, gimli::UnwindSection::cie_from_offset);
-                if fde.is_err() {
-                    continue;
-                }
-
-                // At this point we can be pretty confident this was the good one
-
-                log::debug!("Found .eh_frame section at 0x{eh_frame_addr:x}");
-
-                return Ok(UnwindData {
-                    bases,
-                    endian,
-                    segment: vma_data,
-                    eh_frame: eh_frame_offset,
-                });
+            let eh_frame = gimli::EhFrame::new(&vma_data[eh_frame_offset..], endian);
+            let fde = eh_frame.fde_for_address(&bases, ip.0, gimli::UnwindSection::cie_from_offset);
+            if fde.is_err() {
+                continue;
             }
+
+            // At this point we can be pretty confident this was the good one
+
+            log::debug!("Found .eh_frame section at 0x{eh_frame_addr:x}");
+
+            return Ok(UnwindData {
+                bases,
+                endian,
+                segment: vma_data,
+                eh_frame: eh_frame_offset,
+            });
         }
 
         Err(ibc::IceError::new("Unable to find .eh_frame section"))
@@ -233,22 +220,20 @@ pub fn iter<B: ibc::Backend>(
         stack_pointer,
         start: None,
         size: None,
-        vma: ibc::Vma(VirtualAddress(0)),
-        file: None,
+        module: ibc::Module(VirtualAddress(0)),
     };
 
     loop {
         // Where are we ?
-        let vma = ctx
-            .find_vma_by_address(frame.instruction_pointer)
+        let module = ctx
+            .find_module_by_address(frame.instruction_pointer)
             .ok_or("encountered anonymous page")?;
-        frame.vma = vma.vma;
-        frame.file = Some(vma.file);
+        frame.module = module.module;
 
-        let cie_cache = cie_cache.entry(vma.file).or_insert_with(HashMap::new);
+        let cie_cache = cie_cache.entry(module.module).or_insert_with(HashMap::new);
 
         // Find unwind data of the binary we're in
-        let data = ctx.get_unwind_data(vma.file, frame.instruction_pointer)?;
+        let data = ctx.get_unwind_data(module, frame.instruction_pointer)?;
         let eh_frame = data.eh_frame();
 
         // At this point the only missing data is the function start and its size.

@@ -366,15 +366,11 @@ impl Process {
 
         let mut frames = Vec::new();
         os.0.process_callstack(self.proc, &mut |frame| {
-            let file = frame
-                .file
-                .map(|file| os.0.path_to_string(file))
-                .transpose()?
-                .map(|path| PyString::new(py, &path).into());
+            let path = os.0.module_path(frame.module, self.proc)?;
 
             frames.push(StackFrame {
                 frame: frame.clone(),
-                file,
+                file: PyString::new(py, &path).into(),
             });
             Ok(())
         })
@@ -478,7 +474,7 @@ impl Vma {
 #[pyclass]
 struct StackFrame {
     frame: ibc::StackFrame,
-    file: Option<Py<PyString>>,
+    file: Py<PyString>,
 }
 
 #[pymethods]
@@ -504,8 +500,8 @@ impl StackFrame {
     }
 
     #[getter]
-    fn file(&self) -> Option<&Py<PyString>> {
-        self.file.as_ref()
+    fn file(&self) -> &Py<PyString> {
+        &self.file
     }
 }
 
