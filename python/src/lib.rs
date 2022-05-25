@@ -398,7 +398,7 @@ impl Process {
         let os = self.os.borrow(py)?;
 
         let mut frames = Vec::new();
-        os.0.process_callstack(self.proc, &mut |frame| {
+        let error = os.0.process_callstack(self.proc, &mut |frame| {
             frames.push(StackFrame {
                 frame: frame.clone(),
 
@@ -407,11 +407,11 @@ impl Process {
                 module: GILOnceCell::new(),
             });
             Ok(())
-        })
-        .convert_err()?;
+        });
 
         Ok(CallStackIter {
             frames: frames.into_iter(),
+            error,
         })
     }
 }
@@ -677,6 +677,7 @@ impl VmaIter {
 #[pyclass]
 struct CallStackIter {
     frames: std::vec::IntoIter<StackFrame>,
+    error: IceResult<()>,
 }
 
 #[pymethods]
@@ -685,8 +686,14 @@ impl CallStackIter {
         this
     }
 
-    fn __next__(mut this: PyRefMut<Self>) -> Option<StackFrame> {
-        this.frames.next()
+    fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<StackFrame>> {
+        Ok(match this.frames.next() {
+            Some(frame) => Some(frame),
+            None => {
+                std::mem::replace(&mut this.error, Ok(())).convert_err()?;
+                None
+            }
+        })
     }
 }
 
