@@ -1,4 +1,4 @@
-/* Generated with cbindgen:0.21.0 */
+/* Generated with cbindgen:0.23.0 */
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -20,6 +20,8 @@ typedef struct Error Error;
 typedef struct Os Os;
 
 typedef struct Symbols Symbols;
+
+typedef struct VmaFlags VmaFlags;
 
 typedef struct PhysicalAddress {
   uint64_t val;
@@ -148,6 +150,12 @@ typedef struct Thread {
 typedef struct Vma {
   struct VirtualAddress addr;
 } Vma;
+
+
+
+
+
+
 
 #ifdef __cplusplus
 extern "C" {
