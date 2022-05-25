@@ -1,9 +1,7 @@
 use bytemuck::Zeroable;
-
-use crate::core::{
-    self as ice,
+use ibc::{
     arch::{self, aarch64, x86_64, Vcpus as _},
-    Backend, Memory, PhysicalAddress,
+    PhysicalAddress,
 };
 use std::{
     fs,
@@ -65,7 +63,7 @@ pub struct DumbDump<Mem> {
     mem: Mem,
 }
 
-impl DumbDump<ice::File> {
+impl DumbDump<ibc::File> {
     pub fn read<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut file = io::BufReader::new(fs::File::open(path)?);
 
@@ -92,12 +90,12 @@ impl DumbDump<ice::File> {
 
         Ok(DumbDump {
             vcpus,
-            mem: ice::File::new(file, start, end),
+            mem: ibc::File::new(file, start, end),
         })
     }
 }
 
-impl<Mem: ice::Memory> DumbDump<Mem> {
+impl<Mem: ibc::Memory> DumbDump<Mem> {
     pub fn write<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let mut out = io::BufWriter::new(fs::File::create(path)?);
 
@@ -131,10 +129,9 @@ impl<Mem: ice::Memory> DumbDump<Mem> {
 }
 
 impl DumbDump<Vec<u8>> {
-    pub fn dump_vm<B: Backend>(backend: &B) -> io::Result<Self> {
-        let memory = backend.memory();
-        let mut mem = vec![0; memory.size() as usize];
-        memory.read(PhysicalAddress(0), &mut mem).unwrap();
+    pub fn dump_vm<B: ibc::Backend>(backend: &B) -> io::Result<Self> {
+        let mut mem = vec![0; backend.memory_size() as usize];
+        backend.read_memory(PhysicalAddress(0), &mut mem).unwrap();
 
         let vcpus = match backend.vcpus().into_runtime() {
             arch::runtime::Vcpus::X86_64(vcpus) => Vcpus::X86_64(vcpus.to_vec()),
@@ -146,7 +143,7 @@ impl DumbDump<Vec<u8>> {
     }
 }
 
-impl<Mem: ice::Memory> Backend for DumbDump<Mem> {
+impl<Mem: ibc::Memory> ibc::RawBackend for DumbDump<Mem> {
     type Arch = arch::RuntimeArchitecture;
     type Memory = Mem;
 

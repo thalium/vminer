@@ -109,14 +109,10 @@ impl<T: pyo3::PyClass> PyOwned<T> {
 
 #[pyclass(subclass)]
 #[derive(Clone)]
-struct Backend(Arc<dyn ibc::RuntimeBackend + Send + Sync>);
+struct Backend(Arc<dyn ibc::Backend<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
 
 #[pymethods]
 impl Backend {
-    fn read_u64(&self, addr: PhysicalAddress) -> PyResult<u64> {
-        self.0.read_value(addr.into()).convert_err()
-    }
-
     fn virtual_to_physical(
         &self,
         mmu_addr: PhysicalAddress,
@@ -165,7 +161,7 @@ impl Kvm {
         #[cfg(target_os = "linux")]
         {
             let kvm = icebox::backends::kvm::Kvm::connect(pid).convert_err()?;
-            Ok((Kvm, Backend(Arc::new(kvm))))
+            Ok((Kvm, Backend(Arc::new(ibc::RuntimeBackend(kvm)))))
         }
 
         #[cfg(not(target_os = "linux"))]

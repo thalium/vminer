@@ -10,7 +10,7 @@ pub mod arch;
 pub use arch::Architecture;
 
 mod backend;
-pub use backend::{Backend, RuntimeBackend};
+pub use backend::{Backend, RawBackend, RuntimeBackend};
 
 mod endian;
 pub use endian::{BigEndian, Endianness, LittleEndian, RuntimeEndian};

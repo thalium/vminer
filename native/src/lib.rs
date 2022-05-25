@@ -20,7 +20,7 @@ pub type c_char = u8;
 #[allow(non_camel_case_types)]
 pub type c_void = u8;
 
-pub struct Backend(Arc<dyn ibc::RuntimeBackend + Send + Sync>);
+pub struct Backend(Arc<dyn ibc::Backend<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
 
 #[repr(C)]
 pub struct PhysicalAddress {
@@ -60,9 +60,8 @@ impl Backend {
     fn new<B>(backend: B) -> Box<Self>
     where
         B: ibc::Backend + Send + Sync + 'static,
-        B::Memory: Sized,
     {
-        Box::new(Self(Arc::new(backend)))
+        Box::new(Self(Arc::new(ibc::RuntimeBackend(backend))))
     }
 }
 
@@ -114,7 +113,7 @@ impl ibc::Memory for X86_64Backend {
     }
 }
 
-impl ibc::Backend for X86_64Backend {
+impl ibc::RawBackend for X86_64Backend {
     type Arch = ibc::arch::X86_64;
     type Memory = Self;
 

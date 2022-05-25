@@ -1,12 +1,10 @@
-use ice::{IceError, IceResult, ResultExt};
+use ibc::{IceError, IceResult, ResultExt};
 use std::{
     fs,
     io::{self, BufRead, Read},
     os::unix::{net::UnixListener, prelude::*},
     thread,
 };
-
-use crate::core::{self as ice, Backend};
 
 mod ptrace;
 
@@ -280,7 +278,7 @@ fn get_regs(pid: libc::pid_t) -> IceResult<Vec<arch::Vcpu>> {
 }
 
 pub struct Kvm {
-    mem: ice::File,
+    mem: ibc::File,
     vcpus: Vec<arch::Vcpu>,
 }
 
@@ -332,7 +330,7 @@ impl Kvm {
         };
 
         // Map VM memory in our address space
-        let mem = ice::File::open(
+        let mem = ibc::File::open(
             format!("/proc/{}/mem", pid),
             mem_offset,
             mem_offset + mem_size,
@@ -343,9 +341,9 @@ impl Kvm {
     }
 }
 
-impl Backend for Kvm {
+impl ibc::RawBackend for Kvm {
     type Arch = arch::Arch;
-    type Memory = ice::File;
+    type Memory = ibc::File;
 
     #[inline]
     fn vcpus(&self) -> &[arch::Vcpu] {
