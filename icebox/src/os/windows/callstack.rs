@@ -373,19 +373,19 @@ fn unwind_function<B: Backend>(
                 }
             };
 
-            if let Some(offset) = function.machframe_offset {
-                let machinst = frame_pointer + offset;
-                return Ok(UnwindResult {
-                    next_ip: ctx.read_value(machinst)?,
-                    next_sp: ctx.read_value(machinst + 0x18)?,
-                    fun_start: Some(unwind_data.offset + function.runtime_function.start),
-                });
-            }
-
             let mut next_sp = frame_pointer;
             loop {
                 if let Some(offset) = function.fp_offset {
                     *base_pointer = Some(ctx.read_value(frame_pointer + offset)?);
+                }
+
+                if let Some(offset) = function.machframe_offset {
+                    let machinst = frame_pointer + offset;
+                    return Ok(UnwindResult {
+                        next_ip: ctx.read_value(machinst)?,
+                        next_sp: ctx.read_value(machinst + 0x18)?,
+                        fun_start: Some(unwind_data.offset + function.runtime_function.start),
+                    });
                 }
 
                 next_sp += function.stack_frame_size as u64;
