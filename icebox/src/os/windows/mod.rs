@@ -1,51 +1,10 @@
-use super::pointer::{Context, HasLayout, Pointer, StructOffset};
+use super::pointer::{self, Context, HasLayout, KernelSpace, Pointer, StructOffset};
 use core::{fmt, mem, str};
-use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
+use ibc::{Backend, IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
 
 mod callstack;
 mod memory;
 mod profile;
-
-struct ProcSpace<'a, B: Backend> {
-    os: &'a Windows<B>,
-    proc: ibc::Process,
-    pgd: ibc::PhysicalAddress,
-}
-
-impl<B: Backend> Clone for ProcSpace<'_, B> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<B: Backend> Copy for ProcSpace<'_, B> {}
-
-impl<B: Backend> Context for ProcSpace<'_, B> {
-    #[inline]
-    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        if addr.is_kernel() {
-            self.os.read_virtual_memory(self.os.kernel_pgd(), addr, buf)
-        } else {
-            self.os
-                .read_virtual_memory_with_proc(self.pgd, self.proc, addr, buf)
-        }
-    }
-}
-
-impl<B: Backend> ProcSpace<'_, B> {
-    #[inline]
-    fn profile(&self) -> &profile::Profile {
-        &self.os.profile
-    }
-}
-
-impl<B: Backend> Context for &Windows<B> {
-    #[inline]
-    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        self.read_virtual_memory(self.kpgd, addr, buf)
-    }
-}
 
 pointer_defs! {
     ibc::Module = profile::LdrDataTableEntry;
@@ -55,42 +14,34 @@ pointer_defs! {
     ibc::Vma = profile::MmvadShort;
 }
 
-impl<'a, T, B: Backend> Pointer<T, &'a Windows<B>> {
-    fn switch_to_userspace(self, proc: ibc::Process) -> IceResult<Pointer<T, ProcSpace<'a, B>>> {
-        let pgd = self.ctx.process_pgd(proc)?;
-        let proc_space = ProcSpace {
-            os: self.ctx,
-            proc,
-            pgd,
-        };
-        Ok(self.switch_context(proc_space))
-    }
-}
-
-impl<Ctx: HasLayout<profile::UnicodeString>> Pointer<profile::UnicodeString, Ctx> {
+impl<B: ibc::Backend, Ctx> Pointer<'_, profile::UnicodeString, Windows<B>, Ctx>
+where
+    Ctx: Context<Windows<B>>,
+{
     fn read_unicode_string(self) -> IceResult<String> {
         let buffer = self.read_field(|str| str.Buffer)?;
         let len = self.read_field(|str| str.Length)?;
 
         let mut name = vec![0u16; len as usize / 2];
         self.ctx
-            .read_memory(buffer, bytemuck::cast_slice_mut(&mut name))?;
+            .read_memory(self.os, buffer, bytemuck::cast_slice_mut(&mut name))?;
         Ok(String::from_utf16_lossy(&name))
     }
 }
 
-impl<T, Ctx> Pointer<profile::ListEntry<T>, Ctx>
+impl<T, B: ibc::Backend, Ctx> Pointer<'_, profile::ListEntry<T>, Windows<B>, Ctx>
 where
-    Ctx: HasLayout<profile::ListEntry> + HasLayout<T>,
+    Ctx: Context<Windows<B>>,
+    Windows<B>: HasLayout<T, Ctx>,
 {
     /// Iterate a linked list, yielding elements of type `T`
     fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
         O: FnOnce(&T) -> StructOffset<profile::ListEntry<T>>,
-        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Windows<B>, Ctx>) -> IceResult<()>,
     {
-        let mut pos: Pointer<profile::ListEntry, Ctx> = self.monomorphize();
-        let offset = get_offset(self.ctx.get_layout()).offset;
+        let mut pos: Pointer<profile::ListEntry, _, _> = self.monomorphize();
+        let offset = get_offset(self.os.get_layout()).offset;
 
         loop {
             pos = pos.read_pointer_field(|list| list.Flink)?;
@@ -99,24 +50,24 @@ where
                 break;
             }
 
-            f(Pointer::new(pos.addr - offset, self.ctx))?;
+            f(Pointer::new(pos.addr - offset, self.os, self.ctx))?;
         }
 
         Ok(())
     }
 }
 
-impl<Ctx: HasLayout<profile::RtlBalancedNode>> Pointer<profile::RtlBalancedNode, Ctx> {
+impl<'a, B: ibc::Backend> Pointer<'a, profile::RtlBalancedNode, Windows<B>> {
     fn _iterate_tree<T, F>(self, f: &mut F) -> IceResult<()>
     where
-        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<()>,
     {
         let left = self.read_pointer_field(|node| node.Left)?;
         if !left.is_null() {
             left._iterate_tree(f)?;
         }
 
-        f(Pointer::new(self.addr, self.ctx))?;
+        f(Pointer::new(self.addr, self.os, self.ctx))?;
 
         let right = self.read_pointer_field(|node| node.Right)?;
         if !right.is_null() {
@@ -126,11 +77,11 @@ impl<Ctx: HasLayout<profile::RtlBalancedNode>> Pointer<profile::RtlBalancedNode,
         Ok(())
     }
 
-    fn _find_in_tree<T, F>(self, f: &mut F) -> IceResult<Option<Pointer<T, Ctx>>>
+    fn _find_in_tree<T, F>(self, f: &mut F) -> IceResult<Option<Pointer<'a, T, Windows<B>>>>
     where
-        F: FnMut(Pointer<T, Ctx>) -> IceResult<core::cmp::Ordering>,
+        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<core::cmp::Ordering>,
     {
-        let ptr = Pointer::new(self.addr, self.ctx);
+        let ptr = Pointer::new(self.addr, self.os, self.ctx);
 
         match f(ptr)? {
             core::cmp::Ordering::Less => {
@@ -154,18 +105,18 @@ impl<Ctx: HasLayout<profile::RtlBalancedNode>> Pointer<profile::RtlBalancedNode,
     }
 }
 
-impl<T, Ctx> Pointer<profile::RtlAvlTree<T>, Ctx>
+impl<'a, T, B: ibc::Backend> Pointer<'a, profile::RtlAvlTree<T>, Windows<B>>
 where
-    Ctx: HasLayout<profile::RtlAvlTree> + HasLayout<profile::RtlBalancedNode> + HasLayout<T>,
+    Windows<B>: HasLayout<T>,
 {
     /// Iterate a kernel AVL tree, yielding elements of type `T`
     fn iterate_tree<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
         O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode<T>>,
-        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<()>,
     {
         let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
-        let offset = get_offset(self.ctx.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()).offset;
 
         if offset != 0 {
             return Err(IceError::new("Unsupported structure layout"));
@@ -174,13 +125,17 @@ where
         node._iterate_tree(&mut f)
     }
 
-    fn find_in_tree<O, F>(self, get_offset: O, mut f: F) -> IceResult<Option<Pointer<T, Ctx>>>
+    fn find_in_tree<O, F>(
+        self,
+        get_offset: O,
+        mut f: F,
+    ) -> IceResult<Option<Pointer<'a, T, Windows<B>>>>
     where
         O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode<T>>,
-        F: FnMut(Pointer<T, Ctx>) -> IceResult<core::cmp::Ordering>,
+        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<core::cmp::Ordering>,
     {
         let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
-        let offset = get_offset(self.ctx.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()).offset;
 
         if offset != 0 {
             return Err(IceError::new("Unsupported structure layout"));
@@ -341,40 +296,14 @@ impl<B: Backend> Windows<B> {
     }
 
     #[inline]
-    fn pointer_of<'a, T: AsPointer<U>, U>(&'a self, ptr: T) -> Pointer<U, &'a Self> {
-        ptr.as_pointer(self)
+    fn pointer_of<T: AsPointer<U>, U>(&self, ptr: T) -> Pointer<U, Self> {
+        ptr.as_pointer(self, KernelSpace)
     }
 
     #[inline]
-    fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr, &Self>> {
+    fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr, Self>> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
-        Ok(Pointer::new(per_cpu, self))
-    }
-
-    fn read_virtual_memory_with_proc(
-        &self,
-        mmu_addr: PhysicalAddress,
-        proc: ibc::Process,
-        addr: VirtualAddress,
-        buf: &mut [u8],
-    ) -> IceResult<()> {
-        ibc::read_virtual_memory(addr, buf, |addr, buf| {
-            self.read_virtual_memory_raw(mmu_addr, addr, buf, Some(proc))
-        })?;
-        Ok(())
-    }
-
-    fn try_read_virtual_memory_with_proc(
-        &self,
-        mmu_addr: PhysicalAddress,
-        proc: ibc::Process,
-        addr: VirtualAddress,
-        buf: &mut [u8],
-    ) -> IceResult<()> {
-        ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
-            self.read_virtual_memory_raw(mmu_addr, addr, buf, Some(proc))
-        })?;
-        Ok(())
+        Ok(Pointer::new(per_cpu, self, KernelSpace))
     }
 }
 
@@ -403,6 +332,32 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Ok(())
     }
 
+    fn read_process_memory(
+        &self,
+        proc: ibc::Process,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::read_virtual_memory(addr, buf, |addr, buf| {
+            self.read_virtual_memory_raw(mmu_addr, addr, buf, Some(proc))
+        })?;
+        Ok(())
+    }
+
+    fn try_read_process_memory(
+        &self,
+        proc: ibc::Process,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
+            self.read_virtual_memory_raw(mmu_addr, addr, buf, Some(proc))
+        })?;
+        Ok(())
+    }
+
     #[inline]
     fn kernel_pgd(&self) -> PhysicalAddress {
         self.kpgd
@@ -418,7 +373,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
     ) -> IceResult<()> {
         let head = self.base_addr + self.profile.fast_syms.PsLoadedModuleList;
         let head: Pointer<profile::ListEntry<profile::LdrDataTableEntry>, _> =
-            Pointer::new(head, self);
+            Pointer::new(head, self, KernelSpace);
 
         head.iterate_list(|entry| entry.InLoadOrderLinks, |module| f(module.into()))
     }
@@ -511,7 +466,8 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
         let head = self.base_addr + self.profile.fast_syms.PsActiveProcessHead;
-        let head: Pointer<profile::ListEntry<profile::Eprocess>, _> = Pointer::new(head, self);
+        let head: Pointer<profile::ListEntry<profile::Eprocess>, _> =
+            Pointer::new(head, self, KernelSpace);
 
         head.iterate_list(|eproc| eproc.ActiveProcessLinks, |proc| f(proc.into()))
     }
@@ -670,7 +626,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         };
 
         let codeview = pe_get_pdb_guid(mod_start, &mut Vec::new(), |addr, buf| {
-            self.try_read_virtual_memory_with_proc(pgd, proc, addr, buf)
+            self.try_read_process_memory(proc, pgd, addr, buf)
         })?;
         let codeview = match codeview {
             Some(codeview) => codeview,
@@ -704,7 +660,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         };
 
         let codeview = pe_get_pdb_guid(mod_start, &mut Vec::new(), |addr, buf| {
-            self.try_read_virtual_memory_with_proc(pgd, proc, addr, buf)
+            self.try_read_process_memory(proc, pgd, addr, buf)
         })?;
         let codeview = match codeview {
             Some(codeview) => codeview,

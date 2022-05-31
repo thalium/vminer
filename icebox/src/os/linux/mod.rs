@@ -1,40 +1,12 @@
 pub mod callstack;
 mod profile;
 
-use super::pointer::{Context, HasLayout, Pointer, StructOffset};
+use super::pointer::{Context, HasLayout, KernelSpace, Pointer, StructOffset};
 use crate::core::{self as ice, IceError, IceResult, Os, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
 use core::fmt;
 
 pub use profile::Profile;
-
-struct ProcSpace<'a, B: ice::Backend> {
-    os: &'a Linux<B>,
-    pgd: ibc::PhysicalAddress,
-}
-
-impl<B: ice::Backend> Clone for ProcSpace<'_, B> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<B: ice::Backend> Copy for ProcSpace<'_, B> {}
-
-impl<B: ice::Backend> Context for ProcSpace<'_, B> {
-    #[inline]
-    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        self.os.read_virtual_memory(self.pgd, addr, buf)
-    }
-}
-
-impl<B: ice::Backend> Context for &Linux<B> {
-    #[inline]
-    fn read_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
-        self.read_virtual_memory(self.kpgd, addr, buf)
-    }
-}
 
 pointer_defs! {
     ibc::Module = profile::VmAreaStruct;
@@ -44,18 +16,18 @@ pointer_defs! {
     ibc::Vma = profile::VmAreaStruct;
 }
 
-impl<T, Ctx> Pointer<profile::ListHead<T>, Ctx>
+impl<T, B: ibc::Backend> Pointer<'_, profile::ListHead<T>, Linux<B>>
 where
-    Ctx: HasLayout<profile::ListHead> + HasLayout<T>,
+    Linux<B>: HasLayout<T>,
 {
     /// Iterate a linked list, yielding elements of type `T`
     fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
         O: FnOnce(&T) -> StructOffset<profile::ListHead<T>>,
-        F: FnMut(Pointer<T, Ctx>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Linux<B>>) -> IceResult<()>,
     {
         let mut pos = self.monomorphize();
-        let offset = get_offset(self.ctx.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()).offset;
 
         loop {
             pos = pos.read_pointer_field(|list| list.next)?;
@@ -64,17 +36,14 @@ where
                 break;
             }
 
-            f(Pointer::new(pos.addr - offset, self.ctx))?;
+            f(Pointer::new(pos.addr - offset, self.os, self.ctx))?;
         }
 
         Ok(())
     }
 }
 
-impl<Ctx> Pointer<profile::Dentry, Ctx>
-where
-    Ctx: HasLayout<profile::Dentry> + HasLayout<profile::Qstr>,
-{
+impl<B: ibc::Backend> Pointer<'_, profile::Dentry, Linux<B>> {
     fn build_path(self, buf: &mut Vec<u8>) -> IceResult<()> {
         // Paths start with the last components in the kernel but we want them
         // to start by the root, so we call ourselves recursively to build the
@@ -99,7 +68,7 @@ where
             buf[len] = b'/';
             len += 1;
         }
-        self.ctx.read_memory(name, &mut buf[len..])?;
+        self.ctx.read_memory(self.os, name, &mut buf[len..])?;
 
         match memchr::memchr(0, &buf[len..]) {
             Some(i) => buf.truncate(len + i),
@@ -110,10 +79,7 @@ where
     }
 }
 
-impl<Ctx> Pointer<profile::Path, Ctx>
-where
-    Ctx: HasLayout<profile::Path> + HasLayout<profile::Dentry> + HasLayout<profile::Qstr>,
-{
+impl<B: ibc::Backend> Pointer<'_, profile::Path, Linux<B>> {
     fn read_file_name(self) -> IceResult<String> {
         let mut buf = Vec::new();
         self.read_pointer_field(|p| p.dentry)?
@@ -168,8 +134,8 @@ impl<B: ice::Backend> Linux<B> {
     }
 
     #[inline]
-    fn pointer_of<'a, T: AsPointer<U>, U>(&'a self, ptr: T) -> Pointer<U, &'a Self> {
-        ptr.as_pointer(self)
+    fn pointer_of<T: AsPointer<U>, U>(&self, ptr: T) -> Pointer<U, Self> {
+        ptr.as_pointer(self, KernelSpace)
     }
 
     pub fn per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
@@ -187,7 +153,7 @@ impl<B: ice::Backend> Linux<B> {
         lib.get_symbol_inexact(addr)
     }
 
-    fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct, &Self>> {
+    fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct, Self>> {
         let proc = self.pointer_of(proc);
         let mut mm = proc.read_pointer_field(|ts| ts.mm)?;
 

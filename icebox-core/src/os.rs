@@ -80,6 +80,30 @@ pub trait Os {
         buf: &mut [u8],
     ) -> IceResult<()>;
 
+    fn read_process_memory(
+        &self,
+        _proc: Process,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        self.read_virtual_memory(mmu_addr, addr, buf)
+    }
+
+    fn try_read_process_memory(
+        &self,
+        _proc: Process,
+        mmu_addr: PhysicalAddress,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
+        self.try_read_virtual_memory(mmu_addr, addr, buf)
+    }
+
+    fn read_kernel_memory(&self, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+        self.read_virtual_memory(self.kernel_pgd(), addr, buf)
+    }
+
     fn kernel_pgd(&self) -> PhysicalAddress;
 
     fn for_each_kernel_module(&self, f: &mut dyn FnMut(Module) -> IceResult<()>) -> IceResult<()>;

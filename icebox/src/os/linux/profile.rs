@@ -1,13 +1,15 @@
-use crate::core::{self as ice, IceResult, VirtualAddress};
-use crate::os::pointer::{HasLayout, Pointer, StructOffset};
+use crate::os::pointer::{self, HasLayout, StructOffset};
 use core::marker::PhantomData;
+use ibc::{IceResult, VirtualAddress};
+
+type Pointer<T> = pointer::RawPointer<T>;
 
 pub(crate) struct FastSymbols {
     pub(crate) per_cpu_offset: VirtualAddress,
     pub(crate) current_task: Option<u64>,
 
-    pub(super) init_task: ice::VirtualAddress,
-    pub linux_banner: ice::VirtualAddress,
+    pub(super) init_task: ibc::VirtualAddress,
+    pub linux_banner: ibc::VirtualAddress,
 }
 
 /// This macro defines Rust types to access kernel structures with type checking
@@ -45,7 +47,7 @@ macro_rules! define_kernel_structs {
 
             // Make a constructor
             impl $(<$gen>)? $struct_name $(<$gen>)? {
-                fn new(layout: ice::symbols::Struct) -> IceResult<Self> {
+                fn new(layout: ibc::symbols::Struct) -> IceResult<Self> {
                     Ok(Self {
                         $(
                             $field: StructOffset::new(layout, stringify!($field))?,
@@ -64,7 +66,7 @@ macro_rules! define_kernel_structs {
             )?
 
             // Make the struct easily available
-            impl<B: ice::Backend> HasLayout<$struct_name> for &super::Linux<B> {
+            impl<B: ibc::Backend> HasLayout<$struct_name, pointer::KernelSpace> for super::Linux<B> {
                 fn get_layout(&self) -> &$struct_name {
                     &self.profile.layouts.$kname
                 }
@@ -79,7 +81,7 @@ macro_rules! define_kernel_structs {
         }
 
         impl $layouts {
-            fn new(syms: &ice::ModuleSymbols) -> IceResult<Self> {
+            fn new(syms: &ibc::ModuleSymbols) -> IceResult<Self> {
                 Ok(Self {
                     $(
                         $kname: $struct_name::new(syms.get_struct(stringify!($kname))?)?,
@@ -158,14 +160,14 @@ define_kernel_structs! {
 
 pub struct Profile {
     #[allow(unused)]
-    pub(crate) syms: ice::SymbolsIndexer,
+    pub(crate) syms: ibc::SymbolsIndexer,
     pub(crate) fast_syms: FastSymbols,
 
     pub(super) layouts: Layouts,
 }
 
 impl Profile {
-    pub fn new(syms: ice::SymbolsIndexer) -> IceResult<Self> {
+    pub fn new(syms: ibc::SymbolsIndexer) -> IceResult<Self> {
         let symbols = syms.get_lib("System.map")?;
         let per_cpu_offset = symbols.get_address("__per_cpu_offset")?;
         let current_task = symbols.get_address("current_task").ok().map(|sym| sym.0);

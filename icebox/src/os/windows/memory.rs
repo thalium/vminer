@@ -1,4 +1,4 @@
-use super::{profile, Pointer};
+use super::{pointer, profile, Pointer};
 use ibc::{Os, PhysicalAddress, VirtualAddress};
 
 const VAD_MASK: u64 = 0xffffffff00000000;
@@ -80,7 +80,7 @@ impl<B: ibc::Backend> super::Windows<B> {
 
             let vma_start = self.vma_start(vma)?;
 
-            let pte: Pointer<profile::Mmvad, _> = Pointer::new(vma.0, self);
+            let pte: Pointer<profile::Mmvad, _> = Pointer::new(vma.0, self, pointer::KernelSpace);
             let mut pte = pte.read_pointer_field(|mmvad| mmvad.FirstPrototypePte)?;
 
             pte.addr += ((addr - vma_start) as u64 / 0x1000) * 8;

@@ -5,20 +5,20 @@ mod pointer;
 macro_rules! pointer_defs {
     ( $( $core_ty:path = $ptr:ty; )* ) => {
         trait AsPointer<T> {
-            fn as_pointer<Ctx>(self, ctx: Ctx) -> Pointer<T, Ctx>;
+            fn as_pointer<Os, Ctx>(self, os: &Os, ctx: Ctx) -> Pointer<T, Os, Ctx>;
         }
 
         $(
             impl AsPointer<$ptr> for $core_ty {
                 #[inline]
-                fn as_pointer<Ctx>(self, ctx: Ctx) -> Pointer<$ptr, Ctx> {
-                    Pointer::new(self.0, ctx)
+                fn as_pointer<Os, Ctx>(self, os: &Os, ctx: Ctx) -> Pointer<$ptr, Os, Ctx> {
+                    Pointer::new(self.0, os, ctx)
                 }
             }
 
-            impl<Ctx> From<Pointer<$ptr, Ctx>> for $core_ty {
+            impl<Os, Ctx> From<Pointer<'_, $ptr, Os, Ctx>> for $core_ty {
                 #[inline]
-                fn from(ptr: Pointer<$ptr, Ctx>) -> $core_ty {
+                fn from(ptr: Pointer<$ptr, Os, Ctx>) -> $core_ty {
                     $core_ty(ptr.addr)
                 }
             }

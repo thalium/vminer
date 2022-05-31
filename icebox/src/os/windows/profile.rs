@@ -1,8 +1,10 @@
 #![allow(non_snake_case)]
 
-use crate::os::pointer::{HasLayout, Pointer, StructOffset};
+use crate::os::pointer::{self, HasLayout, StructOffset};
 use core::marker::PhantomData;
 use ibc::{IceResult, PhysicalAddress, VirtualAddress};
+
+type Pointer<T> = pointer::RawPointer<T>;
 
 pub(crate) struct FastSymbols {
     pub KiImplementedPhysicalBits: u64,
@@ -10,9 +12,30 @@ pub(crate) struct FastSymbols {
     pub PsLoadedModuleList: u64,
 }
 
-macro_rules! types {
-    (kernel) => { &super::Windows<B> };
-    (user) => { super::ProcSpace<'_, B> };
+macro_rules! impl_has_layout {
+    (impl HasLayout<$struct_name:ident, kernel> = $kname:ident) => {
+        impl<B: ibc::Backend> HasLayout<$struct_name, pointer::KernelSpace> for super::Windows<B> {
+            fn get_layout(&self) -> &$struct_name {
+                &self.profile().layouts.$kname
+            }
+        }
+    };
+
+    (impl HasLayout<$struct_name:ident, user> = $kname:ident) => {
+        impl<B: ibc::Backend> HasLayout<$struct_name, pointer::ProcSpace> for super::Windows<B> {
+            fn get_layout(&self) -> &$struct_name {
+                &self.profile().layouts.$kname
+            }
+        }
+    };
+
+    (impl HasLayout<$struct_name:ident, all> = $kname:ident) => {
+        impl<B: ibc::Backend, Ctx> HasLayout<$struct_name, Ctx> for super::Windows<B> {
+            fn get_layout(&self) -> &$struct_name {
+                &self.profile().layouts.$kname
+            }
+        }
+    };
 }
 
 /// This macro defines Rust types to access kernel structures with type checking
@@ -25,7 +48,7 @@ macro_rules! define_structs {
             // Each structure has to define the name of the matching kernel
             // struct and the fields it wants to access
             #[actual_name($kname:ident)]
-            #[define_for( $( $space:tt ),+ )]
+            #[define_for($space:tt)]
             $( #[ $attr:meta ] )*
             struct $struct_name:ident $(<$gen:ident>)? {
                 $(
@@ -70,14 +93,7 @@ macro_rules! define_structs {
                 }
             )?
 
-            $(
-                // Make the struct easily available
-                impl<B: ibc::Backend> HasLayout<$struct_name> for types!($space) {
-                    fn get_layout(&self) -> &$struct_name {
-                        &self.profile().layouts.$kname
-                    }
-                }
-            )+
+            impl_has_layout!(impl HasLayout<$struct_name, $space> = $kname);
         )*
 
         // Then put all layouts in a single structure
@@ -166,7 +182,7 @@ define_structs! {
     }
 
     #[actual_name(_LDR_DATA_TABLE_ENTRY)]
-    #[define_for(user, kernel)]
+    #[define_for(all)]
     struct LdrDataTableEntry {
         BaseDllName: UnicodeString,
         DllBase: VirtualAddress,
@@ -176,7 +192,7 @@ define_structs! {
     }
 
     #[actual_name(_LIST_ENTRY)]
-    #[define_for(kernel, user)]
+    #[define_for(all)]
     struct ListEntry<T> {
         Flink: Pointer<ListEntry>,
         #[allow(dead_code)]
@@ -225,7 +241,7 @@ define_structs! {
     }
 
     #[actual_name(_UNICODE_STRING)]
-    #[define_for(kernel, user)]
+    #[define_for(all)]
     struct UnicodeString {
         Length: u16,
         Buffer: VirtualAddress,

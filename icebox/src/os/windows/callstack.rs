@@ -173,9 +173,9 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     fn read_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
         let mut value = bytemuck::Zeroable::zeroed();
         let pgd = self.pgd_for(addr);
-        self.windows.read_virtual_memory_with_proc(
-            pgd,
+        self.windows.read_process_memory(
             self.proc,
+            pgd,
             addr,
             bytemuck::bytes_of_mut(&mut value),
         )?;
@@ -329,12 +329,8 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     fn init_unwind_data(&self, module: &Module) -> IceResult<UnwindData> {
         let mut content = vec![0; (module.end - module.start) as usize];
         let pgd = self.pgd_for(module.start);
-        self.windows.try_read_virtual_memory_with_proc(
-            pgd,
-            self.proc,
-            module.start,
-            &mut content,
-        )?;
+        self.windows
+            .try_read_process_memory(self.proc, pgd, module.start, &mut content)?;
 
         let pe = object::read::pe::PeFile64::parse(&*content).context("failed to parse PE")?;
         let directory = pe
