@@ -10,7 +10,6 @@ pub use profile::Profile;
 
 pointer_defs! {
     ibc::Module = profile::VmAreaStruct;
-    ibc::Path = profile::Path;
     ibc::Process = profile::TaskStruct;
     ibc::Thread = profile::TaskStruct;
     ibc::Vma = profile::VmAreaStruct;
@@ -314,13 +313,10 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         }
     }
 
-    fn process_exe(&self, proc: ice::Process) -> IceResult<Option<ibc::Path>> {
+    fn process_path(&self, proc: ice::Process) -> IceResult<Option<String>> {
         self.process_mm(proc)?
             .read_pointer_field(|mm| mm.exe_file)?
-            .map_non_null(|file| {
-                let path = file.field(|file| file.f_path)?;
-                Ok(path.into())
-            })
+            .map_non_null(|file| file.field(|file| file.f_path)?.read_file_path())
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
@@ -386,7 +382,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         f: &mut dyn FnMut(ibc::Module) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.process_for_each_vma(proc, &mut |vma| {
-            if self.vma_offset(vma)? == 0 && self.vma_file(vma)?.is_some() {
+            if self.vma_offset(vma)? == 0 && self.vma_path(vma)?.is_some() {
                 f(ibc::Module(vma.0))
             } else {
                 Ok(ControlFlow::Continue(()))
@@ -412,17 +408,10 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         self.process_name(ibc::Process(thread.0)).map(Some)
     }
 
-    fn path_to_string(&self, path: ice::Path) -> IceResult<String> {
-        self.pointer_of(path).read_file_path()
-    }
-
-    fn vma_file(&self, vma: ice::Vma) -> IceResult<Option<ibc::Path>> {
+    fn vma_path(&self, vma: ice::Vma) -> IceResult<Option<String>> {
         self.pointer_of(vma)
             .read_pointer_field(|vma| vma.vm_file)?
-            .map_non_null(|file| {
-                let path = file.field(|file| file.f_path)?;
-                Ok(path.into())
-            })
+            .map_non_null(|file| file.field(|file| file.f_path)?.read_file_path())
     }
 
     fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {

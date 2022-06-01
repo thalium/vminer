@@ -27,7 +27,7 @@ pub use mem::File;
 pub use mem::Memory;
 
 mod os;
-pub use os::{Module, Os, Path, Process, StackFrame, Thread, Vma, VmaFlags};
+pub use os::{Module, Os, Process, StackFrame, Thread, Vma, VmaFlags};
 
 pub mod symbols;
 pub use symbols::{ModuleSymbols, SymbolsIndexer};

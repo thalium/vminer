@@ -325,11 +325,7 @@ impl Process {
     #[getter]
     fn exe(&self, py: Python) -> PyResult<Option<String>> {
         let os = self.os.borrow(py)?;
-        let path = os.0.process_exe(self.proc).convert_err()?;
-        Ok(path
-            .map(|path| os.0.path_to_string(path))
-            .transpose()
-            .convert_err()?)
+        os.0.process_path(self.proc).convert_err()
     }
 
     fn parent(&self, py: Python) -> PyResult<Process> {
@@ -474,9 +470,7 @@ impl Vma {
         let start = os.0.vma_start(vma)?.0;
         let end = os.0.vma_end(vma)?.0;
         let file =
-            os.0.vma_file(vma)?
-                .map(|path| os.0.path_to_string(path))
-                .transpose()?
+            os.0.vma_path(vma)?
                 .map(|file| PyString::new(py, &file).into());
 
         Ok(Self { start, end, file })

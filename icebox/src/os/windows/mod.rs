@@ -8,7 +8,6 @@ mod profile;
 
 pointer_defs! {
     ibc::Module = profile::LdrDataTableEntry;
-    ibc::Path = profile::FileObject;
     ibc::Process = profile::Eprocess;
     ibc::Thread = profile::Ethread;
     ibc::Vma = profile::MmvadShort;
@@ -432,10 +431,13 @@ impl<B: Backend> ibc::Os for Windows<B> {
         kproc.read_field(|kproc| kproc.DirectoryTableBase)
     }
 
-    fn process_exe(&self, proc: ibc::Process) -> IceResult<Option<ibc::Path>> {
+    fn process_path(&self, proc: ibc::Process) -> IceResult<Option<String>> {
         self.pointer_of(proc)
             .read_pointer_field(|e| e.ImageFilePointer)?
-            .map_non_null(|path| Ok(path.into()))
+            .map_non_null(|path| {
+                path.field(|file_object| file_object.FileName)?
+                    .read_unicode_string()
+            })
     }
 
     fn process_parent(&self, proc: ibc::Process) -> IceResult<ibc::Process> {
@@ -563,13 +565,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
             .map_non_null(|name| name.read_unicode_string())
     }
 
-    fn path_to_string(&self, path: ibc::Path) -> IceResult<String> {
-        self.pointer_of(path)
-            .field(|file_object| file_object.FileName)?
-            .read_unicode_string()
-    }
-
-    fn vma_file(&self, _vma: ibc::Vma) -> IceResult<Option<ibc::Path>> {
+    fn vma_path(&self, _vma: ibc::Vma) -> IceResult<Option<String>> {
         Err(ibc::IceError::unimplemented())
     }
 
