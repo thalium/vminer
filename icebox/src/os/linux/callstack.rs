@@ -1,3 +1,5 @@
+use core::ops::ControlFlow;
+
 use alloc::{format, vec::Vec};
 use gimli::UnwindSection;
 use hashbrown::HashMap;
@@ -52,7 +54,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         linux.process_for_each_module(proc, &mut |module| {
             let (start, end) = linux.module_span(module, proc)?;
             modules.push(Module { start, end, module });
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         })?;
 
         let eh_frames = modules
@@ -177,7 +179,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
 pub fn iter<B: ibc::Backend>(
     linux: &Linux<B>,
     proc: ibc::Process,
-    f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<()>,
+    f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
 ) -> IceResult<()> {
     use ibc::arch::{Vcpu, Vcpus};
 
@@ -267,7 +269,9 @@ pub fn iter<B: ibc::Backend>(
         frame.size = Some(fde.len());
 
         // Now the frame is complete, we can "send" it before starting again
-        f(&frame)?;
+        if f(&frame)?.is_break() {
+            return Ok(());
+        }
 
         let row = fde
             .unwind_info_for_address(

@@ -1,3 +1,4 @@
+use core::ops::ControlFlow;
 use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
 use once_cell::unsync::OnceCell;
 
@@ -135,7 +136,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 module,
                 unwind_data: OnceCell::new(),
             });
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         })?;
 
         windows.for_each_kernel_module(&mut |module| {
@@ -147,7 +148,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
                 module,
                 unwind_data: OnceCell::new(),
             });
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         })?;
 
         vmas.sort_unstable_by_key(|v| v.start);
@@ -419,7 +420,7 @@ impl<B: Backend> Windows<B> {
     pub fn iter_process_callstack(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<()>,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         use ibc::arch::{Vcpu, Vcpus};
 
@@ -447,7 +448,7 @@ impl<B: Backend> Windows<B> {
     pub fn iter_callstack(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<()>,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
         instruction_pointer: VirtualAddress,
         stack_pointer: VirtualAddress,
         mut base_pointer: Option<VirtualAddress>,
@@ -476,15 +477,19 @@ impl<B: Backend> Windows<B> {
             match unwind_result {
                 Ok(infos) => {
                     frame.start = infos.fun_start;
-                    f(&frame)?;
+                    if f(&frame)?.is_break() {
+                        return Ok(());
+                    }
 
                     frame.instruction_pointer = infos.next_ip;
                     frame.stack_pointer = infos.next_sp;
                 }
                 Err(err) => {
                     frame.start = None;
-                    f(&frame)?;
-                    return Err(err);
+                    return match f(&frame)? {
+                        ControlFlow::Continue(()) => Err(err),
+                        ControlFlow::Break(()) => Ok(()),
+                    };
                 }
             }
 

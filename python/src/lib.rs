@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::ControlFlow, sync::Arc};
 
 use ibc::{IceError, IceResult};
 use icebox::os::OsBuilder;
@@ -406,7 +406,7 @@ impl Process {
                 proc: self.proc,
                 module: GILOnceCell::new(),
             });
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         });
 
         Ok(CallStackIter {

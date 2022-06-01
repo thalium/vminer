@@ -1,4 +1,4 @@
-use core::{fmt, mem};
+use core::{fmt, mem, ops::ControlFlow};
 
 use crate::{
     c_char, cstring, error, symbols::Symbols, Backend, Error, PhysicalAddress, VirtualAddress,
@@ -134,12 +134,14 @@ pub unsafe extern "C" fn os_processes(
 ) -> *mut Error {
     let mut n = 0;
     let res = os.0.for_each_process(&mut |proc| {
-        if *n_procs > n {
+        Ok(if *n_procs > n {
             procs.write(proc.into());
             procs = procs.add(1);
             n += 1;
-        }
-        Ok(())
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        })
     });
     *n_procs = n;
     error::wrap_unit_result(res)

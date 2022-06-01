@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, ops::ControlFlow};
 
 use ibc::{IceResult, Os, VirtualAddress};
 use icebox::{backends::kvm_dump::DumbDump, os::Linux};
@@ -84,7 +84,7 @@ fn proc_tree(arch: Arch) {
 
             let proc = collect_proc_tree(os, child)?;
             children.push(proc);
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         })?;
 
         let mut threads = Vec::new();
@@ -94,7 +94,7 @@ fn proc_tree(arch: Arch) {
             let tid = os.thread_id(thread)?;
             let name = os.thread_name(thread)?;
             threads.push(Thread { tid, name });
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         })?;
 
         Ok(Proc {
@@ -173,7 +173,7 @@ fn vmas(arch: Arch) {
                 offset,
                 path,
             });
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         })
         .unwrap();
 
@@ -235,7 +235,7 @@ fn callstack(arch: Arch) {
                 instruction_pointer,
                 symbol,
             });
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         })
         .unwrap();
 

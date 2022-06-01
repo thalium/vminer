@@ -1,5 +1,6 @@
 use crate::{IceResult, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
+use core::ops::ControlFlow;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct Module(pub VirtualAddress);
@@ -56,6 +57,29 @@ impl core::ops::BitOrAssign for VmaFlags {
     }
 }
 
+#[inline]
+fn find<'a, T: Copy>(
+    result: &'a mut Option<T>,
+    mut predicate: impl FnMut(T) -> IceResult<bool> + 'a,
+) -> impl FnMut(T) -> IceResult<ControlFlow<()>> + 'a {
+    move |item| {
+        Ok(if predicate(item)? {
+            *result = Some(item);
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        })
+    }
+}
+
+#[inline]
+fn push_to<'a, T>(vec: &'a mut Vec<T>) -> impl FnMut(T) -> IceResult<ControlFlow<()>> + 'a {
+    move |item| {
+        vec.push(item);
+        Ok(ControlFlow::Continue(()))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StackFrame {
     pub start: Option<VirtualAddress>,
@@ -106,7 +130,10 @@ pub trait Os {
 
     fn kernel_pgd(&self) -> PhysicalAddress;
 
-    fn for_each_kernel_module(&self, f: &mut dyn FnMut(Module) -> IceResult<()>) -> IceResult<()>;
+    fn for_each_kernel_module(
+        &self,
+        f: &mut dyn FnMut(Module) -> IceResult<ControlFlow<()>>,
+    ) -> IceResult<()>;
 
     fn init_process(&self) -> IceResult<Process>;
     fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
@@ -116,26 +143,12 @@ pub trait Os {
     }
     fn find_process_by_name(&self, name: &str) -> IceResult<Option<Process>> {
         let mut proc = None;
-
-        self.for_each_process(&mut |p| {
-            if self.process_name(p)? == name {
-                proc = Some(p);
-            }
-            Ok(())
-        })?;
-
+        self.for_each_process(&mut find(&mut proc, |p| Ok(self.process_name(p)? == name)))?;
         Ok(proc)
     }
     fn find_process_by_pid(&self, pid: u64) -> IceResult<Option<Process>> {
         let mut proc = None;
-
-        self.for_each_process(&mut |p| {
-            if self.process_pid(p)? == pid {
-                proc = Some(p);
-            }
-            Ok(())
-        })?;
-
+        self.for_each_process(&mut find(&mut proc, |p| Ok(self.process_pid(p)? == pid)))?;
         Ok(proc)
     }
 
@@ -149,48 +162,51 @@ pub trait Os {
     fn process_for_each_child(
         &self,
         proc: Process,
-        f: &mut dyn FnMut(Process) -> IceResult<()>,
+        f: &mut dyn FnMut(Process) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()>;
     fn process_collect_children(&self, proc: Process) -> IceResult<Vec<Process>> {
         let mut procs = Vec::new();
-        self.process_for_each_child(proc, &mut |p| Ok(procs.push(p)))?;
+        self.process_for_each_child(proc, &mut push_to(&mut procs))?;
         Ok(procs)
     }
     fn process_for_each_thread(
         &self,
         proc: Process,
-        f: &mut dyn FnMut(Thread) -> IceResult<()>,
+        f: &mut dyn FnMut(Thread) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()>;
     fn process_collect_threads(&self, proc: Process) -> IceResult<Vec<Thread>> {
         let mut threads = Vec::new();
-        self.process_for_each_thread(proc, &mut |t| Ok(threads.push(t)))?;
+        self.process_for_each_thread(proc, &mut push_to(&mut threads))?;
         Ok(threads)
     }
     fn process_for_each_module(
         &self,
         proc: Process,
-        f: &mut dyn FnMut(Module) -> IceResult<()>,
+        f: &mut dyn FnMut(Module) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()>;
 
     fn process_collect_modules(&self, proc: Process) -> IceResult<Vec<Module>> {
         let mut modules = Vec::new();
-        self.process_for_each_module(proc, &mut |m| Ok(modules.push(m)))?;
+        self.process_for_each_module(proc, &mut push_to(&mut modules))?;
         Ok(modules)
     }
-    fn for_each_process(&self, f: &mut dyn FnMut(Process) -> IceResult<()>) -> IceResult<()>;
+    fn for_each_process(
+        &self,
+        f: &mut dyn FnMut(Process) -> IceResult<ControlFlow<()>>,
+    ) -> IceResult<()>;
     fn collect_processes(&self) -> IceResult<Vec<Process>> {
         let mut procs = Vec::new();
-        self.for_each_process(&mut |p| Ok(procs.push(p)))?;
+        self.for_each_process(&mut push_to(&mut procs))?;
         Ok(procs)
     }
     fn process_for_each_vma(
         &self,
         proc: Process,
-        f: &mut dyn FnMut(Vma) -> IceResult<()>,
+        f: &mut dyn FnMut(Vma) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()>;
     fn process_collect_vmas(&self, proc: Process) -> IceResult<Vec<Vma>> {
         let mut vmas = Vec::new();
-        self.process_for_each_vma(proc, &mut |vma| Ok(vmas.push(vma)))?;
+        self.process_for_each_vma(proc, &mut push_to(&mut vmas))?;
         Ok(vmas)
     }
 
@@ -200,19 +216,14 @@ pub trait Os {
         addr: VirtualAddress,
     ) -> IceResult<Option<Vma>> {
         let mut vma = None;
-        self.process_for_each_vma(proc, &mut |v| {
-            if self.vma_contains(v, addr)? {
-                vma = Some(v);
-            }
-            Ok(())
-        })?;
+        self.process_for_each_vma(proc, &mut find(&mut vma, |v| self.vma_contains(v, addr)))?;
         Ok(vma)
     }
 
     fn process_callstack(
         &self,
         proc: Process,
-        f: &mut dyn FnMut(&StackFrame) -> IceResult<()>,
+        f: &mut dyn FnMut(&StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()>;
 
     fn thread_process(&self, thread: Thread) -> IceResult<Process>;
@@ -255,17 +266,13 @@ pub trait Os {
     ) -> IceResult<Option<Module>> {
         let mut result = None;
 
-        let mut find = |module| {
-            if self.module_contains(module, proc, addr)? {
-                result = Some(module);
+        {
+            let mut find = find(&mut result, |m| self.module_contains(m, proc, addr));
+            if addr.is_kernel() {
+                self.for_each_kernel_module(&mut find)?;
+            } else {
+                self.process_for_each_module(proc, &mut find)?;
             }
-            Ok(())
-        };
-
-        if addr.is_kernel() {
-            self.for_each_kernel_module(&mut find)?;
-        } else {
-            self.process_for_each_module(proc, &mut find)?;
         }
 
         Ok(result)

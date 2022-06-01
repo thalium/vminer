@@ -4,7 +4,7 @@ mod profile;
 use super::pointer::{Context, HasLayout, KernelSpace, Pointer, StructOffset};
 use crate::core::{self as ice, IceError, IceResult, Os, PhysicalAddress, VirtualAddress};
 use alloc::{string::String, vec::Vec};
-use core::fmt;
+use core::{fmt, ops::ControlFlow};
 
 pub use profile::Profile;
 
@@ -24,7 +24,7 @@ where
     fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
         O: FnOnce(&T) -> StructOffset<profile::ListHead<T>>,
-        F: FnMut(Pointer<T, Linux<B>>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Linux<B>>) -> IceResult<ControlFlow<()>>,
     {
         let mut pos = self.monomorphize();
         let offset = get_offset(self.os.get_layout()).offset;
@@ -212,7 +212,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn for_each_kernel_module(
         &self,
-        _f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+        _f: &mut dyn FnMut(ibc::Module) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         Ok(())
     }
@@ -258,10 +258,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
                 let mut current_task = None;
                 self.for_each_process(&mut |proc| {
                     let proc_pgd = self.process_pgd(proc)?;
-                    if proc_pgd == vcpu_pgd {
+                    Ok(if proc_pgd == vcpu_pgd {
                         current_task = Some(ibc::Thread(proc.0));
-                    }
-                    Ok(())
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    })
                 })?;
 
                 current_task.ok_or_else(|| ibc::IceError::new("cannot find current thread"))
@@ -335,7 +337,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn process_for_each_child(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
+        f: &mut dyn FnMut(ibc::Process) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|ts| ts.children)?
@@ -345,14 +347,17 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn process_for_each_thread(
         &self,
         proc: ice::Process,
-        f: &mut dyn FnMut(ice::Thread) -> IceResult<()>,
+        f: &mut dyn FnMut(ice::Thread) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|ts| ts.thread_group)?
             .iterate_list(|ts| ts.thread_group, |thread| f(thread.into()))
     }
 
-    fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
+    fn for_each_process(
+        &self,
+        f: &mut dyn FnMut(ibc::Process) -> IceResult<ControlFlow<()>>,
+    ) -> IceResult<()> {
         let init = self.init_process()?;
         self.pointer_of(init)
             .field(|ts| ts.tasks)?
@@ -362,7 +367,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn process_for_each_vma(
         &self,
         proc: ice::Process,
-        f: &mut dyn FnMut(ice::Vma) -> IceResult<()>,
+        f: &mut dyn FnMut(ice::Vma) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         let mm = self.process_mm(proc)?;
         let mut cur_vma = mm.read_pointer_field(|mm| mm.mmap)?;
@@ -378,13 +383,13 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn process_for_each_module(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+        f: &mut dyn FnMut(ibc::Module) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.process_for_each_vma(proc, &mut |vma| {
             if self.vma_offset(vma)? == 0 && self.vma_file(vma)?.is_some() {
                 f(ibc::Module(vma.0))
             } else {
-                Ok(())
+                Ok(ControlFlow::Continue(()))
             }
         })
     }
@@ -392,7 +397,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     fn process_callstack(
         &self,
         proc: ice::Process,
-        f: &mut dyn FnMut(&ice::StackFrame) -> IceResult<()>,
+        f: &mut dyn FnMut(&ice::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         callstack::iter(self, proc, f)
     }

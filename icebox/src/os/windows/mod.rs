@@ -1,5 +1,5 @@
 use super::pointer::{self, Context, HasLayout, KernelSpace, Pointer, StructOffset};
-use core::{fmt, mem, str};
+use core::{fmt, mem, ops::ControlFlow, str};
 use ibc::{Backend, IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
 
 mod callstack;
@@ -38,7 +38,7 @@ where
     fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
         O: FnOnce(&T) -> StructOffset<profile::ListEntry<T>>,
-        F: FnMut(Pointer<T, Windows<B>, Ctx>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Windows<B>, Ctx>) -> IceResult<ControlFlow<()>>,
     {
         let mut pos: Pointer<profile::ListEntry, _, _> = self.monomorphize();
         let offset = get_offset(self.os.get_layout()).offset;
@@ -50,7 +50,9 @@ where
                 break;
             }
 
-            f(Pointer::new(pos.addr - offset, self.os, self.ctx))?;
+            if f(Pointer::new(pos.addr - offset, self.os, self.ctx))?.is_break() {
+                break;
+            }
         }
 
         Ok(())
@@ -58,23 +60,29 @@ where
 }
 
 impl<'a, B: ibc::Backend> Pointer<'a, profile::RtlBalancedNode, Windows<B>> {
-    fn _iterate_tree<T, F>(self, f: &mut F) -> IceResult<()>
+    fn _iterate_tree<T, F>(self, f: &mut F) -> IceResult<ControlFlow<()>>
     where
-        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<ControlFlow<()>>,
     {
         let left = self.read_pointer_field(|node| node.Left)?;
         if !left.is_null() {
-            left._iterate_tree(f)?;
+            if left._iterate_tree(f)?.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
         }
 
-        f(Pointer::new(self.addr, self.os, self.ctx))?;
+        if f(Pointer::new(self.addr, self.os, self.ctx))?.is_break() {
+            return Ok(ControlFlow::Break(()));
+        }
 
         let right = self.read_pointer_field(|node| node.Right)?;
         if !right.is_null() {
-            right._iterate_tree(f)?;
+            if right._iterate_tree(f)?.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
         }
 
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 
     fn _find_in_tree<T, F>(self, f: &mut F) -> IceResult<Option<Pointer<'a, T, Windows<B>>>>
@@ -113,7 +121,7 @@ where
     fn iterate_tree<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
         O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode<T>>,
-        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<()>,
+        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<ControlFlow<()>>,
     {
         let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
         let offset = get_offset(self.os.get_layout()).offset;
@@ -122,7 +130,8 @@ where
             return Err(IceError::new("Unsupported structure layout"));
         }
 
-        node._iterate_tree(&mut f)
+        node._iterate_tree(&mut f)?;
+        Ok(())
     }
 
     fn find_in_tree<O, F>(
@@ -369,7 +378,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn for_each_kernel_module(
         &self,
-        f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+        f: &mut dyn FnMut(ibc::Module) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         let head = self.base_addr + self.profile.fast_syms.PsLoadedModuleList;
         let head: Pointer<profile::ListEntry<profile::LdrDataTableEntry>, _> =
@@ -442,14 +451,14 @@ impl<B: Backend> ibc::Os for Windows<B> {
     fn process_for_each_child(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(ibc::Process) -> IceResult<()>,
+        f: &mut dyn FnMut(ibc::Process) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         let pid = self.process_pid(proc)?;
         self.for_each_process(&mut |proc| {
             if self.process_parent_id(proc)? == pid {
                 f(proc)
             } else {
-                Ok(())
+                Ok(ControlFlow::Continue(()))
             }
         })
     }
@@ -457,14 +466,17 @@ impl<B: Backend> ibc::Os for Windows<B> {
     fn process_for_each_thread(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(ibc::Thread) -> IceResult<()>,
+        f: &mut dyn FnMut(ibc::Thread) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|eproc| eproc.ThreadListHead)?
             .iterate_list(|ethread| ethread.ThreadListEntry, |thread| f(thread.into()))
     }
 
-    fn for_each_process(&self, f: &mut dyn FnMut(ibc::Process) -> IceResult<()>) -> IceResult<()> {
+    fn for_each_process(
+        &self,
+        f: &mut dyn FnMut(ibc::Process) -> IceResult<ControlFlow<()>>,
+    ) -> IceResult<()> {
         let head = self.base_addr + self.profile.fast_syms.PsActiveProcessHead;
         let head: Pointer<profile::ListEntry<profile::Eprocess>, _> =
             Pointer::new(head, self, KernelSpace);
@@ -475,7 +487,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
     fn process_for_each_vma(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(ibc::Vma) -> IceResult<()>,
+        f: &mut dyn FnMut(ibc::Vma) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|eproc| eproc.VadRoot)?
@@ -510,7 +522,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
     fn process_for_each_module(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(ibc::Module) -> IceResult<()>,
+        f: &mut dyn FnMut(ibc::Module) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         let peb = self.pointer_of(proc).read_pointer_field(|e| e.Peb)?;
         if peb.is_null() {
@@ -526,7 +538,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
     fn process_callstack(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<()>,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.iter_process_callstack(proc, f)
     }
