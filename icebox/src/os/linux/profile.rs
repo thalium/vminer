@@ -175,7 +175,7 @@ impl Profile {
         let linux_banner = symbols.get_address("linux_banner")?;
 
         let types = syms.get_lib("module.ko")?;
-        let layouts = Layouts::new(&types)?;
+        let layouts = Layouts::new(types)?;
 
         Ok(Self {
             syms,

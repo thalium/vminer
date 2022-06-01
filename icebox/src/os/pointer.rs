@@ -1,3 +1,5 @@
+#![allow(clippy::wrong_self_convention)]
+
 use core::{fmt, marker::PhantomData};
 use ibc::{IceResult, VirtualAddress};
 

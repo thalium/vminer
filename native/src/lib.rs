@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(clippy::missing_safety_doc)]
 
 extern crate alloc;
 

@@ -4,14 +4,14 @@ mod pointer;
 #[cfg(any(feature = "linux", feature = "windows"))]
 macro_rules! pointer_defs {
     ( $( $core_ty:path = $ptr:ty; )* ) => {
-        trait AsPointer<T> {
-            fn as_pointer<Os, Ctx>(self, os: &Os, ctx: Ctx) -> Pointer<T, Os, Ctx>;
+        trait ToPointer<T> {
+            fn to_pointer<Os, Ctx>(self, os: &Os, ctx: Ctx) -> Pointer<T, Os, Ctx>;
         }
 
         $(
-            impl AsPointer<$ptr> for $core_ty {
+            impl ToPointer<$ptr> for $core_ty {
                 #[inline]
-                fn as_pointer<Os, Ctx>(self, os: &Os, ctx: Ctx) -> Pointer<$ptr, Os, Ctx> {
+                fn to_pointer<Os, Ctx>(self, os: &Os, ctx: Ctx) -> Pointer<$ptr, Os, Ctx> {
                     Pointer::new(self.0, os, ctx)
                 }
             }

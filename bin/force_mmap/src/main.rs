@@ -9,6 +9,7 @@ fn usage() -> ! {
 pub fn main() {
     let mut args = std::env::args_os().skip(1);
 
+    #[allow(clippy::redundant_closure)]
     let pid = (|| args.next()?.to_str()?.parse().ok())().unwrap_or_else(|| usage());
     if args.next().is_some() {
         usage();

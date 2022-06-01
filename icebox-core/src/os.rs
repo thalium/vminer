@@ -70,6 +70,7 @@ fn find<'a, T: Copy>(
 }
 
 #[inline]
+#[allow(clippy::needless_lifetimes)]
 fn push_to<'a, T>(vec: &'a mut Vec<T>) -> impl FnMut(T) -> IceResult<ControlFlow<()>> + 'a {
     move |item| {
         vec.push(item);

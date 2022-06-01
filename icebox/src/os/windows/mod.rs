@@ -64,10 +64,8 @@ impl<'a, B: ibc::Backend> Pointer<'a, profile::RtlBalancedNode, Windows<B>> {
         F: FnMut(Pointer<T, Windows<B>>) -> IceResult<ControlFlow<()>>,
     {
         let left = self.read_pointer_field(|node| node.Left)?;
-        if !left.is_null() {
-            if left._iterate_tree(f)?.is_break() {
-                return Ok(ControlFlow::Break(()));
-            }
+        if !left.is_null() && left._iterate_tree(f)?.is_break() {
+            return Ok(ControlFlow::Break(()));
         }
 
         if f(Pointer::new(self.addr, self.os, self.ctx))?.is_break() {
@@ -75,10 +73,8 @@ impl<'a, B: ibc::Backend> Pointer<'a, profile::RtlBalancedNode, Windows<B>> {
         }
 
         let right = self.read_pointer_field(|node| node.Right)?;
-        if !right.is_null() {
-            if right._iterate_tree(f)?.is_break() {
-                return Ok(ControlFlow::Break(()));
-            }
+        if !right.is_null() && right._iterate_tree(f)?.is_break() {
+            return Ok(ControlFlow::Break(()));
         }
 
         Ok(ControlFlow::Continue(()))
@@ -236,7 +232,7 @@ where
     try_read_memory(addr, buf)?;
 
     let mut codeview: Codeview = bytemuck::Zeroable::zeroed();
-    for index in memchr::memmem::find_iter(&buf, b"RSDS") {
+    for index in memchr::memmem::find_iter(buf, b"RSDS") {
         bytemuck::bytes_of_mut(&mut codeview)
             .copy_from_slice(&buf[index..index + mem::size_of::<Codeview>()]);
 
@@ -304,8 +300,8 @@ impl<B: Backend> Windows<B> {
     }
 
     #[inline]
-    fn pointer_of<T: AsPointer<U>, U>(&self, ptr: T) -> Pointer<U, Self> {
-        ptr.as_pointer(self, KernelSpace)
+    fn pointer_of<T: ToPointer<U>, U>(&self, ptr: T) -> Pointer<U, Self> {
+        ptr.to_pointer(self, KernelSpace)
     }
 
     #[inline]

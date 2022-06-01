@@ -28,7 +28,7 @@ pub trait Memory {
             // Nice case, all the page fits in the buffer
             Some(buf) => {
                 self.read(addr, buf)?;
-                Ok(finder.find(&buf).map(|i| i as u64))
+                Ok(finder.find(buf).map(|i| i as u64))
             }
             // This is a bit more complicated, as we need several reads.
             None => {

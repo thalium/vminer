@@ -191,6 +191,7 @@ pub fn iter<B: ibc::Backend>(
     let registers = dwarf_registers(vcpus.arch());
 
     // Get pointers from the current CPU
+    #[allow(clippy::never_loop)]
     let (instruction_pointer, stack_pointer, mut base_pointer) = 'res: loop {
         for i in 0..vcpus.count() {
             if linux.current_process(i)? == proc {

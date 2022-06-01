@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use ibc::{IceError, IceResult, ResultExt};
 use std::{
     fs,

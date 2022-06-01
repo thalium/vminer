@@ -290,7 +290,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
 
             let version_flags = read_u8(unwind_data)?;
             let version = version_flags & 0x7;
-            if version < 1 || version > 2 {
+            if !(1..=2).contains(&version) {
                 log::error!("Unsupported unwind code version: {version}");
                 return None;
             }
@@ -427,6 +427,7 @@ impl<B: Backend> Windows<B> {
         let vcpus = self.backend.vcpus();
 
         // Get pointers from the current CPU
+        #[allow(clippy::never_loop)]
         let (instruction_pointer, stack_pointer, base_pointer) = 'res: loop {
             for i in 0..vcpus.count() {
                 if self.current_process(i)? == proc {

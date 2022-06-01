@@ -133,8 +133,8 @@ impl<B: ice::Backend> Linux<B> {
     }
 
     #[inline]
-    fn pointer_of<T: AsPointer<U>, U>(&self, ptr: T) -> Pointer<U, Self> {
-        ptr.as_pointer(self, KernelSpace)
+    fn pointer_of<T: ToPointer<U>, U>(&self, ptr: T) -> Pointer<U, Self> {
+        ptr.to_pointer(self, KernelSpace)
     }
 
     pub fn per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
@@ -242,15 +242,12 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
                 let vcpu = self.backend.vcpus().get(cpuid);
                 let vcpu_pgd = vcpu.pgd();
 
-                match vcpu.into_runtime() {
-                    ice::arch::runtime::Vcpu::Aarch64(vcpu) => {
-                        if vcpu.instruction_pointer().is_kernel() {
-                            let current_task = VirtualAddress(vcpu.registers.sp);
-                            return Ok(ibc::Thread(current_task));
-                        }
+                if let ice::arch::runtime::Vcpu::Aarch64(vcpu) = vcpu.into_runtime() {
+                    if vcpu.instruction_pointer().is_kernel() {
+                        let current_task = VirtualAddress(vcpu.registers.sp);
+                        return Ok(ibc::Thread(current_task));
                     }
-                    _ => (),
-                };
+                }
 
                 log::debug!("Using fallback to get current task");
 

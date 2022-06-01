@@ -12,7 +12,7 @@ jobs:
         runner:
           - ubuntu-latest
           - windows-latest
-    name: Check
+    name: Clippy
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
@@ -24,8 +24,8 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: cargo check
-        run: cargo check
+      - name: cargo clippy
+        run: cargo clippy
 
   check-no_std:
     name: Check no_std

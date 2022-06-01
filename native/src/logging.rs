@@ -10,6 +10,7 @@ pub struct LogRecord {
 }
 
 #[repr(C)]
+#[allow(clippy::enum_variant_names)]
 pub enum LogLevel {
     LogLevelError,
     LogLevelWarn,

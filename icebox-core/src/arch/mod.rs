@@ -291,7 +291,7 @@ fn find_in_kernel_memory_raw<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
         memory,
         table_addr,
         base_search_addr,
-        &finder,
+        finder,
         buf,
         Mmu::LEVELS,
     )
