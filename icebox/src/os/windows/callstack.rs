@@ -1,70 +1,8 @@
+use alloc::collections::BTreeMap;
 use core::ops::ControlFlow;
 use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
-use once_cell::unsync::OnceCell;
 
 use super::Windows;
-
-struct Module {
-    start: VirtualAddress,
-    end: VirtualAddress,
-    module: ibc::Module,
-    unwind_data: OnceCell<UnwindData>,
-}
-
-impl Module {
-    fn contains(&self, addr: VirtualAddress) -> bool {
-        self.start <= addr && addr < self.end
-    }
-}
-
-#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-#[repr(C)]
-struct RuntimeFunction {
-    start: u32,
-    end: u32,
-    ptr: u32,
-}
-
-#[derive(Debug)]
-struct FunctionEntry {
-    runtime_function: RuntimeFunction,
-    stack_frame_size: u32,
-    fp_offset: Option<u32>,
-    frame_register_offset: Option<u8>,
-    machframe_offset: Option<u32>,
-    mother: Option<RuntimeFunction>,
-}
-
-impl FunctionEntry {
-    fn contains(&self, addr: u32) -> bool {
-        self.runtime_function.start <= addr && addr < self.runtime_function.end
-    }
-}
-
-/// Cached unwind data by module
-struct UnwindData {
-    offset: VirtualAddress,
-    functions: Vec<FunctionEntry>,
-}
-
-impl UnwindData {
-    fn find_by_address(&self, addr: VirtualAddress) -> Option<&FunctionEntry> {
-        self.find_by_offset((addr - self.offset) as u32)
-    }
-
-    fn find_by_offset(&self, offset: u32) -> Option<&FunctionEntry> {
-        match self
-            .functions
-            .binary_search_by_key(&offset, |e| e.runtime_function.start)
-        {
-            Ok(index) => Some(&self.functions[index]),
-            Err(index) => {
-                let function = &self.functions[index.checked_sub(1)?];
-                function.contains(offset).then(|| function)
-            }
-        }
-    }
-}
 
 // TODO: these should probably live elsewhere
 
@@ -114,27 +52,305 @@ const UWOP_SAVE_XMM128: u8 = 8;
 const UWOP_SAVE_XMM128_FAR: u8 = 9;
 const UWOP_PUSH_MACHFRAME: u8 = 10;
 
+fn parse_unwind_codes(mut codes: &[u8], version: u8) -> Option<(u32, Option<u32>, Option<u32>)> {
+    const RSP: u8 = 5;
+
+    let mut stack_frame_size = 0;
+    let mut fp_offset = None;
+    let mut machframe_offset = None;
+
+    let codes = &mut codes;
+
+    loop {
+        if read_u8(codes).is_none() {
+            break;
+        }
+        let op = read_u8(codes)?;
+
+        let op_code = op & 0xf;
+        let op_info = op >> 4;
+
+        match op_code {
+            UWOP_PUSH_NONVOL => {
+                if op_info == RSP {
+                    fp_offset = Some(stack_frame_size);
+                }
+                stack_frame_size += 8;
+            }
+            UWOP_ALLOC_LARGE => match op_info {
+                0 => stack_frame_size += read_u16(codes)? as u32 * 8,
+                1 => stack_frame_size += read_u32(codes)?,
+                _ => return None,
+            },
+            UWOP_ALLOC_SMALL => stack_frame_size += op_info as u32 * 8 + 8,
+            UWOP_SET_FPREG => (),
+            UWOP_SAVE_NONVOL => {
+                let offset = read_u16(codes)? as u32 * 8;
+                if op_info == RSP {
+                    fp_offset = Some(offset);
+                }
+            }
+            UWOP_SAVE_NONVOL_FAR => {
+                let offset = read_u32(codes)?;
+                if op_info == RSP {
+                    fp_offset = Some(offset);
+                }
+            }
+            UWOP_EPILOG if version == 2 => {
+                // TODO: Handle this better. There is very few documentation
+                // about this at the moment, but this is not widly used.
+                read_u16(codes)?;
+            }
+            UWOP_SAVE_XMM128 => {
+                read_u16(codes)?;
+            }
+            UWOP_SAVE_XMM128_FAR => {
+                read_u32(codes)?;
+            }
+            UWOP_PUSH_MACHFRAME => {
+                match op_info {
+                    0 => stack_frame_size += 0,
+                    1 => stack_frame_size += 8,
+                    _ => return None,
+                }
+                machframe_offset = Some(stack_frame_size);
+                stack_frame_size += 28;
+            }
+
+            _ => return None,
+        }
+    }
+
+    Some((stack_frame_size, fp_offset, machframe_offset))
+}
+
+struct Module {
+    start: VirtualAddress,
+    end: VirtualAddress,
+    module: ibc::Module,
+    unwind_data: Option<UnwindData>,
+}
+
+impl Module {
+    fn contains(&self, addr: VirtualAddress) -> bool {
+        self.start <= addr && addr < self.end
+    }
+
+    fn get_unwind_data<B: ibc::Backend>(&mut self, ctx: &Context<B>) -> IceResult<&mut UnwindData> {
+        if self.unwind_data.is_none() {
+            let data = ctx.init_unwind_data(self)?;
+            self.unwind_data = Some(data);
+        }
+
+        Ok(self.unwind_data.as_mut().unwrap())
+    }
+}
+
+#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+#[repr(C)]
+struct RuntimeFunction {
+    start: u32,
+    end: u32,
+    ptr: u32,
+}
+
+impl RuntimeFunction {
+    #[inline]
+    fn contains(&self, addr: u32) -> bool {
+        self.start <= addr && addr < self.end
+    }
+
+    #[inline]
+    fn is_valid(&self) -> bool {
+        // Fields in `RuntimeFunction` are not supposed to equal 0, so
+        // meeting some means that we probably encountered an unmapped
+        // page.
+        self.start != 0 && self.end != 0 && self.ptr != 0
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FunctionEntry {
+    runtime_function: RuntimeFunction,
+    mother: Option<RuntimeFunction>,
+
+    prolog_size: u8,
+    stack_frame_size: u32,
+
+    fp_offset: Option<u32>,
+    frame_register_offset: Option<u8>,
+    machframe_offset: Option<u32>,
+}
+
+impl FunctionEntry {
+    fn parse(pe: &[u8], runtime_function: RuntimeFunction) -> Option<Self> {
+        let unwind_data = &mut pe.get(runtime_function.ptr as usize..)?;
+
+        let version_flags = read_u8(unwind_data)?;
+        let version = version_flags & 0x7;
+        if !(1..=2).contains(&version) {
+            log::error!("Unsupported unwind code version: {version}");
+            return None;
+        }
+
+        let is_chained = version_flags & 0x20 != 0;
+        let prolog_size = read_u8(unwind_data)?;
+        let unwind_code_count = read_u8(unwind_data)?;
+
+        let frame_infos = read_u8(unwind_data)?;
+        let frame_register = frame_infos & 0x0f;
+        let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
+
+        let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
+        let (stack_frame_size, fp_offset, machframe_offset) =
+            parse_unwind_codes(unwind_codes, version).expect("bad unwind");
+
+        let mother = if is_chained {
+            let mother = read_slice(unwind_data, std::mem::size_of::<RuntimeFunction>())?;
+            Some(bytemuck::try_pod_read_unaligned(mother).ok()?)
+        } else {
+            None
+        };
+
+        Some(Self {
+            runtime_function,
+            mother,
+
+            stack_frame_size,
+            prolog_size,
+
+            fp_offset,
+            frame_register_offset,
+            machframe_offset,
+        })
+    }
+}
+
+/// Cached unwind data by module
+struct UnwindData {
+    offset: VirtualAddress,
+    content: Vec<u8>,
+    directory_range: (usize, usize),
+    functions: BTreeMap<u32, FunctionEntry>,
+}
+
+impl UnwindData {
+    fn find_runtime_function(
+        functions: &[RuntimeFunction],
+        offset: u32,
+    ) -> IceResult<Option<RuntimeFunction>> {
+        let mut corrupted = false;
+        let pos = functions.binary_search_by_key(&offset, |rt| {
+            if rt.is_valid() {
+                rt.start
+            } else {
+                // In this case, we can't continue the binary search, so
+                // we stop here.
+                log::debug!("Encountered unmapped unwind info");
+                corrupted = true;
+                offset
+            }
+        });
+
+        if corrupted {
+            // If the binary search failed because of an unmapped page, we
+            // fallback to a slower linear search.
+            //
+            // Not finding our function here may have two meanings:
+            // - It is a leaf function
+            // - Its unwind data is unmapped
+            //
+            // If we stop between two valid functions, we can assume the former
+            // case, else we are conservative and return an error.
+            let mut last_valid = None;
+
+            for function in functions {
+                if !function.is_valid() {
+                    last_valid = None;
+                    continue;
+                }
+
+                if offset < function.start {
+                    // We're too far, we can stop there
+                    break;
+                } else if offset < function.end {
+                    // It is the good one !
+                    return Ok(Some(*function));
+                }
+
+                last_valid = Some(*function);
+            }
+
+            match last_valid {
+                Some(_) => Ok(None),
+                None => Err("Unmapped unwind data".into()),
+            }
+        } else {
+            // The binary search succeded, so we known we're good.
+            Ok(match pos {
+                Ok(i) => Some(functions[i]),
+                Err(i) => i.checked_sub(1).and_then(|i| {
+                    let fun = functions[i];
+                    fun.contains(offset).then(|| fun)
+                }),
+            })
+        }
+    }
+
+    fn find_by_offset(&mut self, offset: u32) -> IceResult<Option<&FunctionEntry>> {
+        Ok(self
+            .get_function_start(offset)?
+            .map(|start| &self.functions[&start]))
+    }
+
+    fn get_function_start(&mut self, offset: u32) -> IceResult<Option<u32>> {
+        if let Some((start, function)) = self.functions.range(..=offset).last() {
+            if offset < function.runtime_function.end {
+                return Ok(Some(*start));
+            }
+        }
+
+        self.insert_function(offset)
+    }
+
+    fn insert_function(&mut self, offset: u32) -> IceResult<Option<u32>> {
+        let (start, end) = self.directory_range;
+        let runtime_functions: &[RuntimeFunction] = bytemuck::cast_slice(&self.content[start..end]);
+
+        let function = match Self::find_runtime_function(runtime_functions, offset)? {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        let function_start = function.start;
+        let function = FunctionEntry::parse(&self.content, function).context("bad unwind codes")?;
+        self.functions.insert(function_start, function);
+        Ok(Some(function_start))
+    }
+}
+
 struct Context<'a, B: ibc::Backend> {
     windows: &'a super::Windows<B>,
     proc: ibc::Process,
     pgd: PhysicalAddress,
-
-    /// This is sorted by growing address so we can do binary searches
-    modules: Vec<Module>,
 }
 
-impl<'a, B: ibc::Backend> Context<'a, B> {
-    fn new(windows: &'a super::Windows<B>, proc: ibc::Process) -> IceResult<Self> {
-        let pgd = windows.process_pgd(proc)?;
-        let mut vmas = Vec::new();
+struct AllModules(Vec<Module>);
+
+impl AllModules {
+    fn collect<B: ibc::Backend>(
+        windows: &super::Windows<B>,
+        proc: ibc::Process,
+    ) -> IceResult<Self> {
+        let mut modules = Vec::new();
 
         windows.process_for_each_module(proc, &mut |module| {
             let (start, end) = windows.module_span(module, proc)?;
-            vmas.push(Module {
+            modules.push(Module {
                 start,
                 end,
                 module,
-                unwind_data: OnceCell::new(),
+                unwind_data: None,
             });
             Ok(ControlFlow::Continue(()))
         })?;
@@ -142,25 +358,36 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         windows.for_each_kernel_module(&mut |module| {
             let proc = ibc::Process(VirtualAddress(0));
             let (start, end) = windows.module_span(module, proc)?;
-            vmas.push(Module {
+            modules.push(Module {
                 start,
                 end,
                 module,
-                unwind_data: OnceCell::new(),
+                unwind_data: None,
             });
             Ok(ControlFlow::Continue(()))
         })?;
 
-        vmas.sort_unstable_by_key(|v| v.start);
+        modules.sort_unstable_by_key(|v| v.start);
 
-        // println!("{:#x?}", vmas);
+        Ok(Self(modules))
+    }
 
-        Ok(Self {
-            windows,
-            proc,
-            pgd,
-            modules: vmas,
-        })
+    fn find_by_address(&mut self, addr: VirtualAddress) -> Option<&mut Module> {
+        match self.0.binary_search_by_key(&addr, |m| m.start) {
+            Ok(i) => Some(&mut self.0[i]),
+            Err(i) => {
+                let vma = &mut self.0[i.checked_sub(1)?];
+                vma.contains(addr).then(|| vma)
+            }
+        }
+    }
+}
+
+impl<'a, B: ibc::Backend> Context<'a, B> {
+    fn new(windows: &'a super::Windows<B>, proc: ibc::Process) -> IceResult<Self> {
+        let pgd = windows.process_pgd(proc)?;
+
+        Ok(Self { windows, proc, pgd })
     }
 
     fn pgd_for(&self, addr: VirtualAddress) -> ibc::PhysicalAddress {
@@ -183,150 +410,6 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         Ok(value)
     }
 
-    fn find_module_by_address(&self, addr: VirtualAddress) -> Option<&Module> {
-        match self.modules.binary_search_by_key(&addr, |m| m.start) {
-            Ok(i) => Some(&self.modules[i]),
-            Err(i) => {
-                let vma = &self.modules[i.checked_sub(1)?];
-                vma.contains(addr).then(|| vma)
-            }
-        }
-    }
-
-    fn get_unwind_data<'v>(&self, module: &'v Module) -> IceResult<&'v UnwindData> {
-        module
-            .unwind_data
-            .get_or_try_init(|| self.init_unwind_data(module))
-    }
-
-    fn parse_unwind_codes(
-        &self,
-        mut codes: &[u8],
-        version: u8,
-    ) -> Option<(u32, Option<u32>, Option<u32>)> {
-        const RSP: u8 = 5;
-
-        let mut stack_frame_size = 0;
-        let mut fp_offset = None;
-        let mut machframe_offset = None;
-
-        let codes = &mut codes;
-
-        loop {
-            if read_u8(codes).is_none() {
-                break;
-            }
-            let op = read_u8(codes)?;
-
-            let op_code = op & 0xf;
-            let op_info = op >> 4;
-
-            match op_code {
-                UWOP_PUSH_NONVOL => {
-                    if op_info == RSP {
-                        fp_offset = Some(stack_frame_size);
-                    }
-                    stack_frame_size += 8;
-                }
-                UWOP_ALLOC_LARGE => match op_info {
-                    0 => stack_frame_size += read_u16(codes)? as u32 * 8,
-                    1 => stack_frame_size += read_u32(codes)?,
-                    _ => return None,
-                },
-                UWOP_ALLOC_SMALL => stack_frame_size += op_info as u32 * 8 + 8,
-                UWOP_SET_FPREG => (),
-                UWOP_SAVE_NONVOL => {
-                    let offset = read_u16(codes)? as u32 * 8;
-                    if op_info == RSP {
-                        fp_offset = Some(offset);
-                    }
-                }
-                UWOP_SAVE_NONVOL_FAR => {
-                    let offset = read_u32(codes)?;
-                    if op_info == RSP {
-                        fp_offset = Some(offset);
-                    }
-                }
-                UWOP_EPILOG if version == 2 => {
-                    // TODO: Handle this better. There is very few documentation
-                    // about this at the moment, but this is not widly used.
-                    read_u16(codes)?;
-                }
-                UWOP_SAVE_XMM128 => {
-                    read_u16(codes)?;
-                }
-                UWOP_SAVE_XMM128_FAR => {
-                    read_u32(codes)?;
-                }
-                UWOP_PUSH_MACHFRAME => {
-                    match op_info {
-                        0 => stack_frame_size += 0,
-                        1 => stack_frame_size += 8,
-                        _ => return None,
-                    }
-                    machframe_offset = Some(stack_frame_size);
-                    stack_frame_size += 28;
-                }
-
-                _ => return None,
-            }
-        }
-
-        Some((stack_frame_size, fp_offset, machframe_offset))
-    }
-
-    fn parse_directory_range(
-        &self,
-        pe: &[u8],
-        (start, size): (u32, u32),
-    ) -> Option<Vec<FunctionEntry>> {
-        let data = pe.get(start as usize..(start + size) as usize)?;
-        let runtime_functions: &[RuntimeFunction] = bytemuck::try_cast_slice(data).ok()?;
-
-        let mut entries = Vec::with_capacity(runtime_functions.len());
-
-        for &runtime_function in runtime_functions {
-            let unwind_data = &mut pe.get(runtime_function.ptr as usize..)?;
-
-            let version_flags = read_u8(unwind_data)?;
-            let version = version_flags & 0x7;
-            if !(1..=2).contains(&version) {
-                log::error!("Unsupported unwind code version: {version}");
-                return None;
-            }
-
-            let is_chained = version_flags & 0x20 != 0;
-            let _prolog_size = read_u8(unwind_data)?;
-            let unwind_code_count = read_u8(unwind_data)?;
-
-            let frame_infos = read_u8(unwind_data)?;
-            let frame_register = frame_infos & 0x0f;
-            let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
-
-            let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
-            let (stack_frame_size, fp_offset, machframe_offset) = self
-                .parse_unwind_codes(unwind_codes, version)
-                .expect("bad unwind");
-
-            let mother = if is_chained {
-                let mother = read_slice(unwind_data, std::mem::size_of::<RuntimeFunction>())?;
-                Some(bytemuck::try_pod_read_unaligned(mother).ok()?)
-            } else {
-                None
-            };
-
-            entries.push(FunctionEntry {
-                runtime_function,
-                stack_frame_size,
-                fp_offset,
-                frame_register_offset,
-                machframe_offset,
-                mother,
-            });
-        }
-        Some(entries)
-    }
-
     fn init_unwind_data(&self, module: &Module) -> IceResult<UnwindData> {
         let mut content = vec![0; (module.end - module.start) as usize];
         let pgd = self.pgd_for(module.start);
@@ -338,13 +421,21 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             .data_directory(object::pe::IMAGE_DIRECTORY_ENTRY_EXCEPTION)
             .context("failed to get debug directory")?;
 
-        let functions = self
-            .parse_directory_range(&*content, directory.address_range())
-            .ok_or("invalid debug directory")?;
+        let (start, size) = directory.address_range();
+        let directory_start = start as usize;
+        let directory_end = directory_start + size as usize;
+
+        if directory_end > content.len()
+            || size as usize % core::mem::size_of::<RuntimeFunction>() != 0
+        {
+            return Err(IceError::new("invalid exception directory size"));
+        }
 
         Ok(UnwindData {
             offset: module.start,
-            functions,
+            content,
+            directory_range: (directory_start, directory_end),
+            functions: BTreeMap::new(),
         })
     }
 }
@@ -357,16 +448,27 @@ struct UnwindResult {
 
 fn unwind_function<B: Backend>(
     ctx: &Context<B>,
-    module: &Module,
+    module: &mut Module,
     frame: &ibc::StackFrame,
     base_pointer: &mut Option<VirtualAddress>,
 ) -> IceResult<UnwindResult> {
-    let unwind_data = ctx
-        .get_unwind_data(module)
+    let unwind_data = module
+        .get_unwind_data(ctx)
         .context("cannot get unwind data")?;
 
-    let (caller_sp, fun_start) = match unwind_data.find_by_address(frame.instruction_pointer) {
+    let offset_in_module = (frame.instruction_pointer - unwind_data.offset) as u32;
+    let (caller_sp, fun_start) = match unwind_data.find_by_offset(offset_in_module)? {
+        // This is a leaf function
+        None => (frame.stack_pointer, None),
+
         Some(mut function) => {
+            let mut function_start = function.runtime_function.start;
+
+            let ip_offset = offset_in_module - function.runtime_function.start;
+            if ip_offset <= function.prolog_size as u32 {
+                return Err("Unsupported function prolog".into());
+            }
+
             let frame_pointer = match function.frame_register_offset {
                 None => frame.stack_pointer,
                 Some(offset) => {
@@ -385,7 +487,7 @@ fn unwind_function<B: Backend>(
                     return Ok(UnwindResult {
                         next_ip: ctx.read_value(machinst)?,
                         next_sp: ctx.read_value(machinst + 0x18)?,
-                        fun_start: Some(unwind_data.offset + function.runtime_function.start),
+                        fun_start: Some(unwind_data.offset + function_start),
                     });
                 }
 
@@ -394,19 +496,18 @@ fn unwind_function<B: Backend>(
                 match function.mother {
                     Some(mother) => {
                         function = unwind_data
-                            .find_by_offset(mother.start)
+                            .find_by_offset(mother.start)?
                             .context("cannot find mother function")?;
+
+                        function_start = function.runtime_function.start;
                     }
                     None => break,
                 }
             }
 
-            let fun_start = unwind_data.offset + function.runtime_function.start;
+            let fun_start = unwind_data.offset + function_start;
             (next_sp, Some(fun_start))
         }
-
-        // This is a leaf function
-        None => (frame.stack_pointer, None),
     };
 
     Ok(UnwindResult {
@@ -455,6 +556,7 @@ impl<B: Backend> Windows<B> {
         mut base_pointer: Option<VirtualAddress>,
     ) -> IceResult<()> {
         let ctx = Context::new(self, proc)?;
+        let mut modules = AllModules::collect(self, proc)?;
 
         // Start building the frame with the data we have
         let mut frame = ibc::StackFrame {
@@ -467,8 +569,8 @@ impl<B: Backend> Windows<B> {
 
         loop {
             // Where are we ?
-            let module = ctx
-                .find_module_by_address(frame.instruction_pointer)
+            let module = modules
+                .find_by_address(frame.instruction_pointer)
                 .ok_or("encountered unmapped page")?;
             frame.module = module.module;
 

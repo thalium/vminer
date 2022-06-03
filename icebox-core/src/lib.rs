@@ -82,7 +82,7 @@ pub fn try_read_virtual_memory(
     read_virtual_memory(addr, buf, |addr, buf| match read_memory(addr, buf) {
         Ok(()) => Ok(()),
         Err(TranslationError::Invalid(mmu)) => {
-            log::debug!("Encountered unmapped page: 0x{addr:x} ({mmu:#x})");
+            log::trace!("Encountered unmapped page: 0x{addr:x} ({mmu:#x})");
             Ok(())
         }
         Err(TranslationError::Memory(err)) => Err(err),
