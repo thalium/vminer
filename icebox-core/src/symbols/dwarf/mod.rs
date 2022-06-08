@@ -365,13 +365,6 @@ impl LazyType {
         res
     }
 
-    fn with_inner_resolved<T>(&self, f: impl FnOnce(&DwarfType) -> T) -> Option<T> {
-        self.with_inner(|inner| match inner {
-            LazyTypeInner::Resolved(ty) => Some(f(ty)),
-            LazyTypeInner::Unresolved(_) => None,
-        })
-    }
-
     fn with_inner_mut<T>(&self, f: impl FnOnce(&mut LazyTypeInner) -> T) -> T {
         let mut old = self.0.take();
         let res = f(&mut old);
@@ -379,10 +372,10 @@ impl LazyType {
         res
     }
 
-    fn offset(&self) -> Option<UnitOffset> {
-        self.with_inner(|ty| match ty {
-            LazyTypeInner::Unresolved(offset) => Some(*offset),
-            LazyTypeInner::Resolved(_) => None,
+    fn with_inner_resolved_mut<T>(&self, f: impl FnOnce(&mut DwarfType) -> T) -> Option<T> {
+        self.with_inner_mut(|inner| match inner {
+            LazyTypeInner::Resolved(ty) => Some(f(ty)),
+            LazyTypeInner::Unresolved(_) => None,
         })
     }
 
@@ -398,23 +391,20 @@ impl LazyType {
     }
 
     /// Try to resolve the current type or visit it
-    fn resolve(
-        &self,
-        f: impl FnOnce(UnitOffset) -> Option<DwarfType>,
-        g: impl FnOnce(&mut DwarfType),
-    ) {
-        let res = self.with_inner_mut(|ty| match ty {
-            LazyTypeInner::Unresolved(offset) => Some(f(*offset)),
-            LazyTypeInner::Resolved(ty) => {
-                g(ty);
-                None
+    fn try_resolve(&self, types: &[MidDataEntry]) {
+        let res = self.with_inner(|ty| match ty {
+            LazyTypeInner::Unresolved(offset) => {
+                let index = types
+                    .binary_search_by_key(&*offset, |entry| entry.offset)
+                    .ok()?;
+                let inner_typ = types.get(index)?;
+                inner_typ.typ.clone().into_resolved()
             }
+            LazyTypeInner::Resolved(_) => None,
         });
 
-        match res {
-            Some(Some(ty)) => self.0.set(LazyTypeInner::Resolved(ty)),
-            Some(None) => (),
-            None => (),
+        if let Some(ty) = res {
+            self.0.set(LazyTypeInner::Resolved(ty));
         }
     }
 }
@@ -473,6 +463,52 @@ impl MidData {
     }
 }
 
+/// Flatten anonymous types
+///
+/// struct int_or_float {
+///     int kind;
+///     union { int x; float f; };
+/// };
+fn flatten_anon_fields(
+    types: &[MidDataEntry],
+    fields: &[(u64, Option<String>, LazyType)],
+    struct_name: Option<&str>,
+) -> Vec<(u64, Option<String>, LazyType)> {
+    let mut new_fields = Vec::with_capacity(fields.len());
+    for (offset, name, ty) in fields.iter() {
+        match name {
+            // Named fields are easy
+            Some(_) => new_fields.push((*offset, name.clone(), ty.clone())),
+            None => {
+                // First, resolve inner types. This is necessary
+                // because types are lazily constructed
+                ty.try_resolve(types);
+
+                // Then add the (hopefully) resolved type to our list of fields
+                ty.with_inner(|inner| match inner {
+                    LazyTypeInner::Unresolved(_) => {
+                        log::warn!(
+                            "Could not resolve anonymous field of struct {}",
+                            struct_name.unwrap_or("<anonymous>")
+                        );
+                    }
+                    LazyTypeInner::Resolved(ty) => match ty {
+                        DwarfType::Struct(LazyStruct { fields, .. }) => new_fields.extend(
+                            fields
+                                .iter()
+                                .map(|(o, name, ty)| (offset + o, name.clone(), ty.clone())),
+                        ),
+                        DwarfType::Union(_) => (), // TODO
+                        _ => log::warn!("Anymous field is not a struct nor an union"),
+                    },
+                });
+            }
+        }
+    }
+
+    new_fields
+}
+
 /// Fills `symbols` with types found in the given DWARF unit
 fn fill<R: GimliReader>(
     unit: &gimli::UnitHeader<R>,
@@ -515,70 +551,17 @@ fn fill<R: GimliReader>(
     }
     */
 
-    // Flatten anonymous types , eg:
-    //
-    // struct int_or_float {
-    //     int kind;
-    //     union { int x; float f; };
-    // };
     for entry in &types {
-        entry.typ.resolve(
-            |_| None,
-            |typ| {
-                if let DwarfType::Struct(LazyStruct { fields, .. }) = typ {
-                    // Quick case: there is no anynomous field
-                    if fields.iter().all(|(_, name, _)| name.is_some()) {
-                        return;
-                    }
-
-                    // Let's build a new field list
-                    let mut new_fields = Vec::with_capacity(fields.len());
-                    for (offset, name, ty) in fields.iter() {
-                        match name {
-                            // Named fields are easy
-                            Some(_) => new_fields.push((*offset, name.clone(), ty.clone())),
-                            None => {
-                                // First, resolve inner types. This is necessary
-                                // because types are lazily constructed
-                                ty.resolve(
-                                    |unit_offset| {
-                                        let index = types
-                                            .binary_search_by_key(&unit_offset, |entry| {
-                                                entry.offset
-                                            })
-                                            .ok()?;
-                                        let inner_typ = types.get(index)?;
-                                        inner_typ.typ.clone().into_resolved()
-                                    },
-                                    |_| (),
-                                );
-                                // Then add the (hopefully) resolved type to our list of fields
-                                ty.with_inner(|inner| match inner {
-                                    LazyTypeInner::Unresolved(_) => {
-                                        log::warn!(
-                                            "Could not resolve anonymous field of struct {}",
-                                            entry.name.as_deref().unwrap_or("<anonymous>")
-                                        );
-                                    }
-                                    LazyTypeInner::Resolved(ty) => match ty {
-                                        DwarfType::Struct(LazyStruct { fields, .. }) => new_fields
-                                            .extend(fields.iter().map(|(o, name, ty)| {
-                                                (offset + o, name.clone(), ty.clone())
-                                            })),
-                                        DwarfType::Union(_) => (), // TODO
-                                        _ => {
-                                            log::warn!("Anymous field is not a struct nor an union")
-                                        }
-                                    },
-                                });
-                            }
-                        }
-                    }
-
-                    *fields = new_fields.into();
+        entry.typ.with_inner_resolved_mut(|typ| {
+            if let DwarfType::Struct(LazyStruct { fields, .. }) = typ {
+                // Quick case: there is no anynomous field
+                if fields.iter().all(|(_, name, _)| name.is_some()) {
+                    return;
                 }
-            },
-        );
+
+                *fields = flatten_anon_fields(&types, fields, entry.name.as_deref()).into();
+            }
+        });
     }
 
     // Finally we can add resolved types to debug infos

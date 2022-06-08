@@ -17,6 +17,28 @@ impl<'t> TypeList<'t> {
     }
 }
 
+fn collect_fields(struct_name: &str, fields: &pdb::FieldList) -> Vec<crate::symbols::StructField> {
+    fields
+        .fields
+        .iter()
+        .filter_map(|item| match item {
+            pdb::TypeData::Member(member) => {
+                let name = core::str::from_utf8(member.name.as_bytes())
+                    .ok()?
+                    .to_owned();
+                Some(crate::symbols::StructField {
+                    name,
+                    offset: member.offset as u64,
+                })
+            }
+            _ => {
+                log::warn!("Struct \"{struct_name}\" has weird field: {item:?}");
+                None
+            }
+        })
+        .collect()
+}
+
 pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
     module: &mut crate::ModuleSymbols,
@@ -53,25 +75,7 @@ pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
             }
 
             let fields = match members {
-                pdb::TypeData::FieldList(fields) => fields
-                    .fields
-                    .iter()
-                    .filter_map(|item| match item {
-                        pdb::TypeData::Member(member) => {
-                            let name = core::str::from_utf8(member.name.as_bytes())
-                                .ok()?
-                                .to_owned();
-                            Some(crate::symbols::StructField {
-                                name,
-                                offset: member.offset as u64,
-                            })
-                        }
-                        _ => {
-                            log::warn!("Struct \"{name}\" has weird field: {item:?}");
-                            None
-                        }
-                    })
-                    .collect(),
+                pdb::TypeData::FieldList(fields) => collect_fields(&name, fields),
                 _ => {
                     log::warn!("Struct \"{name}\" has weird field list: {members:?}");
                     return None;
