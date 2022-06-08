@@ -163,9 +163,7 @@ fn vmas(arch: Arch) {
             let start = linux.vma_start(vma)?;
             let end = linux.vma_end(vma)?;
             let offset = linux.vma_offset(vma)?;
-            let path = linux
-                .vma_path(vma)?
-                .map(|path| linux.path_to_string(path).unwrap());
+            let path = linux.vma_path(vma)?;
 
             vmas.push(Vma {
                 start,
