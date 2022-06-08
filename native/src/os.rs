@@ -1,4 +1,4 @@
-use core::{fmt, mem, ops::ControlFlow};
+use core::{fmt::Write as _, mem, ops::ControlFlow};
 
 use crate::{
     c_char, cstring, error, symbols::Symbols, Backend, Error, PhysicalAddress, VirtualAddress,
@@ -84,7 +84,7 @@ impl Os {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn os_new(
+pub extern "C" fn os_new(
     backend: Box<Backend>,
     os: Option<&mut mem::MaybeUninit<Box<Os>>>,
 ) -> *mut Error {
@@ -92,7 +92,7 @@ pub unsafe extern "C" fn os_new(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn os_new_linux(
+pub extern "C" fn os_new_linux(
     backend: Box<Backend>,
     profile: Box<Symbols>,
     os: Option<&mut mem::MaybeUninit<Box<Os>>>,
@@ -109,7 +109,67 @@ pub extern "C" fn os_free(os: Option<Box<Os>>) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn os_current_process(
+pub unsafe extern "C" fn read_virtual_memory(
+    os: &Os,
+    mmu_addr: PhysicalAddress,
+    addr: VirtualAddress,
+    buf: *mut u8,
+    buf_size: usize,
+) -> *mut Error {
+    let buf = core::slice::from_raw_parts_mut(buf, buf_size);
+    error::wrap_unit_result(os.0.read_virtual_memory(mmu_addr.into(), addr.into(), buf))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn try_read_virtual_memory(
+    os: &Os,
+    mmu_addr: PhysicalAddress,
+    addr: VirtualAddress,
+    buf: *mut u8,
+    buf_size: usize,
+) -> *mut Error {
+    let buf = core::slice::from_raw_parts_mut(buf, buf_size);
+    error::wrap_unit_result(os.0.try_read_virtual_memory(mmu_addr.into(), addr.into(), buf))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn read_process_memory(
+    os: &Os,
+    mmu_addr: PhysicalAddress,
+    addr: VirtualAddress,
+    proc: Process,
+    buf: *mut u8,
+    buf_size: usize,
+) -> *mut Error {
+    let buf = core::slice::from_raw_parts_mut(buf, buf_size);
+    error::wrap_unit_result(os.0.read_process_memory(
+        proc.into(),
+        mmu_addr.into(),
+        addr.into(),
+        buf,
+    ))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn try_read_process_memory(
+    os: &Os,
+    mmu_addr: PhysicalAddress,
+    addr: VirtualAddress,
+    proc: Process,
+    buf: *mut u8,
+    buf_size: usize,
+) -> *mut Error {
+    let buf = core::slice::from_raw_parts_mut(buf, buf_size);
+    error::wrap_unit_result(os.0.try_read_process_memory(
+        proc.into(),
+        mmu_addr.into(),
+        addr.into(),
+        buf,
+    ))
+}
+
+#[no_mangle]
+pub extern "C" fn os_current_process(
     os: &Os,
     cpuid: usize,
     proc: Option<&mut mem::MaybeUninit<Process>>,
@@ -118,7 +178,7 @@ pub unsafe extern "C" fn os_current_process(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn os_current_thread(
+pub extern "C" fn os_current_thread(
     os: &Os,
     cpuid: usize,
     proc: Option<&mut mem::MaybeUninit<Thread>>,
@@ -148,7 +208,7 @@ pub unsafe extern "C" fn os_processes(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn process_id(
+pub extern "C" fn process_id(
     os: &Os,
     proc: Process,
     pid: Option<&mut mem::MaybeUninit<u64>>,
@@ -166,14 +226,13 @@ pub unsafe extern "C" fn process_name(
     error::wrap_unit(|| {
         let n = os.0.process_name(proc.into())?;
         let mut fmt = cstring::Formatter::new(name, max_len);
-        let _ = fmt::write(&mut fmt, format_args!("{n}"));
-        fmt.finish();
+        let _ = fmt.write_str(&n);
         Ok(())
     })
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn process_pgd(
+pub extern "C" fn process_pgd(
     os: &Os,
     proc: Process,
     pgd: Option<&mut mem::MaybeUninit<PhysicalAddress>>,
@@ -182,7 +241,7 @@ pub unsafe extern "C" fn process_pgd(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn process_parent(
+pub extern "C" fn process_parent(
     os: &Os,
     proc: Process,
     parent: Option<&mut mem::MaybeUninit<Process>>,
@@ -191,7 +250,7 @@ pub unsafe extern "C" fn process_parent(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn thread_id(
+pub extern "C" fn thread_id(
     os: &Os,
     thread: Thread,
     tid: Option<&mut mem::MaybeUninit<u64>>,
@@ -206,18 +265,18 @@ pub unsafe extern "C" fn thread_name(
     name: *mut c_char,
     max_len: usize,
 ) -> *mut Error {
-    let res = os.0.thread_name(thread.into()).map(|n| {
+    error::wrap_unit(|| {
+        let n = os.0.thread_name(thread.into())?;
         let mut fmt = cstring::Formatter::new(name, max_len);
         if let Some(name) = n {
-            let _ = fmt::write(&mut fmt, format_args!("{name}"));
+            let _ = fmt.write_str(&name);
         }
-        fmt.finish();
-    });
-    error::wrap_unit_result(res)
+        Ok(())
+    })
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn thread_process(
+pub extern "C" fn thread_process(
     os: &Os,
     thread: Thread,
     proc: Option<&mut mem::MaybeUninit<Process>>,
@@ -226,7 +285,7 @@ pub unsafe extern "C" fn thread_process(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn vma_start(
+pub extern "C" fn vma_start(
     os: &Os,
     vma: Vma,
     proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
@@ -235,10 +294,27 @@ pub unsafe extern "C" fn vma_start(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn vma_end(
+pub extern "C" fn vma_end(
     os: &Os,
     vma: Vma,
     proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
 ) -> *mut Error {
     error::wrap_result(proc, os.0.vma_end(vma.into()))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn vma_path(
+    os: &Os,
+    vma: Vma,
+    path: *mut c_char,
+    max_len: usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let p = os.0.vma_path(vma.into())?;
+        let mut fmt = cstring::Formatter::new(path, max_len);
+        if let Some(path) = p {
+            let _ = fmt.write_str(&path);
+        }
+        Ok(())
+    })
 }

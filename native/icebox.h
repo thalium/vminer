@@ -213,6 +213,32 @@ struct Error *os_new_linux(struct Backend *backend, struct Symbols *profile, str
 
 void os_free(struct Os *os);
 
+struct Error *read_virtual_memory(const struct Os *os,
+                                  struct PhysicalAddress mmu_addr,
+                                  struct VirtualAddress addr,
+                                  uint8_t *buf,
+                                  uintptr_t buf_size);
+
+struct Error *try_read_virtual_memory(const struct Os *os,
+                                      struct PhysicalAddress mmu_addr,
+                                      struct VirtualAddress addr,
+                                      uint8_t *buf,
+                                      uintptr_t buf_size);
+
+struct Error *read_process_memory(const struct Os *os,
+                                  struct PhysicalAddress mmu_addr,
+                                  struct VirtualAddress addr,
+                                  struct Process proc,
+                                  uint8_t *buf,
+                                  uintptr_t buf_size);
+
+struct Error *try_read_process_memory(const struct Os *os,
+                                      struct PhysicalAddress mmu_addr,
+                                      struct VirtualAddress addr,
+                                      struct Process proc,
+                                      uint8_t *buf,
+                                      uintptr_t buf_size);
+
 struct Error *os_current_process(const struct Os *os, uintptr_t cpuid, struct Process *proc);
 
 struct Error *os_current_thread(const struct Os *os, uintptr_t cpuid, struct Thread *proc);
@@ -236,6 +262,8 @@ struct Error *thread_process(const struct Os *os, struct Thread thread, struct P
 struct Error *vma_start(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
 
 struct Error *vma_end(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
+
+struct Error *vma_path(const struct Os *os, struct Vma vma, char *path, uintptr_t max_len);
 
 struct Symbols *symbols_new(void);
 

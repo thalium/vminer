@@ -133,11 +133,6 @@ pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
     Backend::new(backend)
 }
 
-// #[no_mangle]
-// pub extern "C" fn backend_virtual_to_physical(backend: &Backend, mmu_addr: GuestPhysAddr, addr: GuestVirtAddr) -> GuestPhysAddr {
-//     backend.0.virtual_to_physical(mmu_addr, addr).valid().unwrap()
-// }
-
 #[cfg(all(target_os = "linux", feature = "std"))]
 #[no_mangle]
 pub extern "C" fn kvm_connect(
