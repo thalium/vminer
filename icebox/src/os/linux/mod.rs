@@ -152,7 +152,10 @@ impl<B: ice::Backend> Linux<B> {
         lib.get_symbol_inexact(addr)
     }
 
-    fn process_mm(&self, proc: ice::Process) -> IceResult<Pointer<profile::MmStruct, Self>> {
+    fn process_mm(
+        &self,
+        proc: ice::Process,
+    ) -> IceResult<Option<Pointer<profile::MmStruct, Self>>> {
         let proc = self.pointer_of(proc);
         let mut mm = proc.read_pointer_field(|ts| ts.mm)?;
 
@@ -161,7 +164,7 @@ impl<B: ice::Backend> Linux<B> {
             mm = proc.read_pointer_field(|ts| ts.active_mm)?;
         }
 
-        Ok(mm)
+        mm.map_non_null(|mm| Ok(mm))
     }
 }
 
@@ -297,23 +300,28 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_pgd(&self, proc: ice::Process) -> IceResult<PhysicalAddress> {
-        let mm = self.process_mm(proc)?;
-        if mm.is_null() {
-            if self.process_is_kernel(proc)? {
-                Ok(self.kpgd)
-            } else {
-                Err(ibc::IceError::new("process has NULL mm"))
+        match self.process_mm(proc)? {
+            Some(mm) => {
+                let pgd = mm.read_field(|mms| mms.pgd)?;
+                Ok(self.backend.virtual_to_physical(self.kpgd, pgd)?)
             }
-        } else {
-            let pgd = mm.read_field(|mms| mms.pgd)?;
-            Ok(self.backend.virtual_to_physical(self.kpgd, pgd)?)
+            None => {
+                if self.process_is_kernel(proc)? {
+                    Ok(self.kpgd)
+                } else {
+                    Err(ibc::IceError::new("process has NULL mm"))
+                }
+            }
         }
     }
 
     fn process_path(&self, proc: ice::Process) -> IceResult<Option<String>> {
-        self.process_mm(proc)?
-            .read_pointer_field(|mm| mm.exe_file)?
-            .map_non_null(|file| file.field(|file| file.f_path)?.read_file_path())
+        match self.process_mm(proc)? {
+            Some(mm) => mm
+                .read_pointer_field(|mm| mm.exe_file)?
+                .map_non_null(|file| file.field(|file| file.f_path)?.read_file_path()),
+            None => Ok(None),
+        }
     }
 
     fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
@@ -362,7 +370,11 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         proc: ice::Process,
         f: &mut dyn FnMut(ice::Vma) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
-        let mm = self.process_mm(proc)?;
+        let mm = match self.process_mm(proc)? {
+            Some(mm) => mm,
+            None => return Ok(()),
+        };
+
         let mut cur_vma = mm.read_pointer_field(|mm| mm.mmap)?;
 
         while !cur_vma.is_null() {
