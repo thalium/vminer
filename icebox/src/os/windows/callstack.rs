@@ -518,6 +518,38 @@ fn unwind_function<B: Backend>(
 }
 
 impl<B: Backend> Windows<B> {
+    #[cold]
+    fn handle_invalid_address(
+        &self,
+        proc: ibc::Process,
+        frame: &mut ibc::StackFrame,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
+    ) -> IceResult<()> {
+        // Current IP is not in a module. If both IP and SP are
+        // valid addresses, we can suppose that we went through
+        // JIT code.
+
+        let is_valid = |addr| {
+            self.process_find_vma_by_address(proc, addr)
+                .unwrap_or_else(|err| {
+                    log::warn!("Failed to get VMA for {addr:#x}: {err}");
+                    None
+                })
+                .is_some()
+        };
+
+        if is_valid(frame.instruction_pointer) && is_valid(frame.stack_pointer) {
+            frame.start = None;
+            frame.module = None;
+            match f(&frame)? {
+                ControlFlow::Continue(()) => Err("unwinding through JIT is unsupported".into()),
+                ControlFlow::Break(()) => Ok(()),
+            }
+        } else {
+            Err("encountered unmapped address".into())
+        }
+    }
+
     pub fn iter_process_callstack(
         &self,
         proc: ibc::Process,
@@ -564,15 +596,16 @@ impl<B: Backend> Windows<B> {
             stack_pointer,
             start: None,
             size: None,
-            module: ibc::Module(VirtualAddress(0)),
+            module: None,
         };
 
         loop {
             // Where are we ?
-            let module = modules
-                .find_by_address(frame.instruction_pointer)
-                .ok_or("encountered unmapped page")?;
-            frame.module = module.module;
+            let module = match modules.find_by_address(frame.instruction_pointer) {
+                Some(m) => m,
+                None => return self.handle_invalid_address(proc, &mut frame, f),
+            };
+            frame.module = Some(module.module);
 
             // Move stack pointer to the upper frame
             let unwind_result = unwind_function(&ctx, module, &frame, &mut base_pointer);

@@ -176,6 +176,52 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     }
 }
 
+impl<B: ibc::Backend> Linux<B> {
+    #[cold]
+    fn handle_invalid_address(
+        &self,
+        proc: ibc::Process,
+        frame: &mut ibc::StackFrame,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
+    ) -> IceResult<()> {
+        // Current IP is not in a module. If both IP and SP are
+        // valid addresses, we can suppose that we went through
+        // JIT code.
+
+        let sp_is_valid = self
+            .process_find_vma_by_address(proc, frame.stack_pointer)
+            .unwrap_or_else(|err| {
+                log::warn!("Failed to get VMA for {:#x}: {err}", frame.stack_pointer);
+                None
+            })
+            .is_some();
+        let ip_is_valid = (|| {
+            Ok(
+                match self.process_find_vma_by_address(proc, frame.instruction_pointer)? {
+                    Some(vma) => self.vma_flags(vma)?.is_exec(),
+                    None => false,
+                },
+            )
+        })()
+        .unwrap_or_else(|err: ibc::IceError| {
+            log::warn!("Failed to check VMA for {:#x}: {err}", frame.stack_pointer);
+            false
+        });
+
+        if sp_is_valid && ip_is_valid {
+            frame.start = None;
+            frame.size = None;
+            frame.module = None;
+            match f(&frame)? {
+                ControlFlow::Continue(()) => Err("unwinding through JIT is unsupported".into()),
+                ControlFlow::Break(()) => Ok(()),
+            }
+        } else {
+            Err("encountered unmapped address".into())
+        }
+    }
+}
+
 pub fn iter<B: ibc::Backend>(
     linux: &Linux<B>,
     proc: ibc::Process,
@@ -223,15 +269,16 @@ pub fn iter<B: ibc::Backend>(
         stack_pointer,
         start: None,
         size: None,
-        module: ibc::Module(VirtualAddress(0)),
+        module: None,
     };
 
     loop {
         // Where are we ?
-        let module = ctx
-            .find_module_by_address(frame.instruction_pointer)
-            .ok_or("encountered anonymous page")?;
-        frame.module = module.module;
+        let module = match ctx.find_module_by_address(frame.instruction_pointer) {
+            Some(m) => m,
+            None => return linux.handle_invalid_address(proc, &mut frame, f),
+        };
+        frame.module = Some(module.module);
 
         let cie_cache = cie_cache.entry(module.module).or_insert_with(HashMap::new);
 

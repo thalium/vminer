@@ -551,7 +551,7 @@ struct StackFrame {
 
     os: PyOwned<RawOs>,
     proc: ibc::Process,
-    module: GILOnceCell<Py<Module>>,
+    module: GILOnceCell<Option<Py<Module>>>,
 }
 
 #[pymethods]
@@ -577,11 +577,14 @@ impl StackFrame {
     }
 
     #[getter]
-    fn module(&self, py: Python) -> PyResult<&Py<Module>> {
-        self.module.get_or_try_init(py, || {
-            let os = &self.os.borrow(py)?;
-            let module = Module::new(py, self.frame.module, self.proc, os).convert_err()?;
-            Py::new(py, module)
+    fn module(&self, py: Python) -> PyResult<&Option<Py<Module>>> {
+        self.module.get_or_try_init(py, || match self.frame.module {
+            Some(module) => {
+                let os = &self.os.borrow(py)?;
+                let module = Module::new(py, module, self.proc, os).convert_err()?;
+                Ok(Some(Py::new(py, module)?))
+            }
+            None => Ok(None),
         })
     }
 }

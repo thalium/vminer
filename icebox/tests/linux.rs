@@ -217,11 +217,12 @@ fn callstack(arch: Arch) {
                 module,
             } = frame;
 
-            let symbol = match start {
-                Some(start) => linux
+            let symbol = match (module, start) {
+                (None, _) => None,
+                (Some(module), Some(start)) => linux
                     .module_resolve_symbol_exact(start, proc, module)?
                     .map(|sym| ibc::symbols::demangle(sym).into_owned()),
-                None => linux
+                (Some(module), None) => linux
                     .module_resolve_symbol(instruction_pointer, proc, module)?
                     .map(|(sym, _)| ibc::symbols::demangle(sym).into_owned()),
             };
