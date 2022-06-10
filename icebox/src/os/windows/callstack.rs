@@ -52,23 +52,31 @@ const UWOP_SAVE_XMM128: u8 = 8;
 const UWOP_SAVE_XMM128_FAR: u8 = 9;
 const UWOP_PUSH_MACHFRAME: u8 = 10;
 
-fn parse_unwind_codes(mut codes: &[u8], version: u8) -> Option<(u32, Option<u32>, Option<u32>)> {
+fn parse_unwind_codes(
+    mut codes: &[u8],
+    version: u8,
+) -> Option<(u32, Option<u32>, Option<u32>, u8)> {
     const RSP: u8 = 5;
 
     let mut stack_frame_size = 0;
     let mut fp_offset = None;
     let mut machframe_offset = None;
+    let mut prolog_size = 0;
 
     let codes = &mut codes;
 
-    loop {
-        if read_u8(codes).is_none() {
-            break;
-        }
+    while let Some(op_offset) = read_u8(codes) {
         let op = read_u8(codes)?;
 
         let op_code = op & 0xf;
         let op_info = op >> 4;
+
+        if matches!(
+            op_code,
+            UWOP_PUSH_NONVOL | UWOP_ALLOC_LARGE | UWOP_ALLOC_SMALL | UWOP_PUSH_MACHFRAME
+        ) {
+            prolog_size = core::cmp::max(prolog_size, op_offset)
+        }
 
         match op_code {
             UWOP_PUSH_NONVOL => {
@@ -121,7 +129,7 @@ fn parse_unwind_codes(mut codes: &[u8], version: u8) -> Option<(u32, Option<u32>
         }
     }
 
-    Some((stack_frame_size, fp_offset, machframe_offset))
+    Some((stack_frame_size, fp_offset, machframe_offset, prolog_size))
 }
 
 struct Module {
@@ -194,7 +202,7 @@ impl FunctionEntry {
         }
 
         let is_chained = version_flags & 0x20 != 0;
-        let prolog_size = read_u8(unwind_data)?;
+        let _prolog_size = read_u8(unwind_data)?;
         let unwind_code_count = read_u8(unwind_data)?;
 
         let frame_infos = read_u8(unwind_data)?;
@@ -202,7 +210,7 @@ impl FunctionEntry {
         let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
 
         let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
-        let (stack_frame_size, fp_offset, machframe_offset) =
+        let (stack_frame_size, fp_offset, machframe_offset, prolog_size) =
             parse_unwind_codes(unwind_codes, version).expect("bad unwind");
 
         let mother = if is_chained {
@@ -465,7 +473,7 @@ fn unwind_function<B: Backend>(
             let mut function_start = function.runtime_function.start;
 
             let ip_offset = offset_in_module - function.runtime_function.start;
-            if ip_offset <= function.prolog_size as u32 {
+            if ip_offset < function.prolog_size as u32 {
                 return Err("Unsupported function prolog".into());
             }
 
