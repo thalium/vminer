@@ -554,7 +554,8 @@ impl<B: Backend> Windows<B> {
                 ControlFlow::Break(()) => Ok(()),
             }
         } else {
-            Err("encountered unmapped address".into())
+            Err("invalid instruction pointer")
+                .context("this is probably a bug or a function epilog")
         }
     }
 

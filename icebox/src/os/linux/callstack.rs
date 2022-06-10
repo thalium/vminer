@@ -3,7 +3,9 @@ use core::ops::ControlFlow;
 use alloc::{format, vec::Vec};
 use gimli::UnwindSection;
 use hashbrown::HashMap;
-use ibc::{Architecture, Endianness, IceError, IceResult, Os, PhysicalAddress, VirtualAddress};
+use ibc::{
+    Architecture, Endianness, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress,
+};
 use once_cell::unsync::OnceCell;
 
 use super::Linux;
@@ -217,7 +219,7 @@ impl<B: ibc::Backend> Linux<B> {
                 ControlFlow::Break(()) => Ok(()),
             }
         } else {
-            Err("encountered unmapped address".into())
+            Err("invalid instruction pointer").context("this is probably a bug")
         }
     }
 }
