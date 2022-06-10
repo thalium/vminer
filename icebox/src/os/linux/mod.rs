@@ -164,7 +164,7 @@ impl<B: ice::Backend> Linux<B> {
             mm = proc.read_pointer_field(|ts| ts.active_mm)?;
         }
 
-        mm.map_non_null(|mm| Ok(mm))
+        mm.map_non_null(Ok)
     }
 }
 

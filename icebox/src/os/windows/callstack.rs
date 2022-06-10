@@ -549,7 +549,7 @@ impl<B: Backend> Windows<B> {
         if is_valid(frame.instruction_pointer) && is_valid(frame.stack_pointer) {
             frame.start = None;
             frame.module = None;
-            match f(&frame)? {
+            match f(frame)? {
                 ControlFlow::Continue(()) => Err("unwinding through JIT is unsupported".into()),
                 ControlFlow::Break(()) => Ok(()),
             }

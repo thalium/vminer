@@ -214,7 +214,7 @@ impl<B: ibc::Backend> Linux<B> {
             frame.start = None;
             frame.size = None;
             frame.module = None;
-            match f(&frame)? {
+            match f(frame)? {
                 ControlFlow::Continue(()) => Err("unwinding through JIT is unsupported".into()),
                 ControlFlow::Break(()) => Ok(()),
             }

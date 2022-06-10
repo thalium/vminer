@@ -25,7 +25,7 @@ jobs:
           override: true
 
       - name: cargo clippy
-        run: cargo clippy
+        run: cargo clippy -- -D warnings
 
   check-no_std:
     name: Check no_std

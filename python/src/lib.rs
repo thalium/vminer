@@ -157,10 +157,10 @@ struct Kvm;
 #[pymethods]
 impl Kvm {
     #[new]
-    fn new(pid: i32) -> PyResult<(Self, Backend)> {
+    fn new(_pid: i32) -> PyResult<(Self, Backend)> {
         #[cfg(target_os = "linux")]
         {
-            let kvm = icebox::backends::kvm::Kvm::connect(pid).convert_err()?;
+            let kvm = icebox::backends::kvm::Kvm::connect(_pid).convert_err()?;
             Ok((Kvm, Backend(Arc::new(ibc::RuntimeBackend(kvm)))))
         }
 
