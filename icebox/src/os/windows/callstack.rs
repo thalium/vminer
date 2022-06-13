@@ -1,4 +1,3 @@
-use alloc::collections::BTreeMap;
 use core::ops::ControlFlow;
 use ibc::{Backend, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
 
@@ -40,92 +39,142 @@ fn read_slice<'a>(codes: &mut &'a [u8], len: usize) -> Option<&'a [u8]> {
     })
 }
 
-// Windows unwind operations
-const UWOP_PUSH_NONVOL: u8 = 0;
-const UWOP_ALLOC_LARGE: u8 = 1;
-const UWOP_ALLOC_SMALL: u8 = 2;
-const UWOP_SET_FPREG: u8 = 3;
-const UWOP_SAVE_NONVOL: u8 = 4;
-const UWOP_SAVE_NONVOL_FAR: u8 = 5;
-const UWOP_EPILOG: u8 = 6;
-const UWOP_SAVE_XMM128: u8 = 8;
-const UWOP_SAVE_XMM128_FAR: u8 = 9;
-const UWOP_PUSH_MACHFRAME: u8 = 10;
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Reg(u8);
 
-fn parse_unwind_codes(
-    mut codes: &[u8],
+impl Reg {
+    const RBP: Self = Reg(5);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct XmmReg(u8);
+
+#[derive(Clone, Copy)]
+enum UnwindOp {
+    Push(Reg),
+    Alloc(u32),
+    SetFpReg,
+    Save(Reg, u32),
+    Epilog,
+    SaveXmm128(XmmReg, u32),
+    PushMachFrame(bool),
+}
+
+struct UnwindOpIterator<'a> {
     version: u8,
-) -> Option<(u32, Option<u32>, Option<u32>, u8)> {
-    const RSP: u8 = 5;
+    codes: &'a [u8],
+}
 
+impl Iterator for UnwindOpIterator<'_> {
+    type Item = Option<(u8, UnwindOp)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Windows unwind operations
+        const UWOP_PUSH_NONVOL: u8 = 0;
+        const UWOP_ALLOC_LARGE: u8 = 1;
+        const UWOP_ALLOC_SMALL: u8 = 2;
+        const UWOP_SET_FPREG: u8 = 3;
+        const UWOP_SAVE_NONVOL: u8 = 4;
+        const UWOP_SAVE_NONVOL_FAR: u8 = 5;
+        const UWOP_EPILOG: u8 = 6;
+        const UWOP_SAVE_XMM128: u8 = 8;
+        const UWOP_SAVE_XMM128_FAR: u8 = 9;
+        const UWOP_PUSH_MACHFRAME: u8 = 10;
+
+        let codes = &mut self.codes;
+
+        let op_offset = read_u8(codes)?;
+
+        let op = (|| {
+            let op = read_u8(codes)?;
+
+            let op_code = op & 0xf;
+            let op_info = op >> 4;
+
+            Some(match op_code {
+                UWOP_PUSH_NONVOL => UnwindOp::Push(Reg(op_info)),
+
+                UWOP_ALLOC_LARGE => match op_info {
+                    0 => UnwindOp::Alloc(read_u16(codes)? as u32 * 8),
+                    1 => UnwindOp::Alloc(read_u32(codes)?),
+                    _ => return None,
+                },
+                UWOP_ALLOC_SMALL => UnwindOp::Alloc(op_info as u32 * 8 + 8),
+
+                UWOP_SET_FPREG => UnwindOp::SetFpReg,
+
+                UWOP_SAVE_NONVOL => UnwindOp::Save(Reg(op_info), read_u16(codes)? as u32 * 8),
+                UWOP_SAVE_NONVOL_FAR => UnwindOp::Save(Reg(op_info), read_u32(codes)?),
+
+                UWOP_EPILOG if self.version == 2 => {
+                    read_u16(codes)?;
+                    UnwindOp::Epilog
+                }
+
+                UWOP_SAVE_XMM128 => {
+                    UnwindOp::SaveXmm128(XmmReg(op_info), read_u16(codes)? as u32 * 16)
+                }
+                UWOP_SAVE_XMM128_FAR => UnwindOp::SaveXmm128(XmmReg(op_info), read_u32(codes)?),
+
+                UWOP_PUSH_MACHFRAME => match op_info {
+                    0 => UnwindOp::PushMachFrame(false),
+                    1 => UnwindOp::PushMachFrame(true),
+                    _ => return None,
+                },
+
+                _ => return None,
+            })
+        })();
+
+        Some(op.map(|op| (op_offset, op)))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n_op = self.codes.len() / 2;
+        ((n_op != 0) as usize, Some(n_op))
+    }
+}
+
+fn parse_unwind_codes(codes: &[u8], version: u8) -> Option<(u32, Option<u32>, Option<u32>, u8)> {
     let mut stack_frame_size = 0;
     let mut fp_offset = None;
     let mut machframe_offset = None;
     let mut prolog_size = 0;
 
-    let codes = &mut codes;
+    let codes = UnwindOpIterator { codes, version };
 
-    while let Some(op_offset) = read_u8(codes) {
-        let op = read_u8(codes)?;
-
-        let op_code = op & 0xf;
-        let op_info = op >> 4;
+    for uwop in codes {
+        let (offset, op) = uwop?;
 
         if matches!(
-            op_code,
-            UWOP_PUSH_NONVOL | UWOP_ALLOC_LARGE | UWOP_ALLOC_SMALL | UWOP_PUSH_MACHFRAME
+            op,
+            UnwindOp::Push(_) | UnwindOp::Alloc(_) | UnwindOp::PushMachFrame(_)
         ) {
-            prolog_size = core::cmp::max(prolog_size, op_offset)
+            prolog_size = core::cmp::max(prolog_size, offset)
         }
 
-        match op_code {
-            UWOP_PUSH_NONVOL => {
-                if op_info == RSP {
+        match op {
+            UnwindOp::Push(reg) => {
+                if reg == Reg::RBP {
                     fp_offset = Some(stack_frame_size);
                 }
                 stack_frame_size += 8;
             }
-            UWOP_ALLOC_LARGE => match op_info {
-                0 => stack_frame_size += read_u16(codes)? as u32 * 8,
-                1 => stack_frame_size += read_u32(codes)?,
-                _ => return None,
-            },
-            UWOP_ALLOC_SMALL => stack_frame_size += op_info as u32 * 8 + 8,
-            UWOP_SET_FPREG => (),
-            UWOP_SAVE_NONVOL => {
-                let offset = read_u16(codes)? as u32 * 8;
-                if op_info == RSP {
+            UnwindOp::Alloc(size) => stack_frame_size += size,
+            UnwindOp::Save(reg, offset) => {
+                if reg == Reg::RBP {
                     fp_offset = Some(offset);
                 }
             }
-            UWOP_SAVE_NONVOL_FAR => {
-                let offset = read_u32(codes)?;
-                if op_info == RSP {
-                    fp_offset = Some(offset);
-                }
-            }
-            UWOP_EPILOG if version == 2 => {
-                // TODO: Handle this better. There is very few documentation
-                // about this at the moment, but this is not widly used.
-                read_u16(codes)?;
-            }
-            UWOP_SAVE_XMM128 => {
-                read_u16(codes)?;
-            }
-            UWOP_SAVE_XMM128_FAR => {
-                read_u32(codes)?;
-            }
-            UWOP_PUSH_MACHFRAME => {
-                match op_info {
-                    0 => stack_frame_size += 0,
-                    1 => stack_frame_size += 8,
-                    _ => return None,
+            UnwindOp::PushMachFrame(error) => {
+                if error {
+                    stack_frame_size += 8;
                 }
                 machframe_offset = Some(stack_frame_size);
                 stack_frame_size += 28;
             }
 
-            _ => return None,
+            _ => (),
         }
     }
 
@@ -144,7 +193,7 @@ impl Module {
         self.start <= addr && addr < self.end
     }
 
-    fn get_unwind_data<B: ibc::Backend>(&mut self, ctx: &Context<B>) -> IceResult<&mut UnwindData> {
+    fn get_unwind_data<B: ibc::Backend>(&mut self, ctx: &Context<B>) -> IceResult<&UnwindData> {
         if self.unwind_data.is_none() {
             let data = ctx.init_unwind_data(self)?;
             self.unwind_data = Some(data);
@@ -190,56 +239,11 @@ struct FunctionEntry {
     machframe_offset: Option<u32>,
 }
 
-impl FunctionEntry {
-    fn parse(pe: &[u8], runtime_function: RuntimeFunction) -> Option<Self> {
-        let unwind_data = &mut pe.get(runtime_function.ptr as usize..)?;
-
-        let version_flags = read_u8(unwind_data)?;
-        let version = version_flags & 0x7;
-        if !(1..=2).contains(&version) {
-            log::error!("Unsupported unwind code version: {version}");
-            return None;
-        }
-
-        let is_chained = version_flags & 0x20 != 0;
-        let _prolog_size = read_u8(unwind_data)?;
-        let unwind_code_count = read_u8(unwind_data)?;
-
-        let frame_infos = read_u8(unwind_data)?;
-        let frame_register = frame_infos & 0x0f;
-        let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
-
-        let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
-        let (stack_frame_size, fp_offset, machframe_offset, prolog_size) =
-            parse_unwind_codes(unwind_codes, version).expect("bad unwind");
-
-        let mother = if is_chained {
-            let mother = read_slice(unwind_data, std::mem::size_of::<RuntimeFunction>())?;
-            Some(bytemuck::try_pod_read_unaligned(mother).ok()?)
-        } else {
-            None
-        };
-
-        Some(Self {
-            runtime_function,
-            mother,
-
-            stack_frame_size,
-            prolog_size,
-
-            fp_offset,
-            frame_register_offset,
-            machframe_offset,
-        })
-    }
-}
-
 /// Cached unwind data by module
 struct UnwindData {
     offset: VirtualAddress,
     content: Vec<u8>,
     directory_range: (usize, usize),
-    functions: BTreeMap<u32, FunctionEntry>,
 }
 
 impl UnwindData {
@@ -305,35 +309,59 @@ impl UnwindData {
         }
     }
 
-    fn find_by_offset(&mut self, offset: u32) -> IceResult<Option<&FunctionEntry>> {
-        Ok(self
-            .get_function_start(offset)?
-            .map(|start| &self.functions[&start]))
-    }
+    fn parse_function(&self, runtime_function: RuntimeFunction) -> Option<FunctionEntry> {
+        let unwind_data = &mut self.content.get(runtime_function.ptr as usize..)?;
 
-    fn get_function_start(&mut self, offset: u32) -> IceResult<Option<u32>> {
-        if let Some((start, function)) = self.functions.range(..=offset).last() {
-            if offset < function.runtime_function.end {
-                return Ok(Some(*start));
-            }
+        let version_flags = read_u8(unwind_data)?;
+        let version = version_flags & 0x7;
+        if !(1..=2).contains(&version) {
+            log::error!("Unsupported unwind code version: {version}");
+            return None;
         }
 
-        self.insert_function(offset)
+        let is_chained = version_flags & 0x20 != 0;
+        let _prolog_size = read_u8(unwind_data)?;
+        let unwind_code_count = read_u8(unwind_data)?;
+
+        let frame_infos = read_u8(unwind_data)?;
+        let frame_register = frame_infos & 0x0f;
+        let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
+
+        let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
+        let (stack_frame_size, fp_offset, machframe_offset, prolog_size) =
+            parse_unwind_codes(unwind_codes, version)?;
+
+        let mother = if is_chained {
+            let mother = read_slice(unwind_data, std::mem::size_of::<RuntimeFunction>())?;
+            Some(bytemuck::pod_read_unaligned(mother))
+        } else {
+            None
+        };
+
+        Some(FunctionEntry {
+            runtime_function,
+            mother,
+
+            stack_frame_size,
+            prolog_size,
+
+            fp_offset,
+            frame_register_offset,
+            machframe_offset,
+        })
     }
 
-    fn insert_function(&mut self, offset: u32) -> IceResult<Option<u32>> {
+    fn find_by_offset(&self, offset: u32) -> IceResult<Option<FunctionEntry>> {
         let (start, end) = self.directory_range;
         let runtime_functions: &[RuntimeFunction] = bytemuck::cast_slice(&self.content[start..end]);
 
-        let function = match Self::find_runtime_function(runtime_functions, offset)? {
-            Some(f) => f,
-            None => return Ok(None),
-        };
-
-        let function_start = function.start;
-        let function = FunctionEntry::parse(&self.content, function).context("bad unwind codes")?;
-        self.functions.insert(function_start, function);
-        Ok(Some(function_start))
+        match Self::find_runtime_function(runtime_functions, offset)? {
+            Some(f) => self
+                .parse_function(f)
+                .context("failed to parse unwind data")
+                .map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -352,7 +380,7 @@ impl AllModules {
     ) -> IceResult<Self> {
         let mut modules = Vec::new();
 
-        windows.process_for_each_module(proc, &mut |module| {
+        let mut push = |module| {
             let (start, end) = windows.module_span(module, proc)?;
             modules.push(Module {
                 start,
@@ -361,19 +389,10 @@ impl AllModules {
                 unwind_data: None,
             });
             Ok(ControlFlow::Continue(()))
-        })?;
+        };
 
-        windows.for_each_kernel_module(&mut |module| {
-            let proc = ibc::Process(VirtualAddress(0));
-            let (start, end) = windows.module_span(module, proc)?;
-            modules.push(Module {
-                start,
-                end,
-                module,
-                unwind_data: None,
-            });
-            Ok(ControlFlow::Continue(()))
-        })?;
+        windows.process_for_each_module(proc, &mut push)?;
+        windows.for_each_kernel_module(&mut push)?;
 
         modules.sort_unstable_by_key(|v| v.start);
 
@@ -443,7 +462,6 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             offset: module.start,
             content,
             directory_range: (directory_start, directory_end),
-            functions: BTreeMap::new(),
         })
     }
 }
@@ -506,7 +524,6 @@ fn unwind_function<B: Backend>(
                         function = unwind_data
                             .find_by_offset(mother.start)?
                             .context("cannot find mother function")?;
-
                         function_start = function.runtime_function.start;
                     }
                     None => break,
@@ -554,8 +571,10 @@ impl<B: Backend> Windows<B> {
                 ControlFlow::Break(()) => Ok(()),
             }
         } else {
-            Err("invalid instruction pointer")
-                .context("this is probably a bug or a function epilog")
+            Err("this is probably a bug or a function epilog").context(format!(
+                "invalid instruction pointer: {:#x}",
+                frame.instruction_pointer
+            ))
         }
     }
 

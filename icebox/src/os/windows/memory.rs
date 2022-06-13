@@ -90,7 +90,7 @@ impl<B: ibc::Backend> super::Windows<B> {
         match result {
             Ok(pte) => self.read_prototype_pte(addr, buf, pte),
             Err(err) => {
-                log::warn!("Failed to read VAD PTE: {err}");
+                log::warn!("Failed to read VAD PTE for address {addr:#x}: {err}");
                 Err(ibc::TranslationError::Invalid(0))
             }
         }

@@ -219,7 +219,10 @@ impl<B: ibc::Backend> Linux<B> {
                 ControlFlow::Break(()) => Ok(()),
             }
         } else {
-            Err("invalid instruction pointer").context("this is probably a bug")
+            Err("this is probably a bug").context(format!(
+                "invalid instruction pointer: {:#x}",
+                frame.instruction_pointer
+            ))
         }
     }
 }
