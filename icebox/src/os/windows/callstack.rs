@@ -466,26 +466,32 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
     }
 }
 
+enum NextSp {
+    Value(VirtualAddress),
+    Addr(VirtualAddress),
+}
+
 struct UnwindResult {
-    next_sp: VirtualAddress,
-    next_ip: VirtualAddress,
+    next_sp: NextSp,
+    next_ip_addr: VirtualAddress,
+    next_bp_addr: Option<VirtualAddress>,
     fun_start: Option<VirtualAddress>,
 }
 
 /// Read instructions and emulate them if they match expectations for an epilog.
-/// Possibly returns a new value for the base pointer.
-fn read_epilog<B: ibc::Backend>(
-    ctx: &Context<B>,
-    code: &mut &[u8],
-    next_sp: &mut VirtualAddress,
-) -> Option<IceResult<Option<VirtualAddress>>> {
-    let mut base_pointer = None;
+/// This is the common way to unwind an epilog in Windows x86_64
+fn read_epilog(unwind_data: &UnwindData, frame: &ibc::StackFrame) -> Option<UnwindResult> {
+    let offset = frame.instruction_pointer - unwind_data.offset;
+    let code = &mut unwind_data.content.get(offset as usize..)?;
+
+    let mut next_sp = frame.stack_pointer;
+    let mut next_bp_addr = None;
 
     loop {
         match read_u8(code)? {
             // pop r8-r15
             0x41 => match read_u8(code) {
-                Some(0x58..=0x5f) => *next_sp += 8,
+                Some(0x58..=0x5f) => next_sp += 8,
                 _ => return None,
             },
             // add rsp, [n]
@@ -495,29 +501,23 @@ fn read_epilog<B: ibc::Backend>(
                     return None;
                 }
                 match op {
-                    0x81 => *next_sp += read_u32(code)? as _,
-                    0x83 => *next_sp += read_u8(code)? as _,
+                    0x81 => next_sp += read_u32(code)? as _,
+                    0x83 => next_sp += read_u8(code)? as _,
                     _ => return None,
                 }
             }
             // pop rsp
             0x5c => {
-                *next_sp = match ctx.read_value(*next_sp) {
-                    Ok(bp) => bp,
-                    Err(err) => return Some(Err(err)),
-                };
-                *next_sp += 8;
+                log::error!("unsupported 'pop rsp'");
+                return None;
             }
             // pop rbp
             0x5d => {
-                base_pointer = match ctx.read_value(*next_sp) {
-                    Ok(bp) => Some(bp),
-                    Err(err) => return Some(Err(err)),
-                };
-                *next_sp += 8;
+                next_bp_addr = Some(next_sp);
+                next_sp += 8;
             }
             // pop [reg] | popf
-            0x58..=0x5f | 0x9d => *next_sp += 8,
+            0x58..=0x5f | 0x9d => next_sp += 8,
             // ret
             0xc3 => break,
 
@@ -525,55 +525,30 @@ fn read_epilog<B: ibc::Backend>(
         }
     }
 
-    Some(Ok(base_pointer))
-}
-
-/// Tests if current IP is within function epilog. This is done by reading
-/// instructions to see if they match expectations for an epilog and applying
-/// their effect if so.
-fn test_epilog<B: Backend>(
-    ctx: &Context<B>,
-    unwind_data: &UnwindData,
-    frame: &ibc::StackFrame,
-    base_pointer: &mut Option<VirtualAddress>,
-) -> IceResult<Option<UnwindResult>> {
-    let offset = frame.instruction_pointer - unwind_data.offset;
-    let code = &mut match unwind_data.content.get(offset as usize..) {
-        Some(code) => code,
-        None => return Ok(None),
-    };
-
-    let mut next_sp = frame.stack_pointer;
-
-    match read_epilog(ctx, code, &mut next_sp) {
-        None => return Ok(None),
-        Some(Err(err)) => return Err(err),
-        Some(Ok(Some(bp))) => *base_pointer = Some(bp),
-        Some(Ok(None)) => (),
-    }
-
-    log::debug!("Found function epilog");
-
-    Ok(Some(UnwindResult {
-        next_sp: next_sp + 8u64,
-        next_ip: ctx.read_value(next_sp)?,
-        fun_start: None, // TODO
-    }))
+    Some(UnwindResult {
+        next_sp: NextSp::Value(next_sp + 8),
+        next_ip_addr: next_sp,
+        next_bp_addr,
+        fun_start: None,
+    })
 }
 
 fn unwind_function<B: Backend>(
     ctx: &Context<B>,
     module: &mut Module,
     frame: &ibc::StackFrame,
-    base_pointer: &mut Option<VirtualAddress>,
+    base_pointer: Option<VirtualAddress>,
 ) -> IceResult<UnwindResult> {
     let unwind_data = module
         .get_unwind_data(ctx)
         .context("cannot get unwind data")?;
 
-    if let Some(result) = test_epilog(ctx, unwind_data, frame, base_pointer)? {
+    if let Some(result) = read_epilog(unwind_data, frame) {
+        log::debug!("Found function epilog");
         return Ok(result);
     }
+
+    let mut next_bp_addr = None;
 
     let offset_in_module = (frame.instruction_pointer - unwind_data.offset) as u32;
     let (caller_sp, fun_start) = match unwind_data.find_by_offset(offset_in_module)? {
@@ -598,14 +573,15 @@ fn unwind_function<B: Backend>(
             let mut next_sp = frame_pointer;
             loop {
                 if let Some(offset) = function.fp_offset {
-                    *base_pointer = Some(ctx.read_value(frame_pointer + offset)?);
+                    next_bp_addr = Some(frame_pointer + offset);
                 }
 
                 if let Some(offset) = function.machframe_offset {
                     let machinst = frame_pointer + offset;
                     return Ok(UnwindResult {
-                        next_ip: ctx.read_value(machinst)?,
-                        next_sp: ctx.read_value(machinst + 0x18)?,
+                        next_sp: NextSp::Addr(machinst + 0x18u64),
+                        next_ip_addr: machinst,
+                        next_bp_addr,
                         fun_start: Some(unwind_data.offset + function_start),
                     });
                 }
@@ -629,8 +605,9 @@ fn unwind_function<B: Backend>(
     };
 
     Ok(UnwindResult {
-        next_ip: ctx.read_value(caller_sp)?,
-        next_sp: caller_sp + 8u64,
+        next_ip_addr: caller_sp,
+        next_sp: NextSp::Value(caller_sp + 8u64),
+        next_bp_addr,
         fun_start,
     })
 }
@@ -729,7 +706,7 @@ impl<B: Backend> Windows<B> {
             frame.module = Some(module.module);
 
             // Move stack pointer to the upper frame
-            let unwind_result = unwind_function(&ctx, module, &frame, &mut base_pointer);
+            let unwind_result = unwind_function(&ctx, module, &frame, base_pointer);
 
             match unwind_result {
                 Ok(infos) => {
@@ -738,8 +715,14 @@ impl<B: Backend> Windows<B> {
                         return Ok(());
                     }
 
-                    frame.instruction_pointer = infos.next_ip;
-                    frame.stack_pointer = infos.next_sp;
+                    frame.instruction_pointer = ctx.read_value(infos.next_ip_addr)?;
+                    frame.stack_pointer = match infos.next_sp {
+                        NextSp::Value(addr) => ctx.read_value(addr)?,
+                        NextSp::Addr(addr) => addr,
+                    };
+                    if let Some(addr) = infos.next_bp_addr {
+                        base_pointer = Some(ctx.read_value(addr)?);
+                    }
                 }
                 Err(err) => {
                     frame.start = None;
