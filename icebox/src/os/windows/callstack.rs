@@ -39,17 +39,17 @@ fn read_slice<'a>(codes: &mut &'a [u8], len: usize) -> Option<&'a [u8]> {
     })
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Reg(u8);
 
 impl Reg {
     const RBP: Self = Reg(5);
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XmmReg(u8);
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum UnwindOp {
     Push(Reg),
     Alloc(u32),
@@ -135,52 +135,6 @@ impl Iterator for UnwindOpIterator<'_> {
     }
 }
 
-fn parse_unwind_codes(codes: &[u8], version: u8) -> Option<(u32, Option<u32>, Option<u32>, u8)> {
-    let mut stack_frame_size = 0;
-    let mut fp_offset = None;
-    let mut machframe_offset = None;
-    let mut prolog_size = 0;
-
-    let codes = UnwindOpIterator { codes, version };
-
-    for uwop in codes {
-        let (offset, op) = uwop?;
-
-        if matches!(
-            op,
-            UnwindOp::Push(_) | UnwindOp::Alloc(_) | UnwindOp::PushMachFrame(_)
-        ) {
-            prolog_size = core::cmp::max(prolog_size, offset)
-        }
-
-        match op {
-            UnwindOp::Push(reg) => {
-                if reg == Reg::RBP {
-                    fp_offset = Some(stack_frame_size);
-                }
-                stack_frame_size += 8;
-            }
-            UnwindOp::Alloc(size) => stack_frame_size += size,
-            UnwindOp::Save(reg, offset) => {
-                if reg == Reg::RBP {
-                    fp_offset = Some(offset);
-                }
-            }
-            UnwindOp::PushMachFrame(error) => {
-                if error {
-                    stack_frame_size += 8;
-                }
-                machframe_offset = Some(stack_frame_size);
-                stack_frame_size += 28;
-            }
-
-            _ => (),
-        }
-    }
-
-    Some((stack_frame_size, fp_offset, machframe_offset, prolog_size))
-}
-
 struct Module {
     start: VirtualAddress,
     end: VirtualAddress,
@@ -227,16 +181,20 @@ impl RuntimeFunction {
 }
 
 #[derive(Debug, Clone)]
-struct FunctionEntry {
-    runtime_function: RuntimeFunction,
+struct FunctionEntry<'a> {
     mother: Option<RuntimeFunction>,
-
-    prolog_size: u8,
-    stack_frame_size: u32,
-
-    fp_offset: Option<u32>,
+    version: u8,
     frame_register_offset: Option<u8>,
-    machframe_offset: Option<u32>,
+    unwind_codes: &'a [u8],
+}
+
+impl<'a> FunctionEntry<'a> {
+    fn iter_codes(&self) -> UnwindOpIterator<'a> {
+        UnwindOpIterator {
+            version: self.version,
+            codes: self.unwind_codes,
+        }
+    }
 }
 
 /// Cached unwind data by module
@@ -258,7 +216,6 @@ impl UnwindData {
             } else {
                 // In this case, we can't continue the binary search, so
                 // we stop here.
-                log::debug!("Encountered unmapped unwind info");
                 corrupted = true;
                 offset
             }
@@ -295,7 +252,7 @@ impl UnwindData {
 
             match last_valid {
                 Some(_) => Ok(None),
-                None => Err("Unmapped unwind data".into()),
+                None => Err("unmapped unwind data".into()),
             }
         } else {
             // The binary search succeded, so we known we're good.
@@ -328,8 +285,6 @@ impl UnwindData {
         let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
 
         let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
-        let (stack_frame_size, fp_offset, machframe_offset, prolog_size) =
-            parse_unwind_codes(unwind_codes, version)?;
 
         let mother = if is_chained {
             let mother = read_slice(unwind_data, std::mem::size_of::<RuntimeFunction>())?;
@@ -339,29 +294,17 @@ impl UnwindData {
         };
 
         Some(FunctionEntry {
-            runtime_function,
             mother,
-
-            stack_frame_size,
-            prolog_size,
-
-            fp_offset,
+            version,
             frame_register_offset,
-            machframe_offset,
+            unwind_codes,
         })
     }
 
-    fn find_by_offset(&self, offset: u32) -> IceResult<Option<FunctionEntry>> {
+    fn find_by_offset(&self, offset: u32) -> IceResult<Option<RuntimeFunction>> {
         let (start, end) = self.directory_range;
         let runtime_functions: &[RuntimeFunction] = bytemuck::cast_slice(&self.content[start..end]);
-
-        match Self::find_runtime_function(runtime_functions, offset)? {
-            Some(f) => self
-                .parse_function(f)
-                .context("failed to parse unwind data")
-                .map(Some),
-            None => Ok(None),
-        }
+        Self::find_runtime_function(runtime_functions, offset)
     }
 }
 
@@ -533,6 +476,115 @@ fn read_epilog(unwind_data: &UnwindData, frame: &ibc::StackFrame) -> Option<Unwi
     })
 }
 
+enum UnwindStep {
+    MachInst(u32),
+    SpOffset(u32),
+}
+
+/// Read raw unwind codes and apply their effect.
+fn read_unwind_codes(
+    function: &FunctionEntry,
+    offset: Option<u32>,
+) -> IceResult<(Option<u32>, UnwindStep)> {
+    let mut codes = function.iter_codes();
+    let mut sp_offset = 0;
+    let mut bp_addr = None;
+
+    while let Some(uwop) = codes.next() {
+        let (op_offset, op) = uwop.context("invalid unwind code")?;
+
+        if offset.is_some() && Some(op_offset as u32) > offset && !matches!(op, UnwindOp::Epilog) {
+            log::trace!("Skipped part of function prolog");
+            break;
+        }
+
+        match op {
+            UnwindOp::Push(reg) => {
+                if reg == Reg::RBP {
+                    bp_addr = Some(sp_offset);
+                }
+                sp_offset += 8;
+            }
+            UnwindOp::Alloc(size) => sp_offset += size,
+            UnwindOp::PushMachFrame(error) => {
+                if codes.next().is_some() {
+                    return Err("unsupported UWOP_MACHFRAME in the middle of unwind ops".into());
+                } else if function.mother.is_some() {
+                    return Err("unsupported UWOP_MACHFRAME with mother".into());
+                }
+
+                let offset = if error { 8 } else { 0 };
+                return Ok((bp_addr, UnwindStep::MachInst(sp_offset + offset)));
+            }
+            UnwindOp::Save(reg, offset) if reg == Reg::RBP => bp_addr = Some(offset),
+            _ => (),
+        }
+    }
+
+    Ok((bp_addr, UnwindStep::SpOffset(sp_offset)))
+}
+
+fn unwind_with_infos(
+    unwind_data: &UnwindData,
+    runtime_function: RuntimeFunction,
+    frame: &ibc::StackFrame,
+    base_pointer: Option<VirtualAddress>,
+) -> IceResult<UnwindResult> {
+    let offset_in_module = (frame.instruction_pointer - unwind_data.offset) as u32;
+    let mut ip_offset = Some(offset_in_module - runtime_function.start);
+
+    let mut function = unwind_data
+        .parse_function(runtime_function)
+        .context("failed to parse unwind data")?;
+
+    let fun_start = Some(unwind_data.offset + runtime_function.start);
+
+    let frame_pointer = match function.frame_register_offset {
+        None => frame.stack_pointer,
+        Some(offset) => base_pointer.context("missing required frame pointer")? - offset as u64,
+    };
+
+    let mut next_sp = frame_pointer;
+    let mut next_bp_addr = None;
+
+    loop {
+        let (bp_offset, step) = read_unwind_codes(&function, ip_offset)?;
+        if let Some(offset) = bp_offset {
+            next_bp_addr = Some(next_sp + offset);
+        }
+
+        match step {
+            UnwindStep::MachInst(offset) => {
+                return Ok(UnwindResult {
+                    next_sp: NextSp::Addr(next_sp + offset + 0x18),
+                    next_ip_addr: next_sp + offset,
+                    next_bp_addr,
+                    fun_start,
+                })
+            }
+            UnwindStep::SpOffset(offset) => next_sp += offset as u64,
+        }
+
+        match function.mother {
+            Some(mother) => {
+                function = unwind_data
+                    .parse_function(mother)
+                    .context("failed to parse unwind data")?;
+                ip_offset = None;
+            }
+
+            None => break,
+        }
+    }
+
+    Ok(UnwindResult {
+        next_ip_addr: next_sp,
+        next_sp: NextSp::Value(next_sp + 8u64),
+        next_bp_addr,
+        fun_start,
+    })
+}
+
 fn unwind_function<B: Backend>(
     ctx: &Context<B>,
     module: &mut Module,
@@ -544,72 +596,22 @@ fn unwind_function<B: Backend>(
         .context("cannot get unwind data")?;
 
     if let Some(result) = read_epilog(unwind_data, frame) {
-        log::debug!("Found function epilog");
+        log::trace!("Found function epilog");
         return Ok(result);
     }
 
-    let mut next_bp_addr = None;
-
     let offset_in_module = (frame.instruction_pointer - unwind_data.offset) as u32;
-    let (caller_sp, fun_start) = match unwind_data.find_by_offset(offset_in_module)? {
+    match unwind_data.find_by_offset(offset_in_module)? {
+        Some(function) => unwind_with_infos(unwind_data, function, frame, base_pointer),
+
         // This is a leaf function
-        None => (frame.stack_pointer, None),
-
-        Some(mut function) => {
-            let mut function_start = function.runtime_function.start;
-
-            let ip_offset = offset_in_module - function.runtime_function.start;
-            if ip_offset < function.prolog_size as u32 {
-                return Err("Unsupported function prolog".into());
-            }
-
-            let frame_pointer = match function.frame_register_offset {
-                None => frame.stack_pointer,
-                Some(offset) => {
-                    base_pointer.context("missing required frame pointer")? - offset as u64
-                }
-            };
-
-            let mut next_sp = frame_pointer;
-            loop {
-                if let Some(offset) = function.fp_offset {
-                    next_bp_addr = Some(frame_pointer + offset);
-                }
-
-                if let Some(offset) = function.machframe_offset {
-                    let machinst = frame_pointer + offset;
-                    return Ok(UnwindResult {
-                        next_sp: NextSp::Addr(machinst + 0x18u64),
-                        next_ip_addr: machinst,
-                        next_bp_addr,
-                        fun_start: Some(unwind_data.offset + function_start),
-                    });
-                }
-
-                next_sp += function.stack_frame_size as u64;
-
-                match function.mother {
-                    Some(mother) => {
-                        function = unwind_data
-                            .find_by_offset(mother.start)?
-                            .context("cannot find mother function")?;
-                        function_start = function.runtime_function.start;
-                    }
-                    None => break,
-                }
-            }
-
-            let fun_start = unwind_data.offset + function_start;
-            (next_sp, Some(fun_start))
-        }
-    };
-
-    Ok(UnwindResult {
-        next_ip_addr: caller_sp,
-        next_sp: NextSp::Value(caller_sp + 8u64),
-        next_bp_addr,
-        fun_start,
-    })
+        None => Ok(UnwindResult {
+            next_ip_addr: frame.stack_pointer,
+            next_sp: NextSp::Value(frame.stack_pointer + 8u64),
+            next_bp_addr: None,
+            fun_start: None,
+        }),
+    }
 }
 
 impl<B: Backend> Windows<B> {
@@ -717,8 +719,8 @@ impl<B: Backend> Windows<B> {
 
                     frame.instruction_pointer = ctx.read_value(infos.next_ip_addr)?;
                     frame.stack_pointer = match infos.next_sp {
-                        NextSp::Value(addr) => ctx.read_value(addr)?,
-                        NextSp::Addr(addr) => addr,
+                        NextSp::Addr(addr) => ctx.read_value(addr)?,
+                        NextSp::Value(addr) => addr,
                     };
                     if let Some(addr) = infos.next_bp_addr {
                         base_pointer = Some(ctx.read_value(addr)?);
