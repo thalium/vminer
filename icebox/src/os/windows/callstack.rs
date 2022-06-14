@@ -472,6 +472,95 @@ struct UnwindResult {
     fun_start: Option<VirtualAddress>,
 }
 
+/// Read instructions and emulate them if they match expectations for an epilog.
+/// Possibly returns a new value for the base pointer.
+fn read_epilog<B: ibc::Backend>(
+    ctx: &Context<B>,
+    code: &mut &[u8],
+    next_sp: &mut VirtualAddress,
+) -> Option<IceResult<Option<VirtualAddress>>> {
+    let mut base_pointer = None;
+
+    loop {
+        match read_u8(code)? {
+            // pop r8-r15
+            0x41 => match read_u8(code) {
+                Some(0x58..=0x5f) => *next_sp += 8,
+                _ => return None,
+            },
+            // add rsp, [n]
+            0x48 => {
+                let op = read_u8(code)?;
+                if read_u8(code)? != 0xc4 {
+                    return None;
+                }
+                match op {
+                    0x81 => *next_sp += read_u32(code)? as _,
+                    0x83 => *next_sp += read_u8(code)? as _,
+                    _ => return None,
+                }
+            }
+            // pop rsp
+            0x5c => {
+                *next_sp = match ctx.read_value(*next_sp) {
+                    Ok(bp) => bp,
+                    Err(err) => return Some(Err(err)),
+                };
+                *next_sp += 8;
+            }
+            // pop rbp
+            0x5d => {
+                base_pointer = match ctx.read_value(*next_sp) {
+                    Ok(bp) => Some(bp),
+                    Err(err) => return Some(Err(err)),
+                };
+                *next_sp += 8;
+            }
+            // pop [reg] | popf
+            0x58..=0x5f | 0x9d => *next_sp += 8,
+            // ret
+            0xc3 => break,
+
+            _ => return None,
+        }
+    }
+
+    Some(Ok(base_pointer))
+}
+
+/// Tests if current IP is within function epilog. This is done by reading
+/// instructions to see if they match expectations for an epilog and applying
+/// their effect if so.
+fn test_epilog<B: Backend>(
+    ctx: &Context<B>,
+    unwind_data: &UnwindData,
+    frame: &ibc::StackFrame,
+    base_pointer: &mut Option<VirtualAddress>,
+) -> IceResult<Option<UnwindResult>> {
+    let offset = frame.instruction_pointer - unwind_data.offset;
+    let code = &mut match unwind_data.content.get(offset as usize..) {
+        Some(code) => code,
+        None => return Ok(None),
+    };
+
+    let mut next_sp = frame.stack_pointer;
+
+    match read_epilog(ctx, code, &mut next_sp) {
+        None => return Ok(None),
+        Some(Err(err)) => return Err(err),
+        Some(Ok(Some(bp))) => *base_pointer = Some(bp),
+        Some(Ok(None)) => (),
+    }
+
+    log::debug!("Found function epilog");
+
+    Ok(Some(UnwindResult {
+        next_sp: next_sp + 8u64,
+        next_ip: ctx.read_value(next_sp)?,
+        fun_start: None, // TODO
+    }))
+}
+
 fn unwind_function<B: Backend>(
     ctx: &Context<B>,
     module: &mut Module,
@@ -481,6 +570,10 @@ fn unwind_function<B: Backend>(
     let unwind_data = module
         .get_unwind_data(ctx)
         .context("cannot get unwind data")?;
+
+    if let Some(result) = test_epilog(ctx, unwind_data, frame, base_pointer)? {
+        return Ok(result);
+    }
 
     let offset_in_module = (frame.instruction_pointer - unwind_data.offset) as u32;
     let (caller_sp, fun_start) = match unwind_data.find_by_offset(offset_in_module)? {
@@ -571,7 +664,7 @@ impl<B: Backend> Windows<B> {
                 ControlFlow::Break(()) => Ok(()),
             }
         } else {
-            Err("this is probably a bug or a function epilog").context(format!(
+            Err("this is probably a bug").context(format!(
                 "invalid instruction pointer: {:#x}",
                 frame.instruction_pointer
             ))
