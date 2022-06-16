@@ -41,7 +41,7 @@ fn collect_fields(struct_name: &str, fields: &pdb::FieldList) -> Vec<crate::symb
 
 pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
-    module: &mut crate::ModuleSymbols,
+    module: &mut super::ModuleSymbolsBuilder,
 ) -> Result<(), pdb::Error> {
     let types = pdb.type_information()?;
 
@@ -96,7 +96,7 @@ pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
 
 pub fn load_syms_from_pdb<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
-    module: &mut crate::symbols::ModuleSymbols,
+    module: &mut super::ModuleSymbolsBuilder,
 ) -> Result<(), pdb::Error> {
     let symbols = pdb.global_symbols()?;
     let address_map = pdb.address_map()?;
@@ -106,7 +106,7 @@ pub fn load_syms_from_pdb<'s, S: pdb::Source<'s> + 's>(
             if let Some(addr) = sym.offset.to_rva(&address_map) {
                 if let Ok(name) = std::str::from_utf8(sym.name.as_bytes()) {
                     let addr = crate::VirtualAddress(addr.0 as u64);
-                    module.extend([(name, addr)])
+                    module.push(addr, name);
                 }
             }
             Ok(())

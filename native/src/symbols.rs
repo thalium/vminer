@@ -22,7 +22,7 @@ pub unsafe extern "C" fn symbols_load_from_bytes(
     error::wrap_unit(|| {
         let data = core::slice::from_raw_parts(data, len);
         let name = cstring::from_ut8(name)?.into();
-        indexer.0.get_lib_mut(name).read_symbols_from_bytes(data)
+        indexer.0.load_from_bytes(name, data)
     })
 }
 
@@ -30,13 +30,11 @@ pub unsafe extern "C" fn symbols_load_from_bytes(
 #[no_mangle]
 pub unsafe extern "C" fn symbols_load_from_file(
     indexer: &mut Symbols,
-    name: *const c_char,
     path: *const c_char,
 ) -> *mut Error {
     error::wrap_unit(|| {
         let path = cstring::from_ut8(path)?;
-        let name = cstring::from_ut8(name)?.into();
-        indexer.0.get_lib_mut(name).read_symbols_from_file(path)
+        indexer.0.load_from_file(path)
     })
 }
 

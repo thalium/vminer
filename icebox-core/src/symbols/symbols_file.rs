@@ -1,4 +1,4 @@
-use crate::IceResult;
+use crate::{symbols::ModuleSymbolsBuilder, IceResult};
 use alloc::string::String;
 #[cfg(feature = "std")]
 use std::io;
@@ -29,18 +29,18 @@ impl BufRead for &[u8] {
 }
 
 #[cfg(feature = "std")]
-pub fn parse_symbol_file<R: io::BufRead>(r: R, syms: &mut crate::ModuleSymbols) -> IceResult<()> {
+pub fn parse_symbol_file<R: io::BufRead>(r: R, syms: &mut ModuleSymbolsBuilder) -> IceResult<()> {
     parse_symbol_file_inner(r, syms)
 }
 
 pub fn parse_symbol_file_from_bytes(
     bytes: &[u8],
-    syms: &mut crate::ModuleSymbols,
+    syms: &mut ModuleSymbolsBuilder,
 ) -> IceResult<()> {
     parse_symbol_file_inner(bytes, syms)
 }
 
-fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut crate::ModuleSymbols) -> IceResult<()> {
+fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ModuleSymbolsBuilder) -> IceResult<()> {
     let mut line = String::with_capacity(200);
 
     loop {

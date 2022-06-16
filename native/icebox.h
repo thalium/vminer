@@ -273,7 +273,7 @@ struct Error *symbols_load_from_bytes(struct Symbols *indexer,
                                       uintptr_t len);
 
 #if defined(STD)
-struct Error *symbols_load_from_file(struct Symbols *indexer, const char *name, const char *path);
+struct Error *symbols_load_from_file(struct Symbols *indexer, const char *path);
 #endif
 
 #if defined(STD)

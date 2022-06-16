@@ -8,12 +8,10 @@ use crate::{IceError, IceResult};
 use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
-    collections::BTreeMap,
     string::{String, ToString},
-    sync::Arc,
     vec::Vec,
 };
-use core::fmt;
+use core::{fmt, ops::Range};
 use hashbrown::HashMap;
 #[cfg(feature = "std")]
 use std::{fs, path};
@@ -125,59 +123,40 @@ impl<'a> Struct<'a> {
     }
 }
 
-#[derive(Default)]
-pub struct ModuleSymbols {
-    // TODO: Try to store all string in a single buffer
-    /// A map to translate addresses to names
-    names: BTreeMap<VirtualAddress, Arc<str>>,
-
-    /// A map to translate names to addresses
-    addresses: HashMap<Arc<str>, VirtualAddress>,
-
+#[derive(Debug, Default)]
+pub struct ModuleSymbolsBuilder {
+    buffer: String,
+    symbols: Vec<(VirtualAddress, Range<usize>)>,
     types: HashMap<String, OwnedStruct>,
 }
 
-impl ModuleSymbols {
-    fn new() -> Self {
-        Self {
-            names: BTreeMap::new(),
-            addresses: HashMap::new(),
-            types: HashMap::new(),
-        }
+impl ModuleSymbolsBuilder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn get_symbol(&self, addr: VirtualAddress) -> Option<&str> {
-        Some(&**self.names.get(&addr)?)
-    }
+    pub fn build(self) -> ModuleSymbols {
+        let buffer = self.buffer.into_boxed_str();
 
-    pub fn get_symbol_inexact(&self, addr: VirtualAddress) -> Option<(&str, u64)> {
-        let before = self.names.range(..=addr);
-        let (&last_addr, sym) = before.last()?;
-        Some((sym, (addr - last_addr) as u64))
-    }
+        let mut names = self.symbols.into_boxed_slice();
+        names.sort_unstable_by_key(|(addr, _)| *addr);
 
-    pub fn get_address(&self, name: &str) -> IceResult<VirtualAddress> {
-        match self.addresses.get(name) {
-            Some(addr) => Ok(*addr),
-            None => Err(IceError::missing_symbol(name)),
+        let mut addresses = names.clone();
+        addresses.sort_unstable_by_key(|(_, range)| &buffer[range.clone()]);
+
+        ModuleSymbols {
+            buffer,
+            symbols: names,
+            addresses,
+            types: self.types,
         }
     }
 
     pub fn push(&mut self, addr: VirtualAddress, symbol: &str) {
-        let symbol = Arc::<str>::from(symbol);
-        self.names.insert(addr, symbol.clone());
-        self.addresses.insert(symbol, addr);
-    }
-
-    pub fn iter_symbols(&self) -> impl ExactSizeIterator<Item = (VirtualAddress, &str)> {
-        self.names.iter().map(|(&addr, name)| (addr, &**name))
-    }
-
-    pub fn get_struct(&self, name: &str) -> IceResult<Struct> {
-        match self.types.get(name) {
-            Some(s) => Ok(s.borrow()),
-            None => Err(IceError::missing_symbol(name)),
-        }
+        let start = self.buffer.len();
+        self.buffer.push_str(symbol);
+        let end = self.buffer.len();
+        self.symbols.push((addr, start..end))
     }
 
     pub fn insert_struct(&mut self, structure: OwnedStruct) {
@@ -216,26 +195,91 @@ impl ModuleSymbols {
     }
 }
 
-impl<S: AsRef<str>> Extend<(VirtualAddress, S)> for ModuleSymbols {
+impl<S: AsRef<str>> Extend<(VirtualAddress, S)> for ModuleSymbolsBuilder {
     fn extend<I: IntoIterator<Item = (VirtualAddress, S)>>(&mut self, iter: I) {
-        for (addr, symbol) in iter {
-            self.push(addr, symbol.as_ref());
-        }
+        self.symbols.extend(iter.into_iter().map(|(addr, sym)| {
+            let start = self.buffer.len();
+            self.buffer.push_str(sym.as_ref());
+            let end = self.buffer.len();
+            (addr, (start..end))
+        }))
     }
 }
 
-impl<S: AsRef<str>> Extend<(S, VirtualAddress)> for ModuleSymbols {
-    fn extend<I: IntoIterator<Item = (S, VirtualAddress)>>(&mut self, iter: I) {
-        for (symbol, addr) in iter {
-            self.push(addr, symbol.as_ref());
-        }
-    }
-}
-
-impl Extend<OwnedStruct> for ModuleSymbols {
+impl Extend<OwnedStruct> for ModuleSymbolsBuilder {
     fn extend<I: IntoIterator<Item = OwnedStruct>>(&mut self, iter: I) {
         self.types
             .extend(iter.into_iter().map(|s| (s.name.clone(), s)))
+    }
+}
+
+#[derive(Default)]
+pub struct ModuleSymbols {
+    buffer: Box<str>,
+
+    /// Sorted by address to find names
+    symbols: Box<[(VirtualAddress, Range<usize>)]>,
+
+    /// Sorted by name to find addresses
+    addresses: Box<[(VirtualAddress, Range<usize>)]>,
+
+    types: HashMap<String, OwnedStruct>,
+}
+
+impl ModuleSymbols {
+    #[cfg(feature = "std")]
+    fn read_symbols_from_file<P: AsRef<std::path::Path>>(path: P) -> IceResult<Self> {
+        let mut module = ModuleSymbolsBuilder::new();
+        module.read_symbols_from_file_inner(path.as_ref())?;
+        Ok(module.build())
+    }
+
+    pub fn read_symbols_from_bytes(content: &[u8]) -> IceResult<Self> {
+        let mut module = ModuleSymbolsBuilder::new();
+        module.read_symbols_from_bytes(content)?;
+        Ok(module.build())
+    }
+
+    fn symbol(&self, range: Range<usize>) -> &str {
+        &self.buffer[range]
+    }
+
+    pub fn get_symbol(&self, addr: VirtualAddress) -> Option<&str> {
+        let index = self.symbols.binary_search_by_key(&addr, |(a, _)| *a).ok()?;
+        Some(self.symbol(self.symbols[index].1.clone()))
+    }
+
+    pub fn get_symbol_inexact(&self, addr: VirtualAddress) -> Option<(&str, u64)> {
+        let (range, offset) = match self.symbols.binary_search_by_key(&addr, |(a, _)| *a) {
+            Ok(i) => (&self.symbols[i].1, 0),
+            Err(i) => {
+                let i = i.checked_sub(1)?;
+                let (sym_addr, range) = &self.symbols[i];
+                (range, (addr - *sym_addr) as u64)
+            }
+        };
+        Some((self.symbol(range.clone()), offset))
+    }
+
+    pub fn get_address(&self, name: &str) -> IceResult<VirtualAddress> {
+        let index = self
+            .addresses
+            .binary_search_by_key(&name, |(_, range)| self.symbol(range.clone()))
+            .map_err(|_| IceError::missing_symbol(name))?;
+        Ok(self.addresses[index].0)
+    }
+
+    pub fn iter_symbols(&self) -> impl ExactSizeIterator<Item = (VirtualAddress, &str)> {
+        self.symbols
+            .iter()
+            .map(|(addr, range)| (*addr, self.symbol(range.clone())))
+    }
+
+    pub fn get_struct(&self, name: &str) -> IceResult<Struct> {
+        match self.types.get(name) {
+            Some(s) => Ok(s.borrow()),
+            None => Err(IceError::missing_symbol(name)),
+        }
     }
 }
 
@@ -261,10 +305,7 @@ impl SymbolsIndexer {
         self.get_lib(lib)?.get_address(name)
     }
 
-    pub fn insert_addr(&mut self, lib: Box<str>, symbol: &str, addr: VirtualAddress) {
-        self.get_lib_mut(lib).push(addr, symbol);
-    }
-
+    #[inline]
     pub fn get_lib(&self, name: &str) -> IceResult<&ModuleSymbols> {
         match self.modules.get(name) {
             Some(lib) => Ok(lib),
@@ -272,12 +313,23 @@ impl SymbolsIndexer {
         }
     }
 
-    pub fn get_lib_mut(&mut self, name: Box<str>) -> &mut ModuleSymbols {
-        self.modules.entry(name).or_insert_with(ModuleSymbols::new)
+    fn load(
+        &mut self,
+        name: Box<str>,
+        load: impl FnOnce(&str) -> IceResult<ModuleSymbols>,
+    ) -> IceResult<()> {
+        match self.modules.entry(name) {
+            hashbrown::hash_map::Entry::Occupied(_) => (),
+            hashbrown::hash_map::Entry::Vacant(entry) => {
+                let value = load(entry.key())?;
+                entry.insert(value);
+            }
+        }
+        Ok(())
     }
 
-    pub fn load(&mut self, name: Box<str>, content: &[u8]) -> IceResult<()> {
-        self.get_lib_mut(name).read_symbols_from_bytes(content)
+    pub fn load_from_bytes(&mut self, name: Box<str>, content: &[u8]) -> IceResult<()> {
+        self.load(name, |_| ModuleSymbols::read_symbols_from_bytes(content))
     }
 
     #[cfg(feature = "std")]
@@ -297,7 +349,7 @@ impl SymbolsIndexer {
             .context("non UTF-8 file name")?
             .into();
 
-        self.get_lib_mut(name).read_symbols_from_file(path)
+        self.load(name, |_| ModuleSymbols::read_symbols_from_file(path))
     }
 
     #[cfg(feature = "std")]
@@ -306,7 +358,7 @@ impl SymbolsIndexer {
             match entry {
                 Ok(entry) => {
                     let path = entry.path();
-                    if let Err(err) = self.load_from_file(&path) {
+                    if let Err(err) = self.load_from_file_inner(&path) {
                         log::warn!("Error reading {}: {err}", path.display());
                     }
                 }
