@@ -6,6 +6,7 @@ extern crate alloc;
 #[cfg(feature = "custom_allocator")]
 mod allocator;
 mod arch;
+mod array;
 mod cstring;
 mod error;
 mod logging;

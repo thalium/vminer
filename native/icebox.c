@@ -129,10 +129,10 @@ Backend *make_dump(const char *path) {
 int main() {
 	Error *err = NULL;
 	Os *os = NULL;
-	Process procs[200];
+	Process *procs = NULL;
 	char name[30];
 	uint64_t pid;
-	size_t n_procs = (sizeof procs)/(sizeof *procs);
+	size_t n_procs;
 
 	set_logger(&LOGGER);
 
@@ -148,6 +148,8 @@ int main() {
 	err = os_new_linux(dump, symbols, &os);
 	symbols = NULL;
 	CHECK(err);
+	CHECK(os_processes(os, NULL, &n_procs));
+	procs = malloc(n_procs * sizeof *procs);
 	CHECK(os_processes(os, procs, &n_procs));
 
 	for(size_t i = 0; i < n_procs; ++i) {
@@ -158,6 +160,8 @@ int main() {
 	}
 
 error:
+	free(procs);
+
 	if(os != NULL) {
 		os_free(os);
 	} else {

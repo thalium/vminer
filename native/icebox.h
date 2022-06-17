@@ -251,7 +251,24 @@ struct Error *process_name(const struct Os *os, struct Process proc, char *name,
 
 struct Error *process_pgd(const struct Os *os, struct Process proc, struct PhysicalAddress *pgd);
 
+struct Error *process_path(const struct Os *os, struct Process proc, char *name, uintptr_t max_len);
+
 struct Error *process_parent(const struct Os *os, struct Process proc, struct Process *parent);
+
+struct Error *process_vmas(const struct Os *os,
+                           struct Process proc,
+                           struct Vma *vmas,
+                           uintptr_t *n_vmas);
+
+struct Error *process_threads(const struct Os *os,
+                              struct Process proc,
+                              struct Thread *threads,
+                              uintptr_t *n_threads);
+
+struct Error *process_children(const struct Os *os,
+                               struct Process proc,
+                               struct Process *children,
+                               uintptr_t *n_children);
 
 struct Error *thread_id(const struct Os *os, struct Thread thread, uint64_t *tid);
 

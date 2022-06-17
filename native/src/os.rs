@@ -1,4 +1,4 @@
-use core::{fmt::Write as _, mem, ops::ControlFlow};
+use core::{fmt::Write as _, mem};
 
 use crate::{
     c_char, cstring, error, symbols::Symbols, Backend, Error, PhysicalAddress, VirtualAddress,
@@ -189,22 +189,13 @@ pub extern "C" fn os_current_thread(
 #[no_mangle]
 pub unsafe extern "C" fn os_processes(
     os: &Os,
-    mut procs: *mut Process,
+    procs: *mut Process,
     n_procs: *mut usize,
 ) -> *mut Error {
-    let mut n = 0;
-    let res = os.0.for_each_process(&mut |proc| {
-        Ok(if *n_procs > n {
-            procs.write(proc.into());
-            procs = procs.add(1);
-            n += 1;
-            ControlFlow::Continue(())
-        } else {
-            ControlFlow::Break(())
-        })
-    });
-    *n_procs = n;
-    error::wrap_unit_result(res)
+    error::wrap_unit(|| {
+        let mut procs = crate::array::Array::new(procs, n_procs);
+        os.0.for_each_process(&mut |proc| Ok(procs.push(proc.into())))
+    })
 }
 
 #[no_mangle]
@@ -241,12 +232,68 @@ pub extern "C" fn process_pgd(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn process_path(
+    os: &Os,
+    proc: Process,
+    name: *mut c_char,
+    max_len: usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let path = os.0.process_path(proc.into())?;
+        let mut fmt = cstring::Formatter::new(name, max_len);
+        if let Some(path) = path {
+            let _ = fmt.write_str(&path);
+        }
+        Ok(())
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn process_parent(
     os: &Os,
     proc: Process,
     parent: Option<&mut mem::MaybeUninit<Process>>,
 ) -> *mut Error {
     error::wrap_result(parent, os.0.process_parent(proc.into()))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn process_vmas(
+    os: &Os,
+    proc: Process,
+    vmas: *mut Vma,
+    n_vmas: *mut usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let mut vmas = crate::array::Array::new(vmas, n_vmas);
+        os.0.process_for_each_vma(proc.into(), &mut |vma| Ok(vmas.push(vma.into())))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn process_threads(
+    os: &Os,
+    proc: Process,
+    threads: *mut Thread,
+    n_threads: *mut usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let mut threads = crate::array::Array::new(threads, n_threads);
+        os.0.process_for_each_thread(proc.into(), &mut |thread| Ok(threads.push(thread.into())))
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn process_children(
+    os: &Os,
+    proc: Process,
+    children: *mut Process,
+    n_children: *mut usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let mut children = crate::array::Array::new(children, n_children);
+        os.0.process_for_each_child(proc.into(), &mut |child| Ok(children.push(child.into())))
+    })
 }
 
 #[no_mangle]
