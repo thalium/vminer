@@ -204,7 +204,7 @@ pub extern "C" fn process_id(
     proc: Process,
     pid: Option<&mut mem::MaybeUninit<u64>>,
 ) -> *mut Error {
-    error::wrap_result(pid, os.0.process_pid(proc.into()))
+    error::wrap_result(pid, os.0.process_id(proc.into()))
 }
 
 #[no_mangle]

@@ -394,7 +394,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn process_pid(&self, proc: ibc::Process) -> IceResult<u64> {
+    fn process_id(&self, proc: ibc::Process) -> IceResult<u64> {
         self.pointer_of(proc)
             .read_field(|eproc| eproc.UniqueProcessId)
     }
@@ -438,7 +438,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
 
     fn process_parent(&self, proc: ibc::Process) -> IceResult<ibc::Process> {
         let parent_pid = self.process_parent_id(proc)?;
-        Ok(self.find_process_by_pid(parent_pid)?.unwrap_or(proc))
+        Ok(self.find_process_by_id(parent_pid)?.unwrap_or(proc))
     }
 
     fn process_parent_id(&self, proc: ibc::Process) -> IceResult<u64> {
@@ -451,7 +451,7 @@ impl<B: Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Process) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
-        let pid = self.process_pid(proc)?;
+        let pid = self.process_id(proc)?;
         self.for_each_process(&mut |proc| {
             if self.process_parent_id(proc)? == pid {
                 f(proc)

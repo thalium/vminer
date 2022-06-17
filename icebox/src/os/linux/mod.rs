@@ -282,7 +282,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Ok(flags & 0x200000 != 0)
     }
 
-    fn process_pid(&self, proc: ibc::Process) -> IceResult<u64> {
+    fn process_id(&self, proc: ibc::Process) -> IceResult<u64> {
         self.pointer_of(proc)
             .read_field(|ts| ts.tgid)
             .map(|pid| pid as u64)
@@ -332,7 +332,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
     }
 
     fn process_parent_id(&self, proc: ibc::Process) -> IceResult<u64> {
-        self.process_pid(self.process_parent(proc)?)
+        self.process_id(self.process_parent(proc)?)
     }
 
     fn process_for_each_child(

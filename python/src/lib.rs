@@ -264,7 +264,7 @@ impl Os {
 
     fn find_process_by_pid(&self, py: Python, pid: u64) -> PyResult<Option<Process>> {
         let os = self.0.borrow(py)?;
-        let proc = os.0.find_process_by_pid(pid).convert_err()?;
+        let proc = os.0.find_process_by_id(pid).convert_err()?;
         Ok(proc.map(|p| self.make_proc(py, p)))
     }
 }
@@ -297,7 +297,7 @@ impl Process {
     #[getter]
     fn pid(&self, py: Python) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
-        let pid = os.0.process_pid(self.proc).convert_err()?;
+        let pid = os.0.process_id(self.proc).convert_err()?;
         Ok(pid)
     }
 

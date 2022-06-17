@@ -75,7 +75,7 @@ fn proc_tree(arch: Arch) {
     }
 
     fn collect_proc_tree(os: &impl Os, proc: ibc::Process) -> IceResult<Proc> {
-        let pid = os.process_pid(proc)?;
+        let pid = os.process_id(proc)?;
         let name = os.process_name(proc)?;
 
         let mut children = Vec::new();
@@ -127,10 +127,10 @@ fn current_process_x86_64() {
     let linux = Arch::X86_64.linux();
 
     let proc = linux.current_process(0).unwrap();
-    assert_eq!(linux.process_pid(proc).unwrap(), 0);
+    assert_eq!(linux.process_id(proc).unwrap(), 0);
 
     let proc = linux.current_process(1).unwrap();
-    assert_eq!(linux.process_pid(proc).unwrap(), 651);
+    assert_eq!(linux.process_id(proc).unwrap(), 651);
 }
 
 #[test]
@@ -138,10 +138,10 @@ fn current_process_aarch64() {
     let linux = Arch::Aarch64.linux();
 
     let proc = linux.current_process(0).unwrap();
-    assert_eq!(linux.process_pid(proc).unwrap(), 420);
+    assert_eq!(linux.process_id(proc).unwrap(), 420);
 
     let proc = linux.current_process(1).unwrap();
-    assert_eq!(linux.process_pid(proc).unwrap(), 0);
+    assert_eq!(linux.process_id(proc).unwrap(), 0);
 }
 
 fn vmas(arch: Arch) {
