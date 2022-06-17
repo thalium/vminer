@@ -26,6 +26,25 @@ impl From<Process> for ibc::Process {
 }
 
 #[repr(C)]
+pub struct Module {
+    addr: VirtualAddress,
+}
+
+impl From<ibc::Module> for Module {
+    fn from(module: ibc::Module) -> Self {
+        Self {
+            addr: module.0.into(),
+        }
+    }
+}
+
+impl From<Module> for ibc::Module {
+    fn from(module: Module) -> Self {
+        Self(module.addr.into())
+    }
+}
+
+#[repr(C)]
 pub struct Thread {
     addr: VirtualAddress,
 }
@@ -297,6 +316,19 @@ pub unsafe extern "C" fn process_children(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn process_modules(
+    os: &Os,
+    proc: Process,
+    modules: *mut Module,
+    n_modules: *mut usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let mut modules = crate::array::Array::new(modules, n_modules);
+        os.0.process_for_each_module(proc.into(), &mut |module| Ok(modules.push(module.into())))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn thread_id(
     os: &Os,
     thread: Thread,
@@ -362,6 +394,64 @@ pub unsafe extern "C" fn vma_path(
         if let Some(path) = p {
             let _ = fmt.write_str(&path);
         }
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn module_start(
+    os: &Os,
+    module: Module,
+    proc: Process,
+    start: Option<&mut mem::MaybeUninit<VirtualAddress>>,
+) -> *mut Error {
+    error::wrap(start, || {
+        let (start, _) = os.0.module_span(module.into(), proc.into())?;
+        Ok(start.into())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn module_end(
+    os: &Os,
+    module: Module,
+    proc: Process,
+    end: Option<&mut mem::MaybeUninit<VirtualAddress>>,
+) -> *mut Error {
+    error::wrap(end, || {
+        let (_, end) = os.0.module_span(module.into(), proc.into())?;
+        Ok(end.into())
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn module_name(
+    os: &Os,
+    module: Module,
+    proc: Process,
+    name: *mut c_char,
+    max_len: usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let n = os.0.module_name(module.into(), proc.into())?;
+        let mut fmt = cstring::Formatter::new(name, max_len);
+        let _ = fmt.write_str(&n);
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn module_path(
+    os: &Os,
+    module: Module,
+    proc: Process,
+    path: *mut c_char,
+    max_len: usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let p = os.0.module_path(module.into(), proc.into())?;
+        let mut fmt = cstring::Formatter::new(path, max_len);
+        let _ = fmt.write_str(&p);
         Ok(())
     })
 }

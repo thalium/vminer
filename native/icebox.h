@@ -151,6 +151,10 @@ typedef struct Vma {
   struct VirtualAddress addr;
 } Vma;
 
+typedef struct Module {
+  struct VirtualAddress addr;
+} Module;
+
 
 
 
@@ -266,6 +270,11 @@ struct Error *process_children(const struct Os *os,
                                struct Process *children,
                                uintptr_t *n_children);
 
+struct Error *process_modules(const struct Os *os,
+                              struct Process proc,
+                              struct Module *modules,
+                              uintptr_t *n_modules);
+
 struct Error *thread_id(const struct Os *os, struct Thread thread, uint64_t *tid);
 
 struct Error *thread_name(const struct Os *os, struct Thread thread, char *name, uintptr_t max_len);
@@ -277,6 +286,28 @@ struct Error *vma_start(const struct Os *os, struct Vma vma, struct VirtualAddre
 struct Error *vma_end(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
 
 struct Error *vma_path(const struct Os *os, struct Vma vma, char *path, uintptr_t max_len);
+
+struct Error *module_start(const struct Os *os,
+                           struct Module module,
+                           struct Process proc,
+                           struct VirtualAddress *start);
+
+struct Error *module_end(const struct Os *os,
+                         struct Module module,
+                         struct Process proc,
+                         struct VirtualAddress *end);
+
+struct Error *module_name(const struct Os *os,
+                          struct Module module,
+                          struct Process proc,
+                          char *name,
+                          uintptr_t max_len);
+
+struct Error *module_path(const struct Os *os,
+                          struct Module module,
+                          struct Process proc,
+                          char *path,
+                          uintptr_t max_len);
 
 struct Symbols *symbols_new(void);
 
