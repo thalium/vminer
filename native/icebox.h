@@ -155,6 +155,11 @@ typedef struct Module {
   struct VirtualAddress addr;
 } Module;
 
+typedef struct StackFrame {
+  struct VirtualAddress ip;
+  struct VirtualAddress sp;
+} StackFrame;
+
 
 
 
@@ -275,6 +280,11 @@ struct Error *process_modules(const struct Os *os,
                               struct Module *modules,
                               uintptr_t *n_modules);
 
+struct Error *process_callstack(const struct Os *os,
+                                struct Process proc,
+                                struct StackFrame *frames,
+                                uintptr_t *n_frames);
+
 struct Error *thread_id(const struct Os *os, struct Thread thread, uint64_t *tid);
 
 struct Error *thread_name(const struct Os *os, struct Thread thread, char *name, uintptr_t max_len);
@@ -308,6 +318,12 @@ struct Error *module_path(const struct Os *os,
                           struct Process proc,
                           char *path,
                           uintptr_t max_len);
+
+struct Error *resolve_symbol(const struct Os *os,
+                             struct Process proc,
+                             struct VirtualAddress addr,
+                             char *symbol,
+                             uintptr_t max_len);
 
 struct Symbols *symbols_new(void);
 

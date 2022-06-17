@@ -80,6 +80,21 @@ impl From<Vma> for ibc::Vma {
     }
 }
 
+#[repr(C)]
+pub struct StackFrame {
+    ip: VirtualAddress,
+    sp: VirtualAddress,
+}
+
+impl From<&ibc::StackFrame> for StackFrame {
+    fn from(frame: &ibc::StackFrame) -> Self {
+        Self {
+            ip: frame.instruction_pointer.into(),
+            sp: frame.stack_pointer.into(),
+        }
+    }
+}
+
 pub struct Os(Box<dyn ibc::Os + Send + Sync>);
 
 impl Os {
@@ -329,6 +344,19 @@ pub unsafe extern "C" fn process_modules(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn process_callstack(
+    os: &Os,
+    proc: Process,
+    frames: *mut StackFrame,
+    n_frames: *mut usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let mut frames = crate::array::Array::new(frames, n_frames);
+        os.0.process_callstack(proc.into(), &mut |frame| Ok(frames.push(frame.into())))
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn thread_id(
     os: &Os,
     thread: Thread,
@@ -452,6 +480,24 @@ pub unsafe extern "C" fn module_path(
         let p = os.0.module_path(module.into(), proc.into())?;
         let mut fmt = cstring::Formatter::new(path, max_len);
         let _ = fmt.write_str(&p);
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn resolve_symbol(
+    os: &Os,
+    proc: Process,
+    addr: VirtualAddress,
+    symbol: *mut c_char,
+    max_len: usize,
+) -> *mut Error {
+    error::wrap_unit(|| {
+        let sym = os.0.resolve_symbol(addr.into(), proc.into())?;
+        let mut fmt = cstring::Formatter::new(symbol, max_len);
+        if let Some((sym, _)) = sym {
+            let _ = fmt.write_str(sym);
+        }
         Ok(())
     })
 }
