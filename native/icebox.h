@@ -174,11 +174,7 @@ struct Error *read_dump(const char *path, struct Backend **dump);
 void backend_free(struct Backend *backend);
 
 #if defined(CUSTOM_ALLOCATOR)
-void set_allocator(const struct Allocator *allocator);
-#endif
-
-#if defined(CUSTOM_ALLOCATOR)
-void get_allocator(struct Allocator *allocator);
+int set_allocator(struct Allocator allocator);
 #endif
 
 #if defined(CUSTOM_ALLOCATOR)

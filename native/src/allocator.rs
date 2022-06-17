@@ -1,5 +1,4 @@
 use alloc::alloc;
-use core::{mem, ptr};
 
 use crate::c_void;
 
@@ -16,42 +15,11 @@ pub struct Allocator {
 }
 
 unsafe impl Send for Allocator {}
+unsafe impl Sync for Allocator {}
 
 impl Allocator {
-    #[cfg(not(feature = "std"))]
-    const DEFAULT: Self = {
-        unsafe extern "C" fn alloc(_data: *mut c_void, _size: usize, _align: usize) -> *mut c_void {
-            ptr::null_mut()
-        }
-
-        unsafe extern "C" fn dealloc(
-            _data: *mut c_void,
-            _ptr: *mut c_void,
-            _size: usize,
-            _align: usize,
-        ) {
-        }
-
-        unsafe extern "C" fn realloc(
-            _data: *mut c_void,
-            _ptr: *mut c_void,
-            _size: usize,
-            _align: usize,
-            _new_size: usize,
-        ) -> *mut c_void {
-            ptr::null_mut()
-        }
-
-        Self {
-            data: ptr::null_mut(),
-            alloc,
-            dealloc,
-            realloc,
-        }
-    };
-
     #[cfg(feature = "std")]
-    const DEFAULT: Self = {
+    const SYSTEM: Self = {
         use std::alloc::{GlobalAlloc, System};
 
         unsafe extern "C" fn alloc(_data: *mut c_void, size: usize, align: usize) -> *mut c_void {
@@ -81,7 +49,7 @@ impl Allocator {
         }
 
         Self {
-            data: ptr::null_mut(),
+            data: core::ptr::null_mut(),
             alloc,
             dealloc,
             realloc,
@@ -89,29 +57,39 @@ impl Allocator {
     };
 }
 
-struct GlobalAllocator(spin::Mutex<Allocator>);
+struct GlobalAllocator(spin::Once<Allocator>);
 
 impl GlobalAllocator {
+    #[inline]
     const fn new() -> Self {
-        Self(spin::Mutex::new(Allocator::DEFAULT))
+        Self(spin::Once::new())
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn get(&self) -> Option<&Allocator> {
+        Some(self.0.call_once(|| Allocator::SYSTEM))
+    }
+
+    #[cfg(not(feature = "std"))]
+    #[inline]
+    fn get(&self) -> Option<&Allocator> {
+        self.0.get()
     }
 }
 
 unsafe impl alloc::GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: alloc::Layout) -> *mut c_void {
-        let (data, alloc) = {
-            let allocator = &*self.0.lock();
-            (allocator.data, allocator.alloc)
-        };
-        alloc(data, layout.size(), layout.align())
+        match self.get() {
+            Some(alloc) => (alloc.alloc)(alloc.data, layout.size(), layout.align()),
+            None => core::ptr::null_mut(),
+        }
     }
 
     unsafe fn dealloc(&self, ptr: *mut c_void, layout: alloc::Layout) {
-        let (data, dealloc) = {
-            let allocator = &*self.0.lock();
-            (allocator.data, allocator.dealloc)
-        };
-        dealloc(data, ptr, layout.size(), layout.align())
+        if let Some(alloc) = self.get() {
+            (alloc.dealloc)(alloc.data, ptr, layout.size(), layout.align());
+        }
     }
 
     unsafe fn realloc(
@@ -120,24 +98,23 @@ unsafe impl alloc::GlobalAlloc for GlobalAllocator {
         layout: alloc::Layout,
         new_size: usize,
     ) -> *mut c_void {
-        let (data, realloc) = {
-            let allocator = &*self.0.lock();
-            (allocator.data, allocator.realloc)
-        };
-        realloc(data, ptr, layout.size(), layout.align(), new_size)
+        match self.get() {
+            Some(alloc) => {
+                (alloc.realloc)(alloc.data, ptr, layout.size(), layout.align(), new_size)
+            }
+            None => core::ptr::null_mut(),
+        }
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn set_allocator(allocator: Option<&Allocator>) {
-    *ALLOCATOR.0.lock() = *allocator.unwrap_or(&Allocator::DEFAULT)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn get_allocator(allocator: Option<&mut mem::MaybeUninit<Allocator>>) {
-    if let Some(allocator) = allocator {
-        allocator.write(*ALLOCATOR.0.lock());
-    }
+pub unsafe extern "C" fn set_allocator(allocator: Allocator) -> cty::c_int {
+    let mut set = 0;
+    ALLOCATOR.0.call_once(|| {
+        set = 1;
+        allocator
+    });
+    set
 }
 
 #[no_mangle]

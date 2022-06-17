@@ -1,4 +1,5 @@
 use crate::{c_char, c_void};
+use alloc::{string::String, vec::Vec};
 
 #[repr(C)]
 pub struct LogRecord {

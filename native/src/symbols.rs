@@ -1,5 +1,4 @@
 use crate::error::{self, Error};
-#[cfg(feature = "std")]
 use crate::{c_char, cstring};
 use alloc::boxed::Box;
 use ibc::SymbolsIndexer;

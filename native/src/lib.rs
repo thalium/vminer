@@ -15,6 +15,7 @@ mod symbols;
 
 use crate::error::Error;
 use alloc::{boxed::Box, sync::Arc};
+#[cfg(feature = "std")]
 use core::mem;
 
 #[allow(non_camel_case_types)]

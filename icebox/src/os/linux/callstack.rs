@@ -124,7 +124,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             ibc::RuntimeEndian::Big => gimli::RunTimeEndian::Big,
         };
 
-        let mut vma_data = vec![0; (module.end - module.start) as usize];
+        let mut vma_data = alloc::vec![0; (module.end - module.start) as usize];
         self.linux
             .try_read_virtual_memory(self.pgd, module.start, &mut vma_data)?;
 
