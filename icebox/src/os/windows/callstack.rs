@@ -424,7 +424,7 @@ struct UnwindResult {
 /// Read instructions and emulate them if they match expectations for an epilog.
 /// This is the common way to unwind an epilog in Windows x86_64
 fn read_epilog(unwind_data: &UnwindData, frame: &ibc::StackFrame) -> Option<UnwindResult> {
-    let offset = frame.instruction_pointer - unwind_data.offset;
+    let offset = (frame.instruction_pointer - unwind_data.offset) as u32;
     let code = &mut unwind_data.content.get(offset as usize..)?;
 
     let mut next_sp = frame.stack_pointer;
@@ -468,11 +468,27 @@ fn read_epilog(unwind_data: &UnwindData, frame: &ibc::StackFrame) -> Option<Unwi
         }
     }
 
+    let fun_start = (|| {
+        let mut runtime_function = unwind_data.find_by_offset(offset).unwrap_or_else(|err| {
+            log::error!("Failed to get unwind data: {err}");
+            None
+        })?;
+
+        loop {
+            let function = unwind_data.parse_function(runtime_function)?;
+
+            match function.mother {
+                Some(mother) => runtime_function = mother,
+                None => break Some(unwind_data.offset + runtime_function.start),
+            }
+        }
+    })();
+
     Some(UnwindResult {
         next_sp: NextSp::Value(next_sp + 8),
         next_ip_addr: next_sp,
         next_bp_addr,
-        fun_start: None,
+        fun_start,
     })
 }
 
