@@ -553,7 +553,7 @@ fn unwind_with_infos(
         .parse_function(runtime_function)
         .context("failed to parse unwind data")?;
 
-    let fun_start = Some(unwind_data.offset + runtime_function.start);
+    let mut fun_start = Some(unwind_data.offset + runtime_function.start);
 
     let frame_pointer = match function.frame_register_offset {
         None => frame.stack_pointer,
@@ -587,6 +587,7 @@ fn unwind_with_infos(
                     .parse_function(mother)
                     .context("failed to parse unwind data")?;
                 ip_offset = None;
+                fun_start = Some(unwind_data.offset + mother.start);
             }
 
             None => break,
