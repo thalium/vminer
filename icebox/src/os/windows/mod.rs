@@ -201,44 +201,53 @@ impl Codeview {
     }
 
     fn name(&self) -> Option<&str> {
-        let i = self.name.iter().enumerate().find(|(_, b)| **b == 0)?.0;
+        let i = memchr::memchr(0, &self.name)?;
         str::from_utf8(&self.name[..i]).ok()
     }
 }
 
 fn pe_get_pdb_guid<E>(
     addr: VirtualAddress,
-    buf: &mut Vec<u8>,
+    size: Option<u64>,
     try_read_memory: impl Fn(VirtualAddress, &mut [u8]) -> Result<(), E>,
 ) -> IceResult<Option<Codeview>>
 where
     IceError: From<E>,
 {
-    buf.resize(0x1000, 0);
-    try_read_memory(addr, buf)?;
+    let mut buffer = [0; 0x1008];
+    try_read_memory(addr, &mut buffer[8..])?;
 
-    if !buf.starts_with(b"MZ") {
-        return Ok(None);
-    }
+    let size = match size {
+        Some(size) => size,
+        None => object::read::pe::PeFile64::parse(&buffer[8..])
+            .map_err(IceError::new)?
+            .nt_headers()
+            .optional_header
+            .size_of_image
+            .get(object::endian::LittleEndian) as u64,
+    };
 
-    let pe = object::read::pe::PeFile64::parse(buf.as_slice()).map_err(IceError::new)?;
-    let size = pe
-        .nt_headers()
-        .optional_header
-        .size_of_image
-        .get(object::endian::LittleEndian) as usize;
-    buf.resize(size, 0);
+    for offset in (0..size).step_by(0x1000) {
+        for index in memchr::memmem::find_iter(&buffer, b"RSDS") {
+            let codeview: Codeview = match &buffer.get(index..index + mem::size_of::<Codeview>()) {
+                Some(bytes) => bytemuck::pod_read_unaligned(bytes),
+                None => {
+                    let mut codeview = bytemuck::Zeroable::zeroed();
+                    try_read_memory(
+                        addr + offset + index as u64,
+                        bytemuck::bytes_of_mut(&mut codeview),
+                    )?;
+                    codeview
+                }
+            };
 
-    try_read_memory(addr, buf)?;
-
-    let mut codeview: Codeview = bytemuck::Zeroable::zeroed();
-    for index in memchr::memmem::find_iter(buf, b"RSDS") {
-        bytemuck::bytes_of_mut(&mut codeview)
-            .copy_from_slice(&buf[index..index + mem::size_of::<Codeview>()]);
-
-        if codeview.name().is_some() {
-            return Ok(Some(codeview));
+            if codeview.name().is_some() {
+                return Ok(Some(codeview));
+            }
         }
+
+        buffer.copy_within(0x1000.., 0);
+        try_read_memory(addr + offset, &mut buffer[8..])?;
     }
 
     Ok(None)
@@ -248,14 +257,12 @@ fn find_kernel<B: Backend>(
     backend: &B,
     kpgd: PhysicalAddress,
 ) -> IceResult<Option<(String, VirtualAddress)>> {
-    let mut buf = vec![0; 0];
-
     for addr in backend
         .iter_in_kernel_memory(kpgd, b"MZ")
         .map_while(|addr| addr.ok())
         .filter(|addr| addr.0 & 0xfff == 0)
     {
-        let codeview = pe_get_pdb_guid(addr, &mut buf, |addr, buf| {
+        let codeview = pe_get_pdb_guid(addr, None, |addr, buf| {
             ibc::try_read_virtual_memory(addr, buf, |addr, buf| {
                 backend.read_virtual_memory(kpgd, addr, buf)
             })
@@ -629,7 +636,8 @@ impl<B: Backend> ibc::Os for Windows<B> {
             self.process_pgd(proc)?
         };
 
-        let codeview = pe_get_pdb_guid(mod_start, &mut Vec::new(), |addr, buf| {
+        let mod_size = (mod_end - mod_start) as u64;
+        let codeview = pe_get_pdb_guid(mod_start, Some(mod_size), |addr, buf| {
             self.try_read_process_memory(proc, pgd, addr, buf)
         })?;
         let codeview = match codeview {
@@ -663,7 +671,8 @@ impl<B: Backend> ibc::Os for Windows<B> {
             self.process_pgd(proc)?
         };
 
-        let codeview = pe_get_pdb_guid(mod_start, &mut Vec::new(), |addr, buf| {
+        let mod_size = (mod_end - mod_start) as u64;
+        let codeview = pe_get_pdb_guid(mod_start, Some(mod_size), |addr, buf| {
             self.try_read_process_memory(proc, pgd, addr, buf)
         })?;
         let codeview = match codeview {
