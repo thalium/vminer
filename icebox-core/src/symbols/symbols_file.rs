@@ -33,10 +33,7 @@ pub fn parse_symbol_file<R: io::BufRead>(r: R, syms: &mut ModuleSymbolsBuilder) 
     parse_symbol_file_inner(r, syms)
 }
 
-pub fn parse_symbol_file_from_bytes(
-    bytes: &[u8],
-    syms: &mut ModuleSymbolsBuilder,
-) -> IceResult<()> {
+pub fn read_from_bytes(bytes: &[u8], syms: &mut ModuleSymbolsBuilder) -> IceResult<()> {
     parse_symbol_file_inner(bytes, syms)
 }
 

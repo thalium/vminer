@@ -39,7 +39,7 @@ fn collect_fields(struct_name: &str, fields: &pdb::FieldList) -> Vec<crate::symb
         .collect()
 }
 
-pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
+pub fn load_types<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
     module: &mut super::ModuleSymbolsBuilder,
 ) -> Result<(), pdb::Error> {
@@ -94,7 +94,7 @@ pub fn load_types_from_pdb<'s, S: pdb::Source<'s> + 's>(
     Ok(())
 }
 
-pub fn load_syms_from_pdb<'s, S: pdb::Source<'s> + 's>(
+pub fn load_syms<'s, S: pdb::Source<'s> + 's>(
     pdb: &mut pdb::PDB<'s, S>,
     module: &mut super::ModuleSymbolsBuilder,
 ) -> Result<(), pdb::Error> {

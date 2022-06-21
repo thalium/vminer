@@ -164,17 +164,17 @@ impl ModuleSymbolsBuilder {
     }
 
     #[cfg(feature = "std")]
-    pub fn read_symbols_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
-        self.read_symbols_from_file_inner(path.as_ref())
+    pub fn read_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
+        self.read_from_file_inner(path.as_ref())
     }
 
     #[cfg(feature = "std")]
-    fn read_symbols_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<()> {
+    fn read_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<()> {
         let content = std::fs::read(path)?;
-        self.read_symbols_from_bytes(&content)
+        self.read_from_bytes(&content)
     }
 
-    pub fn read_symbols_from_bytes(&mut self, content: &[u8]) -> IceResult<()> {
+    pub fn read_from_bytes(&mut self, content: &[u8]) -> IceResult<()> {
         if content.starts_with(b"\x7fELF") {
             let obj = object::File::parse(content).map_err(IceError::new)?;
             crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)?;
@@ -185,13 +185,13 @@ impl ModuleSymbolsBuilder {
         if content.starts_with(b"Microsoft C/C++") {
             let content = std::io::Cursor::new(content);
             let mut pdb = ::pdb::PDB::open(content).map_err(IceError::new)?;
-            pdb::load_syms_from_pdb(&mut pdb, self).map_err(IceError::new)?;
-            pdb::load_types_from_pdb(&mut pdb, self).map_err(IceError::new)?;
+            pdb::load_syms(&mut pdb, self).map_err(IceError::new)?;
+            pdb::load_types(&mut pdb, self).map_err(IceError::new)?;
 
             return Ok(());
         }
 
-        symbols_file::parse_symbol_file_from_bytes(content, self)
+        symbols_file::read_from_bytes(content, self)
     }
 }
 
@@ -228,15 +228,15 @@ pub struct ModuleSymbols {
 
 impl ModuleSymbols {
     #[cfg(feature = "std")]
-    fn read_symbols_from_file<P: AsRef<std::path::Path>>(path: P) -> IceResult<Self> {
+    pub fn read_from_file<P: AsRef<std::path::Path>>(path: P) -> IceResult<Self> {
         let mut module = ModuleSymbolsBuilder::new();
-        module.read_symbols_from_file_inner(path.as_ref())?;
+        module.read_from_file_inner(path.as_ref())?;
         Ok(module.build())
     }
 
-    pub fn read_symbols_from_bytes(content: &[u8]) -> IceResult<Self> {
+    pub fn read_from_bytes(content: &[u8]) -> IceResult<Self> {
         let mut module = ModuleSymbolsBuilder::new();
-        module.read_symbols_from_bytes(content)?;
+        module.read_from_bytes(content)?;
         Ok(module.build())
     }
 
@@ -302,11 +302,11 @@ impl SymbolsIndexer {
     }
 
     pub fn get_addr(&self, lib: &str, name: &str) -> IceResult<VirtualAddress> {
-        self.get_lib(lib)?.get_address(name)
+        self.get_module(lib)?.get_address(name)
     }
 
     #[inline]
-    pub fn get_lib(&self, name: &str) -> IceResult<&ModuleSymbols> {
+    pub fn get_module(&self, name: &str) -> IceResult<&ModuleSymbols> {
         match self.modules.get(name) {
             Some(lib) => Ok(lib),
             None => Err(IceError::missing_module(name)),
@@ -329,7 +329,7 @@ impl SymbolsIndexer {
     }
 
     pub fn load_from_bytes(&mut self, name: Box<str>, content: &[u8]) -> IceResult<()> {
-        self.load(name, |_| ModuleSymbols::read_symbols_from_bytes(content))
+        self.load(name, |_| ModuleSymbols::read_from_bytes(content))
     }
 
     #[cfg(feature = "std")]
@@ -349,7 +349,7 @@ impl SymbolsIndexer {
             .context("non UTF-8 file name")?
             .into();
 
-        self.load(name, |_| ModuleSymbols::read_symbols_from_file(path))
+        self.load(name, |_| ModuleSymbols::read_from_file(path))
     }
 
     #[cfg(feature = "std")]

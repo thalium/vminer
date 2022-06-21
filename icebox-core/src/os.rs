@@ -274,18 +274,51 @@ pub trait Os {
         Ok(result)
     }
 
+    fn module_symbols(
+        &self,
+        proc: Process,
+        module: Module,
+    ) -> IceResult<Option<&crate::ModuleSymbols>>;
+
     fn module_resolve_symbol_exact(
         &self,
         addr: VirtualAddress,
         proc: Process,
         module: Module,
-    ) -> IceResult<Option<&str>>;
+    ) -> IceResult<Option<&str>> {
+        let syms = match self.module_symbols(proc, module)? {
+            Some(syms) => syms,
+            None => return Ok(None),
+        };
+
+        let (mod_start, mod_end) = self.module_span(module, proc)?;
+        if !(mod_start..mod_end).contains(&addr) {
+            return Err(crate::IceError::new("address not in module"));
+        }
+        let addr = VirtualAddress((addr - mod_start) as u64);
+
+        Ok(syms.get_symbol(addr))
+    }
+
     fn module_resolve_symbol(
         &self,
         addr: VirtualAddress,
         proc: Process,
         module: Module,
-    ) -> IceResult<Option<(&str, u64)>>;
+    ) -> IceResult<Option<(&str, u64)>> {
+        let syms = match self.module_symbols(proc, module)? {
+            Some(syms) => syms,
+            None => return Ok(None),
+        };
+
+        let (mod_start, mod_end) = self.module_span(module, proc)?;
+        if !(mod_start..mod_end).contains(&addr) {
+            return Err(crate::IceError::new("address not in module"));
+        }
+        let addr = VirtualAddress((addr - mod_start) as u64);
+
+        Ok(syms.get_symbol_inexact(addr))
+    }
 
     fn resolve_symbol_exact(&self, addr: VirtualAddress, proc: Process) -> IceResult<Option<&str>> {
         match self.find_module_by_address(proc, addr)? {

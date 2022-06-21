@@ -619,24 +619,15 @@ impl<B: Backend> ibc::Os for Windows<B> {
             .read_unicode_string()
     }
 
-    fn module_resolve_symbol_exact(
+    fn module_symbols(
         &self,
-        addr: VirtualAddress,
         proc: ibc::Process,
         module: ibc::Module,
-    ) -> IceResult<Option<&str>> {
+    ) -> IceResult<Option<&ibc::ModuleSymbols>> {
         let (mod_start, mod_end) = self.module_span(module, proc)?;
-        if !(mod_start..mod_end).contains(&addr) {
-            return Err(IceError::new("address not in module"));
-        }
-
-        let pgd = if addr.is_kernel() {
-            self.kernel_pgd()
-        } else {
-            self.process_pgd(proc)?
-        };
-
         let mod_size = (mod_end - mod_start) as u64;
+        let pgd = self.process_pgd(proc)?;
+
         let codeview = pe_get_pdb_guid(mod_start, Some(mod_size), |addr, buf| {
             self.try_read_process_memory(proc, pgd, addr, buf)
         })?;
@@ -645,47 +636,6 @@ impl<B: Backend> ibc::Os for Windows<B> {
             None => return Ok(None),
         };
 
-        match self.profile.syms.get_lib(codeview.name().unwrap()) {
-            Ok(lib) => {
-                let addr = VirtualAddress((addr - mod_start) as u64);
-                Ok(lib.get_symbol(addr))
-            }
-            Err(_) => Ok(None),
-        }
-    }
-
-    fn module_resolve_symbol(
-        &self,
-        addr: VirtualAddress,
-        proc: ibc::Process,
-        module: ibc::Module,
-    ) -> IceResult<Option<(&str, u64)>> {
-        let (mod_start, mod_end) = self.module_span(module, proc)?;
-        if !(mod_start..mod_end).contains(&addr) {
-            return Err(IceError::new("address not in module"));
-        }
-
-        let pgd = if addr.is_kernel() {
-            self.kernel_pgd()
-        } else {
-            self.process_pgd(proc)?
-        };
-
-        let mod_size = (mod_end - mod_start) as u64;
-        let codeview = pe_get_pdb_guid(mod_start, Some(mod_size), |addr, buf| {
-            self.try_read_process_memory(proc, pgd, addr, buf)
-        })?;
-        let codeview = match codeview {
-            Some(codeview) => codeview,
-            None => return Ok(None),
-        };
-
-        match self.profile.syms.get_lib(codeview.name().unwrap()) {
-            Ok(lib) => {
-                let addr = VirtualAddress((addr - mod_start) as u64);
-                Ok(lib.get_symbol_inexact(addr))
-            }
-            Err(_) => Ok(None),
-        }
+        Ok(self.profile.syms.get_module(codeview.name().unwrap()).ok())
     }
 }

@@ -142,16 +142,6 @@ impl<B: ice::Backend> Linux<B> {
         self.read_kernel_value(per_cpu_offset + 8 * cpuid as u64)
     }
 
-    pub fn find_symbol(&self, lib: &str, addr: VirtualAddress) -> Option<&str> {
-        let lib = self.profile.syms.get_lib(lib).ok()?;
-        lib.get_symbol(addr)
-    }
-
-    pub fn find_symbol_inexact(&self, lib: &str, addr: VirtualAddress) -> Option<(&str, u64)> {
-        let lib = self.profile.syms.get_lib(lib).ok()?;
-        lib.get_symbol_inexact(addr)
-    }
-
     fn process_mm(
         &self,
         proc: ice::Process,
@@ -480,38 +470,13 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             .read_file_path()
     }
 
-    fn module_resolve_symbol_exact(
+    fn module_symbols(
         &self,
-        addr: VirtualAddress,
-        proc: ibc::Process,
-        module: ibc::Module,
-    ) -> IceResult<Option<&str>> {
-        let (mod_start, mod_end) = self.module_span(module, proc)?;
-        if !(mod_start..mod_end).contains(&addr) {
-            return Err(IceError::new("address not in module"));
-        }
-
-        let addr = VirtualAddress((addr - mod_start) as u64);
-        let module = self.module_name(module, proc)?;
-
-        Ok(self.find_symbol(&module, addr))
-    }
-
-    fn module_resolve_symbol(
-        &self,
-        addr: VirtualAddress,
-        proc: ibc::Process,
-        module: ibc::Module,
-    ) -> IceResult<Option<(&str, u64)>> {
-        let (mod_start, mod_end) = self.module_span(module, proc)?;
-        if !(mod_start..mod_end).contains(&addr) {
-            return Err(IceError::new("address not in module"));
-        }
-
-        let addr = VirtualAddress((addr - mod_start) as u64);
-        let module = self.module_name(module, proc)?;
-
-        Ok(self.find_symbol_inexact(&module, addr))
+        proc: ice::Process,
+        module: ice::Module,
+    ) -> IceResult<Option<&ice::ModuleSymbols>> {
+        let name = self.module_name(module, proc)?;
+        Ok(self.profile.syms.get_module(&name).ok())
     }
 }
 

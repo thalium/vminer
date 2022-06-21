@@ -168,13 +168,13 @@ pub struct Profile {
 
 impl Profile {
     pub fn new(syms: ibc::SymbolsIndexer) -> IceResult<Self> {
-        let symbols = syms.get_lib("System.map")?;
+        let symbols = syms.get_module("System.map")?;
         let per_cpu_offset = symbols.get_address("__per_cpu_offset")?;
         let current_task = symbols.get_address("current_task").ok().map(|sym| sym.0);
         let init_task = symbols.get_address("init_task")?;
         let linux_banner = symbols.get_address("linux_banner")?;
 
-        let types = syms.get_lib("module.ko")?;
+        let types = syms.get_module("module.ko")?;
         let layouts = Layouts::new(types)?;
 
         Ok(Self {
