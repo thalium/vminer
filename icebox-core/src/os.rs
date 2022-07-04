@@ -1,5 +1,5 @@
 use crate::{IceResult, PhysicalAddress, VirtualAddress};
-use alloc::{string::String, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use core::ops::ControlFlow;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -337,4 +337,73 @@ pub trait Os {
             None => Ok(None),
         }
     }
+
+    fn format_symbol(&self, proc: Process, addr: VirtualAddress) -> IceResult<String> {
+        match self.find_module_by_address(proc, addr)? {
+            Some(module) => self.format_symbol_with_module(proc, module, addr, None),
+            None => format_symbol_without_module(self, proc, addr, None),
+        }
+    }
+
+    fn format_symbol_with_module(
+        &self,
+        proc: Process,
+        module: Module,
+        addr: VirtualAddress,
+        fun_start: Option<VirtualAddress>,
+    ) -> IceResult<String> {
+        let (mod_start, _) = self.module_span(module, proc)?;
+        let mod_name = self.module_name(module, proc)?;
+
+        let symbol = match fun_start {
+            Some(fun_start) => self
+                .module_resolve_symbol_exact(fun_start, proc, module)?
+                .map(|s| (s, (addr - fun_start) as u64)),
+            None => self.module_resolve_symbol(addr, proc, module)?,
+        };
+
+        Ok(match symbol {
+            Some((symbol, 0)) => format!("{mod_name}!{symbol}"),
+            Some((symbol, offset)) => format!("{mod_name}!{symbol}+{offset:#x}"),
+            None => match fun_start {
+                Some(fun_start) => format!(
+                    "{mod_name}!{:#x}+{:#x}",
+                    fun_start - mod_start,
+                    addr - fun_start
+                ),
+                None => format!("{mod_name}!{:#x}", addr - mod_start),
+            },
+        })
+    }
+
+    fn format_stackframe_symbol(&self, proc: Process, frame: &StackFrame) -> IceResult<String> {
+        let addr = frame.instruction_pointer;
+        match frame.module {
+            Some(module) => self.format_symbol_with_module(proc, module, addr, frame.start),
+            None => format_symbol_without_module(self, proc, addr, frame.start),
+        }
+    }
+}
+
+fn format_symbol_without_module<O: Os + ?Sized>(
+    os: &O,
+    proc: Process,
+    addr: VirtualAddress,
+    fun_start: Option<VirtualAddress>,
+) -> IceResult<String> {
+    let vma_start = match os.process_find_vma_by_address(proc, addr)? {
+        Some(vma) => Some(os.vma_start(vma)?),
+        None => None,
+    };
+
+    Ok(match (vma_start, fun_start) {
+        (Some(vma_start), Some(fun_start)) => format!(
+            "{vma_start:#x}!{:#x}+{:#x}",
+            vma_start - fun_start,
+            addr - fun_start
+        ),
+        (Some(vma_start), None) => format!("{vma_start:#x}!{:#x}", addr - vma_start),
+        (None, Some(fun_start)) => format!("{fun_start:#x}+{:#x}", addr - fun_start),
+        (None, None) => format!("{addr:#x}"),
+    })
 }
