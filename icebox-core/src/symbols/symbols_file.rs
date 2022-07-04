@@ -53,8 +53,8 @@ fn parse_symbol_file_inner<R: BufRead>(mut r: R, syms: &mut ModuleSymbolsBuilder
             let addr = u64::from_str_radix(&start[0..16], 16).ok()?;
 
             // Filter interesting symbols kinds
-            match start.as_bytes()[17] {
-                b'T' | b't' | b'A' | b'D' => (),
+            match start.as_bytes()[17].to_ascii_uppercase() {
+                b'T' | b'A' | b'D' | b'R' => (),
                 _ => return None,
             }
 
