@@ -1,5 +1,5 @@
 [workspace]
-
+resolver = "2"
 members = [
     "bin/force_mmap",
     "bin/kvm_dump_live",
@@ -9,3 +9,6 @@ members = [
     "patch",
     "python",
 ]
+
+[profile.dev]
+opt-level = 1
