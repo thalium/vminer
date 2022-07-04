@@ -267,6 +267,7 @@ dependencies = [
  "memchr",
  "msvc-demangler",
  "object",
+ "once_map",
  "pdb",
  "rustc-demangle",
  "serde",
@@ -392,6 +393,17 @@ name = "once_cell"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7709cef83f0c1f58f666e746a08b21e0085f7440fa6a29cc194d68aac97a4225"
+
+[[package]]
+name = "once_map"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9687b3950afdc9905a86e3bb5e7826e61102ee6638bd370dffe7c04c5160113"
+dependencies = [
+ "hashbrown",
+ "parking_lot",
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "os_str_bytes"

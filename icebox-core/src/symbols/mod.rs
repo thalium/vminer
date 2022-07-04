@@ -9,10 +9,15 @@ use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
     string::{String, ToString},
+    sync::Arc,
     vec::Vec,
 };
 use core::{fmt, ops::Range};
 use hashbrown::HashMap;
+#[cfg(not(feature = "std"))]
+use once_map::unsync::OnceMap;
+#[cfg(feature = "std")]
+use once_map::OnceMap;
 #[cfg(feature = "std")]
 use std::{fs, path};
 
@@ -164,17 +169,17 @@ impl ModuleSymbolsBuilder {
     }
 
     #[cfg(feature = "std")]
-    pub fn read_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
-        self.read_from_file_inner(path.as_ref())
+    pub fn read_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
+        self.read_file_inner(path.as_ref())
     }
 
     #[cfg(feature = "std")]
-    fn read_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<()> {
+    fn read_file_inner(&mut self, path: &std::path::Path) -> IceResult<()> {
         let content = std::fs::read(path)?;
-        self.read_from_bytes(&content)
+        self.read_bytes(&content)
     }
 
-    pub fn read_from_bytes(&mut self, content: &[u8]) -> IceResult<()> {
+    pub fn read_bytes(&mut self, content: &[u8]) -> IceResult<()> {
         if content.starts_with(b"\x7fELF") {
             let obj = object::File::parse(content).map_err(IceError::new)?;
             crate::symbols::dwarf::load_types(&obj, self).map_err(IceError::new)?;
@@ -230,13 +235,13 @@ impl ModuleSymbols {
     #[cfg(feature = "std")]
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> IceResult<Self> {
         let mut module = ModuleSymbolsBuilder::new();
-        module.read_from_file_inner(path.as_ref())?;
+        module.read_file_inner(path.as_ref())?;
         Ok(module.build())
     }
 
     pub fn from_bytes(content: &[u8]) -> IceResult<Self> {
         let mut module = ModuleSymbolsBuilder::new();
-        module.read_from_bytes(content)?;
+        module.read_bytes(content)?;
         Ok(module.build())
     }
 
@@ -291,55 +296,54 @@ impl fmt::Debug for ModuleSymbols {
 
 #[derive(Debug, Default)]
 pub struct SymbolsIndexer {
-    modules: HashMap<Box<str>, ModuleSymbols>,
+    modules: OnceMap<Box<str>, Arc<ModuleSymbols>>,
 }
 
 impl SymbolsIndexer {
     pub fn new() -> Self {
         Self {
-            modules: HashMap::new(),
+            modules: OnceMap::new(),
         }
     }
 
     pub fn get_addr(&self, lib: &str, name: &str) -> IceResult<VirtualAddress> {
-        self.get_module(lib)?.get_address(name)
+        self.require_module(lib)?.get_address(name)
     }
 
-    #[inline]
-    pub fn get_module(&self, name: &str) -> IceResult<&ModuleSymbols> {
-        match self.modules.get(name) {
-            Some(lib) => Ok(lib),
-            None => Err(IceError::missing_module(name)),
-        }
+    pub fn get_module(&self, name: &str) -> Option<&ModuleSymbols> {
+        self.modules.get(name)
     }
 
-    fn load(
-        &mut self,
+    pub fn require_module(&self, name: &str) -> IceResult<&ModuleSymbols> {
+        self.get_module(name)
+            .ok_or_else(|| IceError::missing_module(name))
+    }
+
+    pub fn load_module(
+        &self,
         name: Box<str>,
-        load: impl FnOnce(&str) -> IceResult<ModuleSymbols>,
-    ) -> IceResult<()> {
-        match self.modules.entry(name) {
-            hashbrown::hash_map::Entry::Occupied(_) => (),
-            hashbrown::hash_map::Entry::Vacant(entry) => {
-                let value = load(entry.key())?;
-                entry.insert(value);
-            }
-        }
-        Ok(())
+        f: &mut dyn FnMut(&str) -> IceResult<Arc<ModuleSymbols>>,
+    ) -> IceResult<&ModuleSymbols> {
+        self.modules.try_insert(name, |name| f(name))
     }
 
-    pub fn load_from_bytes(&mut self, name: Box<str>, content: &[u8]) -> IceResult<()> {
-        self.load(name, |_| ModuleSymbols::from_bytes(content))
+    pub fn load_from_bytes(&mut self, name: Box<str>, content: &[u8]) -> IceResult<&ModuleSymbols> {
+        self.load_module(name, &mut |_| {
+            ModuleSymbols::from_bytes(content).map(Arc::new)
+        })
     }
 
     #[cfg(feature = "std")]
     #[inline]
-    pub fn load_from_file<P: AsRef<std::path::Path>>(&mut self, path: P) -> IceResult<()> {
+    pub fn load_from_file<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+    ) -> IceResult<&ModuleSymbols> {
         self.load_from_file_inner(path.as_ref())
     }
 
     #[cfg(feature = "std")]
-    fn load_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<()> {
+    fn load_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<&ModuleSymbols> {
         use crate::ResultExt;
 
         let name = path
@@ -349,7 +353,7 @@ impl SymbolsIndexer {
             .context("non UTF-8 file name")?
             .into();
 
-        self.load(name, |_| ModuleSymbols::from_file(path))
+        self.load_module(name, &mut |_| ModuleSymbols::from_file(path).map(Arc::new))
     }
 
     #[cfg(feature = "std")]

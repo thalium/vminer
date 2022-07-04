@@ -671,6 +671,6 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
             None => return Ok(None),
         };
 
-        Ok(self.profile.syms.get_module(codeview.name().unwrap()).ok())
+        Ok(self.profile.syms.get_module(codeview.name().unwrap()))
     }
 }

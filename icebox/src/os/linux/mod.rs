@@ -488,7 +488,7 @@ impl<B: ibc::Backend> ibc::Os for Linux<B> {
         module: ibc::Module,
     ) -> IceResult<Option<&ibc::ModuleSymbols>> {
         let name = self.module_name(module, proc)?;
-        Ok(self.profile.syms.get_module(&name).ok())
+        Ok(self.profile.syms.get_module(&name))
     }
 }
 
