@@ -21,9 +21,7 @@ pub use error::{
     TranslationResult, TranslationResultExt,
 };
 
-mod mem;
-#[cfg(feature = "std")]
-pub use mem::File;
+pub mod mem;
 pub use mem::Memory;
 
 mod os;

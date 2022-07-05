@@ -8,7 +8,9 @@ use core::{
     ops::{Add, AddAssign},
 };
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, bytemuck::Pod, bytemuck::Zeroable,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(transparent)]
 pub struct PhysicalAddress(pub u64);
@@ -28,14 +30,23 @@ impl fmt::UpperHex for PhysicalAddress {
 impl Add<u64> for PhysicalAddress {
     type Output = PhysicalAddress;
 
+    #[inline]
     fn add(self, rhs: u64) -> Self::Output {
         Self(self.0 + rhs)
+    }
+}
+
+impl AddAssign<u64> for PhysicalAddress {
+    #[inline]
+    fn add_assign(&mut self, rhs: u64) {
+        self.0 += rhs;
     }
 }
 
 impl Add<i64> for PhysicalAddress {
     type Output = Self;
 
+    #[inline]
     fn add(self, rhs: i64) -> Self {
         let (res, o) = self.0.overflowing_add(rhs as u64);
 
@@ -47,9 +58,26 @@ impl Add<i64> for PhysicalAddress {
     }
 }
 
+impl AddAssign<i64> for PhysicalAddress {
+    #[inline]
+    fn add_assign(&mut self, rhs: i64) {
+        *self = *self + rhs;
+    }
+}
+
+impl Sub<PhysicalAddress> for PhysicalAddress {
+    type Output = i64;
+
+    #[inline]
+    fn sub(self, rhs: PhysicalAddress) -> Self::Output {
+        self.0.wrapping_sub(rhs.0) as i64
+    }
+}
+
 impl Sub<u64> for PhysicalAddress {
     type Output = PhysicalAddress;
 
+    #[inline]
     fn sub(self, rhs: u64) -> Self::Output {
         Self(self.0 - rhs)
     }
@@ -176,7 +204,7 @@ impl Sub<VirtualAddress> for VirtualAddress {
 
     #[inline]
     fn sub(self, rhs: VirtualAddress) -> i64 {
-        self.0.overflowing_sub(rhs.0).0 as i64
+        self.0.wrapping_sub(rhs.0) as i64
     }
 }
 

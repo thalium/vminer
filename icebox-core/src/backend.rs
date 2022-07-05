@@ -1,6 +1,6 @@
 use crate::{
-    arch, Architecture, IceResult, Memory, MemoryAccessResult, PhysicalAddress, TranslationResult,
-    VirtualAddress,
+    arch, mem::MemoryMap, Architecture, IceResult, Memory, MemoryAccessResult, PhysicalAddress,
+    TranslationResult, VirtualAddress,
 };
 
 pub trait RawBackend {
@@ -31,9 +31,9 @@ pub trait Backend {
 
     fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus;
 
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
+    fn memory_mappings(&self) -> &[MemoryMap];
 
-    fn memory_size(&self) -> u64;
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
     #[inline]
     fn read_virtual_memory(
@@ -136,13 +136,13 @@ impl<B: RawBackend> Backend for B {
     }
 
     #[inline]
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        self.memory().read(addr, buf)
+    fn memory_mappings(&self) -> &[MemoryMap] {
+        self.memory().mappings()
     }
 
     #[inline]
-    fn memory_size(&self) -> u64 {
-        self.memory().size()
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        self.memory().read(addr, buf)
     }
 
     #[inline]
@@ -183,13 +183,13 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
     }
 
     #[inline]
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        (**self).read_memory(addr, buf)
+    fn memory_mappings(&self) -> &[MemoryMap] {
+        (**self).memory_mappings()
     }
 
     #[inline]
-    fn memory_size(&self) -> u64 {
-        (**self).memory_size()
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        (**self).read_memory(addr, buf)
     }
 
     #[inline]
@@ -254,13 +254,13 @@ impl<B: Backend> Backend for RuntimeBackend<B> {
     }
 
     #[inline]
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        self.0.read_memory(addr, buf)
+    fn memory_mappings(&self) -> &[MemoryMap] {
+        self.0.memory_mappings()
     }
 
     #[inline]
-    fn memory_size(&self) -> u64 {
-        self.0.memory_size()
+    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        self.0.read_memory(addr, buf)
     }
 
     #[inline]
@@ -357,8 +357,8 @@ struct BackendMemory<'a, B: Backend + ?Sized>(&'a B);
 
 impl<B: Backend + ?Sized> Memory for BackendMemory<'_, B> {
     #[inline]
-    fn size(&self) -> u64 {
-        self.0.memory_size()
+    fn mappings(&self) -> &[MemoryMap] {
+        self.0.memory_mappings()
     }
 
     #[inline]

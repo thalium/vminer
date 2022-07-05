@@ -1,4 +1,4 @@
-/* Generated with cbindgen:0.24.2 */
+/* Generated with cbindgen:0.24.3 */
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -26,6 +26,16 @@ typedef struct VmaFlags VmaFlags;
 typedef struct PhysicalAddress {
   uint64_t val;
 } PhysicalAddress;
+
+typedef struct MemoryMap {
+  struct PhysicalAddress start;
+  struct PhysicalAddress end;
+} MemoryMap;
+
+typedef struct MemoryMapping {
+  const struct MemoryMap *maps;
+  uintptr_t len;
+} MemoryMapping;
 
 typedef struct X86_64Registers {
   uint64_t rax;
@@ -106,7 +116,7 @@ typedef struct X86_64Vcpus {
 typedef struct X86_64Backend {
   void *data;
   int32_t (*read_memory)(const void *data, struct PhysicalAddress addr, void *buf, uintptr_t size);
-  uint64_t (*memory_size)(const void *data);
+  struct MemoryMapping (*memory_mapping)(const void *data);
   struct X86_64Vcpus (*get_vcpus)(const void *data);
   void (*drop)(void *data);
 } X86_64Backend;

@@ -29,16 +29,16 @@ static Logger LOGGER = {
 typedef struct {
 	X86_64Vcpu *vcpus;
 	int n_vcpus;
+	MemoryMapping mappings;
 	int file_fd;
 	uint64_t offset;
-	uint64_t mem_size;
 } MyBackend;
 
 int32_t read_memory(const void *data, struct PhysicalAddress addr, void *buf, uintptr_t size) {
 	const MyBackend *backend_data = data;
 	uint64_t offset = addr.val + backend_data->offset;
 
-	if(offset + size > backend_data->mem_size) {
+	if(offset + size > backend_data->mappings.maps->end.val) {
 		return -1;
 	}
 
@@ -56,9 +56,9 @@ int32_t read_memory(const void *data, struct PhysicalAddress addr, void *buf, ui
 	return 0;
 }
 
-uint64_t memory_size(const void *data) {
+MemoryMapping memory_mapping(const void *data) {
 	const MyBackend *backend_data = data;
-	return backend_data->mem_size;
+	return backend_data->mappings;
 }
 
 struct X86_64Vcpus get_vcpus(const void *data) {
@@ -75,50 +75,51 @@ void drop(void *data) {
 	free(backend_data);
 }
 
+struct DumpHeader {
+	uint32_t magic;
+	uint32_t arch;
+	uint32_t n_mappings;
+	uint32_t n_vcpus;
+};
+
 Backend *make_dump(const char *path) {
-	uint32_t data;
-	struct stat stats;
+	struct DumpHeader header;
 
 	MyBackend *backend_data = malloc(sizeof *backend_data);
 
 	backend_data->file_fd = open(path, O_RDONLY | O_CLOEXEC);
 
-	if(read(backend_data->file_fd, &data, 4) != 4) {
-		perror("read arch");
+	if(read(backend_data->file_fd, &header, sizeof header) != sizeof header) {
+		perror("read header");
 		return NULL;
 	}
 
-	if(data != 0) {
-		printf("Wrong arch: %d\n", data);
+	if(header.arch != 0) {
+		printf("Wrong arch: %d\n", header.arch);
 		return NULL;
 	}
 
-	if(read(backend_data->file_fd, &data, 4) != 4) {
-		perror("read n vcpus");
+	backend_data->mappings.len = header.n_mappings;
+	int n_mappings = header.n_mappings * sizeof(MemoryMapping);
+	MemoryMap *maps = malloc(n_mappings);
+	if(read(backend_data->file_fd, maps, n_mappings) != n_mappings) {
+		perror("read vcpus");
 		return NULL;
 	}
+	backend_data->mappings.maps = maps;
 
-	backend_data->n_vcpus = data;
-	int vcpu_size = data * sizeof(X86_64Vcpu);
-	backend_data->offset = vcpu_size + 8;
-
+	backend_data->n_vcpus = header.n_vcpus;
+	int vcpu_size = header.n_vcpus * sizeof(X86_64Vcpu);
 	backend_data->vcpus = malloc(vcpu_size);
-
 	if(read(backend_data->file_fd, backend_data->vcpus, vcpu_size) != vcpu_size) {
 		perror("read vcpus");
 		return NULL;
 	}
 
-	if(fstat(backend_data->file_fd, &stats) != 0) {
-		perror("fstat");
-		return NULL;
-	}
-	backend_data->mem_size = stats.st_size - backend_data->offset;
-
 	X86_64Backend x86_64_dump = {
 		.data = backend_data,
 		.read_memory = read_memory,
-		.memory_size = memory_size,
+		.memory_mapping = memory_mapping,
 		.get_vcpus = get_vcpus,
 		.drop = drop,
 	};

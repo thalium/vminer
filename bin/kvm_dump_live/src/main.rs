@@ -24,7 +24,7 @@ mod inner {
     pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         env_logger::init();
         let args = Args::parse();
-        let vm = kvm::Kvm::connect(args.pid)?;
+        let vm = kvm::Kvm::with_default_qemu_mappings(args.pid)?;
         kvm_dump::DumbDump::dump_vm(&vm)?.write(args.output)?;
         Ok(())
     }

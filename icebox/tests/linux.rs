@@ -28,16 +28,16 @@ impl fmt::Display for Arch {
     }
 }
 
-fn read_linux(arch: Arch) -> IceResult<Linux<DumbDump<ibc::File>>> {
+fn read_linux(arch: Arch) -> IceResult<Linux<DumbDump<ibc::mem::File>>> {
     let backend = DumbDump::read(format!("../data/linux-5.10-{arch}-dump"))?;
     let mut profile = ibc::SymbolsIndexer::new();
     profile.load_dir(format!("../data/linux-5.10-{arch}"))?;
     Linux::create(backend, profile)
 }
 
-static LINUX_X86_64: Lazy<Linux<DumbDump<ibc::File>>> =
+static LINUX_X86_64: Lazy<Linux<DumbDump<ibc::mem::File>>> =
     Lazy::new(|| read_linux(Arch::X86_64).expect("Failed to initialize OS"));
-static LINUX_AARCH64: Lazy<Linux<DumbDump<ibc::File>>> =
+static LINUX_AARCH64: Lazy<Linux<DumbDump<ibc::mem::File>>> =
     Lazy::new(|| read_linux(Arch::Aarch64).expect("Failed to initialize OS"));
 
 fn assert_match_expected<T>(arch: Arch, name: &str, result: &T)

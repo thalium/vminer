@@ -59,6 +59,18 @@ impl From<VirtualAddress> for ibc::VirtualAddress {
     }
 }
 
+#[repr(C)]
+pub struct MemoryMap {
+    start: PhysicalAddress,
+    end: PhysicalAddress,
+}
+
+#[repr(C)]
+pub struct MemoryMapping {
+    maps: *const MemoryMap,
+    len: usize,
+}
+
 impl Backend {
     fn new<B>(backend: B) -> Box<Self>
     where
@@ -77,7 +89,7 @@ pub struct X86_64Backend {
         buf: *mut c_void,
         size: usize,
     ) -> i32,
-    memory_size: unsafe extern "C" fn(data: *const c_void) -> u64,
+    memory_mapping: unsafe extern "C" fn(data: *const c_void) -> MemoryMapping,
     get_vcpus: unsafe extern "C" fn(data: *const c_void) -> arch::X86_64Vcpus,
     drop: Option<unsafe extern "C" fn(data: *mut c_void)>,
 }
@@ -96,8 +108,11 @@ impl Drop for X86_64Backend {
 }
 
 impl ibc::Memory for X86_64Backend {
-    fn size(&self) -> u64 {
-        unsafe { (self.memory_size)(self.data) }
+    fn mappings(&self) -> &[ibc::mem::MemoryMap] {
+        unsafe {
+            let MemoryMapping { maps, len } = (self.memory_mapping)(self.data);
+            core::slice::from_raw_parts(maps.cast(), len)
+        }
     }
 
     fn read(&self, addr: ibc::PhysicalAddress, buf: &mut [u8]) -> ibc::MemoryAccessResult<()> {

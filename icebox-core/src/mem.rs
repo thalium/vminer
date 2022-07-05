@@ -1,13 +1,31 @@
 use super::{MemoryAccessError, MemoryAccessResult, PhysicalAddress};
-
+use alloc::vec::Vec;
 #[cfg(feature = "std")]
 use std::{fs, io, path::Path};
+
+#[derive(Debug, Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+#[repr(C)]
+pub struct MemoryMap {
+    pub start: PhysicalAddress,
+    pub end: PhysicalAddress,
+}
 
 /// A trait to specify how to read physical memory from a guest
 ///
 /// This trait defines additional optional methods for specialisation
 pub trait Memory {
-    fn size(&self) -> u64;
+    fn mappings(&self) -> &[MemoryMap];
+
+    #[inline]
+    fn is_valid(&self, addr: PhysicalAddress, size: usize) -> bool {
+        for mapping in self.mappings() {
+            if mapping.start <= addr && addr + (size as u64) <= mapping.end {
+                return true;
+            }
+        }
+
+        false
+    }
 
     fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
@@ -51,28 +69,47 @@ pub trait Memory {
     #[cfg(feature = "std")]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
         let mut buffer = [0; 1 << 16];
-        let size = self.size();
 
-        for addr in (0..size).step_by(buffer.len() as _) {
-            self.read(PhysicalAddress(addr), &mut buffer)?;
-            writer.write_all(&buffer)?;
+        for mapping in self.mappings() {
+            for addr in (mapping.start.0..mapping.end.0).step_by(buffer.len() as _) {
+                self.read(PhysicalAddress(addr), &mut buffer)?;
+                writer.write_all(&buffer)?;
+            }
         }
 
         Ok(())
     }
 }
 
-impl Memory for [u8] {
+#[derive(Debug)]
+pub struct RawMemory<T: ?Sized> {
+    mapping: MemoryMap,
+    bytes: T,
+}
+
+impl<T: AsRef<[u8]>> RawMemory<T> {
+    pub fn new(bytes: T) -> Self {
+        Self {
+            mapping: MemoryMap {
+                start: PhysicalAddress(0),
+                end: PhysicalAddress(bytes.as_ref().len() as u64),
+            },
+            bytes,
+        }
+    }
+}
+
+impl<T: AsRef<[u8]> + ?Sized> Memory for RawMemory<T> {
     #[inline]
-    fn size(&self) -> u64 {
-        self.len() as u64
+    fn mappings(&self) -> &[MemoryMap] {
+        core::slice::from_ref(&self.mapping)
     }
 
     #[inline]
     fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (|| {
             let offset = addr.0.try_into().ok()?;
-            let this = self.get(offset..)?;
+            let this = self.bytes.as_ref().get(offset..)?;
             let len = buf.len();
             (this.len() >= len).then(|| buf.copy_from_slice(&this[..len]))
         })()
@@ -89,7 +126,7 @@ impl Memory for [u8] {
         let this = (|| {
             let max = addr.0.checked_add(page_size)?.try_into().ok()?;
             let offset = addr.0.try_into().ok()?;
-            self.get(offset..max)
+            self.bytes.as_ref().get(offset..max)
         })()
         .ok_or(MemoryAccessError::OutOfBounds)?;
 
@@ -99,43 +136,57 @@ impl Memory for [u8] {
     #[cfg(feature = "std")]
     #[inline]
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
-        writer.write_all(self)
+        writer.write_all(self.bytes.as_ref())
     }
 }
 
-impl Memory for alloc::vec::Vec<u8> {
-    #[inline]
-    fn size(&self) -> u64 {
-        (**self).size()
+#[derive(Debug)]
+pub struct MemRemap<M: ?Sized> {
+    mappings: Vec<MemoryMap>,
+    remap_at: Vec<PhysicalAddress>,
+    inner: M,
+}
+
+impl<M: Memory> MemRemap<M> {
+    pub fn new(inner: M, mappings: Vec<MemoryMap>, remap_at: Vec<PhysicalAddress>) -> Self {
+        Self {
+            mappings,
+            remap_at,
+            inner,
+        }
+    }
+}
+
+impl<M: Memory + ?Sized> Memory for MemRemap<M> {
+    fn mappings(&self) -> &[MemoryMap] {
+        &self.mappings
     }
 
-    #[inline]
     fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        (**self).read(addr, buf)
-    }
+        assert!(self.mappings.len() == self.remap_at.len());
 
-    #[inline]
-    fn search(
-        &self,
-        addr: PhysicalAddress,
-        page_size: u64,
-        finder: &memchr::memmem::Finder,
-        buf: &mut [u8],
-    ) -> MemoryAccessResult<Option<u64>> {
-        (**self).search(addr, page_size, finder, buf)
-    }
+        let mut i = 0;
+        let addr = loop {
+            if i >= self.mappings.len() {
+                return Err(MemoryAccessError::OutOfBounds);
+            }
 
-    #[cfg(feature = "std")]
-    #[inline]
-    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
-        (**self).dump(writer)
+            let mapping = self.mappings[i];
+            if mapping.start <= addr && addr + (buf.len() as u64) <= mapping.end {
+                break self.remap_at[i] + (addr - mapping.start);
+            }
+
+            i += 1;
+        };
+
+        self.inner.read(addr, buf)
     }
 }
 
 impl<M: Memory + ?Sized> Memory for &'_ M {
     #[inline]
-    fn size(&self) -> u64 {
-        (**self).size()
+    fn mappings(&self) -> &[MemoryMap] {
+        (**self).mappings()
     }
 
     #[inline]
@@ -163,19 +214,13 @@ impl<M: Memory + ?Sized> Memory for &'_ M {
 
 impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
     #[inline]
-    fn size(&self) -> u64 {
-        (**self).size()
+    fn mappings(&self) -> &[MemoryMap] {
+        (**self).mappings()
     }
 
     #[inline]
     fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (**self).read(addr, buf)
-    }
-
-    #[cfg(feature = "std")]
-    #[inline]
-    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
-        (**self).dump(writer)
     }
 
     #[inline]
@@ -188,6 +233,12 @@ impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
     ) -> MemoryAccessResult<Option<u64>> {
         (**self).search(addr, page_size, finder, buf)
     }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        (**self).dump(writer)
+    }
 }
 
 #[cfg(feature = "std")]
@@ -195,7 +246,7 @@ impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
 pub struct File {
     file: sync_file::RandomAccessFile,
     start: u64,
-    end: u64,
+    mapping: MemoryMap,
 }
 
 #[cfg(feature = "std")]
@@ -203,7 +254,15 @@ impl File {
     #[inline]
     pub fn new(file: fs::File, start: u64, end: u64) -> Self {
         let file = sync_file::RandomAccessFile::from(file);
-        Self { file, start, end }
+        let mapping = MemoryMap {
+            start: PhysicalAddress(0),
+            end: PhysicalAddress(end - start),
+        };
+        Self {
+            file,
+            start,
+            mapping,
+        }
     }
 
     #[inline]
@@ -211,23 +270,29 @@ impl File {
         let file = fs::File::open(path)?;
         Ok(Self::new(file, start, end))
     }
+
+    #[inline]
+    pub fn size(&self) -> u64 {
+        self.mapping.end.0
+    }
 }
 
 #[cfg(feature = "std")]
 impl Memory for File {
     #[inline]
-    fn size(&self) -> u64 {
-        self.end - self.start
+    fn mappings(&self) -> &[MemoryMap] {
+        core::slice::from_ref(&self.mapping)
     }
 
     #[inline]
     fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         use sync_file::ReadAt;
 
-        let offset = self.start + addr.0;
-        if offset + (buf.len() as u64) > self.end {
+        if !self.is_valid(addr, buf.len()) {
             return Err(MemoryAccessError::OutOfBounds);
         }
+
+        let offset = self.start + addr.0;
         self.file.read_exact_at(buf, offset)?;
         Ok(())
     }

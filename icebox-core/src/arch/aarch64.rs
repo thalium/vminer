@@ -16,13 +16,11 @@ impl Vcpu {
     fn cleaned_ttbr0(&self) -> PhysicalAddress {
         use super::MmuDesc as _;
         PhysicalAddress(self.special_registers.ttbr0_el1 & crate::mask(MmuDesc::ADDR_BITS))
-            - MmuDesc::MEM_OFFSET
     }
 
     fn cleaned_ttbr1(&self) -> PhysicalAddress {
         use super::MmuDesc as _;
         PhysicalAddress(self.special_registers.ttbr1_el1 & crate::mask(MmuDesc::ADDR_BITS))
-            - MmuDesc::MEM_OFFSET
     }
 }
 
@@ -138,8 +136,6 @@ impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
 struct MmuDesc;
 
 impl super::MmuDesc for MmuDesc {
-    const MEM_OFFSET: u64 = 1 << 30;
-
     #[inline]
     fn is_valid(mmu_entry: crate::addr::MmuEntry) -> bool {
         mmu_entry.0 & 1 != 0

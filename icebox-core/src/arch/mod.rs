@@ -28,10 +28,9 @@ fn make_address_test<'a>(
     use_per_cpu: bool,
     additionnal: &'a [&[VirtualAddress]],
 ) -> impl Fn(PhysicalAddress) -> bool + 'a {
-    let mem_size = memory.size();
     move |addr| {
         let test_one = |test_addr| match vcpus.arch().virtual_to_physical(memory, addr, test_addr) {
-            Ok(addr) => addr.0 < mem_size,
+            Ok(addr) => memory.is_valid(addr, 1),
             _ => false,
         };
 
@@ -141,10 +140,6 @@ pub trait Architecture<'a> {
 ///
 /// Using a trait here enable many compile-time optimisations.
 trait MmuDesc {
-    /// Assume that all physical addresses have this offset. For some reason
-    /// this is required on aarch64.
-    const MEM_OFFSET: u64 = 0;
-
     /// The number of significant bits in an address.
     const ADDR_BITS: u32 = 48;
 
@@ -186,7 +181,6 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
         if !Mmu::is_valid(mmu_entry) {
             return Err(crate::TranslationError::Invalid(mmu_entry.0));
         }
-        mmu_entry -= Mmu::MEM_OFFSET;
 
         // If we encounter a huge page, we are done
         if has_huge && Mmu::is_large(mmu_entry) {
@@ -241,8 +235,6 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     {
         let base_addr = prefix + index as u64 * page_size;
         let offset = if index == base_index { search_rest } else { 0 };
-
-        let entry = entry - Mmu::MEM_OFFSET;
 
         if rest.is_empty() || (has_large && Mmu::is_large(entry)) {
             // If this is the last level or if we encountered a large page, look

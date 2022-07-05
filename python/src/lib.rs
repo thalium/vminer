@@ -181,7 +181,7 @@ struct Dump;
 impl Dump {
     #[new]
     fn new(path: &str) -> PyResult<(Self, Backend)> {
-        let dump = icebox::backends::kvm_dump::DumbDump::read(path)?;
+        let dump = icebox::backends::kvm_dump::DumbDump::read(path).convert_err()?;
         Ok((Dump, Backend(Arc::new(dump))))
     }
 }

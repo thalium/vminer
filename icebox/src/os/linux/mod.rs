@@ -116,6 +116,7 @@ impl<B: ice::Backend> Linux<B> {
     pub fn create(backend: B, profile: ibc::SymbolsIndexer) -> IceResult<Self> {
         let profile = Profile::new(profile)?;
         let kpgd = backend.find_kernel_pgd(true, &[])?;
+        log::info!("Found Linux PGD at 0x{:x}", kpgd);
         let kaslr = get_aslr(&backend, &profile, kpgd)?;
 
         Ok(Linux {
