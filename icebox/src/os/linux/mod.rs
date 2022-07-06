@@ -2,7 +2,9 @@ pub mod callstack;
 mod profile;
 
 use super::pointer::{Context, HasLayout, KernelSpace, Pointer, StructOffset};
-use crate::core::{self as ice, IceError, IceResult, Os, PhysicalAddress, VirtualAddress};
+use crate::core::{
+    self as ice, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress,
+};
 use alloc::{string::String, vec::Vec};
 use core::{fmt, ops::ControlFlow};
 
@@ -101,30 +103,9 @@ pub struct Linux<B> {
     kaslr: i64,
 }
 
-pub fn get_aslr<B: ice::Backend>(
-    backend: &B,
-    profile: &Profile,
-    kpgd: PhysicalAddress,
-) -> IceResult<i64> {
-    let base_banner_addr = profile.fast_syms.linux_banner;
-    let banner_addr = get_banner_addr(backend, kpgd)?.ok_or("could not find banner address")?;
-
-    Ok(banner_addr.0.overflowing_sub(base_banner_addr.0).0 as i64)
-}
-
 impl<B: ice::Backend> Linux<B> {
-    pub fn create(backend: B, profile: ibc::SymbolsIndexer) -> IceResult<Self> {
-        let profile = Profile::new(profile)?;
-        let kpgd = backend.find_kernel_pgd(true, &[])?;
-        log::info!("Found Linux PGD at 0x{:x}", kpgd);
-        let kaslr = get_aslr(&backend, &profile, kpgd)?;
-
-        Ok(Linux {
-            backend,
-            profile,
-            kpgd,
-            kaslr,
-        })
+    pub fn create(backend: B, symbols: ibc::SymbolsIndexer) -> IceResult<Self> {
+        super::OsBuilder::new().with_symbols(symbols).build(backend)
     }
 
     fn read_kernel_value<T: bytemuck::Pod>(&self, addr: VirtualAddress) -> IceResult<T> {
@@ -166,10 +147,42 @@ fn get_banner_addr<B: ice::Backend>(
     backend.find_in_kernel_memory(mmu_addr, b"Linux version")
 }
 
-impl<B: ice::Backend> super::OsBuilder<B> for Linux<B> {
-    fn quick_check(backend: &B) -> IceResult<bool> {
-        let mmu_addr = backend.find_kernel_pgd(true, &[])?;
-        Ok(get_banner_addr(backend, mmu_addr)?.is_some())
+impl<B: ice::Backend> super::Buildable<B> for Linux<B> {
+    fn quick_check(backend: &B) -> Option<super::OsBuilder> {
+        let kpgd = backend.find_kernel_pgd(true, &[]).ok()?;
+        let kaslr = get_banner_addr(backend, kpgd).ok()??;
+        Some(super::OsBuilder::new().with_kpgd(kpgd).with_kaslr(kaslr))
+    }
+
+    fn build(backend: B, builder: super::OsBuilder) -> IceResult<Self> {
+        let kpgd = match builder.kpgd {
+            Some(kpgd) => kpgd,
+            None => backend
+                .find_kernel_pgd(true, &[])
+                .context("could not find kernel PGD")?,
+        };
+        log::debug!("Found Linux PGD at 0x{kpgd:x}");
+
+        let banner_addr = match builder.kaslr {
+            Some(kaslr) => kaslr,
+            None => get_banner_addr(&backend, kpgd)
+                .context("could not find banner address")?
+                .context("could not find banner address")?,
+        };
+        log::info!("Found Linux banner at 0x{banner_addr:x}");
+
+        let symbols = builder.symbols.unwrap_or_else(ibc::SymbolsIndexer::new);
+        let profile = Profile::new(symbols)?;
+
+        let base_banner_addr = profile.fast_syms.linux_banner;
+        let kaslr = banner_addr.0.wrapping_sub(base_banner_addr.0) as i64;
+
+        Ok(Linux {
+            backend,
+            profile,
+            kpgd,
+            kaslr,
+        })
     }
 }
 

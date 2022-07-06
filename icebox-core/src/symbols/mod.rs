@@ -228,13 +228,13 @@ pub struct ModuleSymbols {
 
 impl ModuleSymbols {
     #[cfg(feature = "std")]
-    pub fn read_from_file<P: AsRef<std::path::Path>>(path: P) -> IceResult<Self> {
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> IceResult<Self> {
         let mut module = ModuleSymbolsBuilder::new();
         module.read_from_file_inner(path.as_ref())?;
         Ok(module.build())
     }
 
-    pub fn read_from_bytes(content: &[u8]) -> IceResult<Self> {
+    pub fn from_bytes(content: &[u8]) -> IceResult<Self> {
         let mut module = ModuleSymbolsBuilder::new();
         module.read_from_bytes(content)?;
         Ok(module.build())
@@ -329,7 +329,7 @@ impl SymbolsIndexer {
     }
 
     pub fn load_from_bytes(&mut self, name: Box<str>, content: &[u8]) -> IceResult<()> {
-        self.load(name, |_| ModuleSymbols::read_from_bytes(content))
+        self.load(name, |_| ModuleSymbols::from_bytes(content))
     }
 
     #[cfg(feature = "std")]
@@ -349,7 +349,7 @@ impl SymbolsIndexer {
             .context("non UTF-8 file name")?
             .into();
 
-        self.load(name, |_| ModuleSymbols::read_from_file(path))
+        self.load(name, |_| ModuleSymbols::from_file(path))
     }
 
     #[cfg(feature = "std")]

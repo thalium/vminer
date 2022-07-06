@@ -99,18 +99,16 @@ pub struct Os(Box<dyn ibc::Os + Send + Sync>);
 
 impl Os {
     fn new(backend: Backend) -> IceResult<Box<Self>> {
-        use icebox::os::OsBuilder;
+        use icebox::os::Buildable;
 
-        match icebox::os::Linux::quick_check(&backend.0) {
-            Ok(true) => {
-                let mut profile = ibc::SymbolsIndexer::new();
-                #[cfg(feature = "std")]
-                profile.load_dir("../data/linux-x86-64")?;
-                let linux = icebox::os::Linux::create(backend.0, profile)?;
-                return Ok(Box::new(Self(Box::new(linux))));
-            }
-            Err(e) => log::warn!("Error while guessing OS: {}", e),
-            Ok(false) => (),
+        if let Some(builder) = icebox::os::Linux::quick_check(&backend.0) {
+            let mut symbols = ibc::SymbolsIndexer::new();
+            #[cfg(feature = "std")]
+            symbols.load_dir("../data/linux-x86-64")?;
+            let linux = builder
+                .with_symbols(symbols)
+                .build::<_, icebox::os::Linux<_>>(backend.0)?;
+            return Ok(Box::new(Self(Box::new(linux))));
         }
 
         Err(IceError::from("Failed to guess host OS"))

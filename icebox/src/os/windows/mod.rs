@@ -253,6 +253,10 @@ where
     Ok(None)
 }
 
+fn find_kernel_pgd<B: Backend>(backend: &B) -> IceResult<PhysicalAddress> {
+    backend.find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])
+}
+
 fn find_kernel<B: Backend>(
     backend: &B,
     kpgd: PhysicalAddress,
@@ -278,27 +282,8 @@ fn find_kernel<B: Backend>(
 }
 
 impl<B: Backend> Windows<B> {
-    pub fn create(backend: B, profile: ibc::SymbolsIndexer) -> IceResult<Self> {
-        let profile = profile::Profile::new(profile)?;
-        let kpgd = backend.find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])?;
-        let (pdb_id, base_addr) =
-            find_kernel(&backend, kpgd)?.context("failed to find kernel data")?;
-        log::info!("Found kernel at 0x{base_addr:x} (PDB: {pdb_id})");
-
-        let bits = base_addr + profile.fast_syms.KiImplementedPhysicalBits;
-        let bits: u64 = backend.read_value_virtual(kpgd, bits)?;
-        let unswizzle_mask = !(1 << (bits - 1));
-
-        let this = Self {
-            backend,
-            kpgd,
-            base_addr,
-            profile,
-
-            unswizzle_mask,
-        };
-
-        Ok(this)
+    pub fn create(backend: B, symbols: ibc::SymbolsIndexer) -> IceResult<Self> {
+        super::os_builder().with_symbols(symbols).build(backend)
     }
 
     #[inline]
@@ -315,6 +300,56 @@ impl<B: Backend> Windows<B> {
     fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr, Self>> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
         Ok(Pointer::new(per_cpu, self, KernelSpace))
+    }
+}
+
+impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
+    fn quick_check(backend: &B) -> Option<super::OsBuilder> {
+        let kpgd = find_kernel_pgd(backend).ok()?;
+        let (pdb_id, kaslr) = find_kernel(backend, kpgd).ok()??;
+        Some(super::OsBuilder {
+            kpgd: Some(kpgd),
+            kaslr: Some(kaslr),
+            version: Some(pdb_id),
+            symbols: None,
+        })
+    }
+
+    fn build(backend: B, builder: super::OsBuilder) -> IceResult<Self> {
+        let kpgd = match builder.kpgd {
+            Some(kpgd) => kpgd,
+            None => backend
+                .find_kernel_pgd(true, &[])
+                .context("could not find kernel PGD")?,
+        };
+        log::debug!("Found Windows PGD at 0x{kpgd:x}");
+
+        let (pdb_id, base_addr) = match builder.kaslr {
+            Some(kaslr) => {
+                let pdb_id = builder.version.context("missing version")?;
+                (pdb_id, kaslr)
+            }
+            None => find_kernel(&backend, kpgd)
+                .context("failed to find kernel data")?
+                .context("failed to find kernel data")?,
+        };
+
+        log::info!("Found kernel at 0x{base_addr:x} (PDB: {pdb_id})");
+
+        let symbols = builder.symbols.unwrap_or_else(ibc::SymbolsIndexer::new);
+        let profile = profile::Profile::new(symbols)?;
+
+        let bits = base_addr + profile.fast_syms.KiImplementedPhysicalBits;
+        let bits: u64 = backend.read_value_virtual(kpgd, bits)?;
+        let unswizzle_mask = !(1 << (bits - 1));
+
+        Ok(Windows {
+            backend,
+            kpgd,
+            base_addr,
+            profile,
+            unswizzle_mask,
+        })
     }
 }
 

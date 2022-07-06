@@ -1,7 +1,6 @@
 use std::{ops::ControlFlow, sync::Arc};
 
 use ibc::{IceError, IceResult};
-use icebox::os::OsBuilder;
 use pyo3::{
     exceptions,
     once_cell::GILOnceCell,
@@ -191,15 +190,15 @@ struct RawOs(Box<dyn ibc::Os + Send + Sync>);
 
 impl RawOs {
     fn new(backend: Backend, path: &str) -> IceResult<Self> {
-        match icebox::os::Linux::quick_check(&backend.0) {
-            Ok(true) => {
-                let mut profile = ibc::SymbolsIndexer::new();
-                profile.load_dir(path)?;
-                let linux = icebox::os::Linux::create(backend.0, profile)?;
-                return Ok(RawOs(Box::new(linux)));
-            }
-            Err(e) => log::warn!("Error while guessing OS: {}", e),
-            Ok(false) => (),
+        use icebox::os::Buildable;
+
+        if let Some(builder) = icebox::os::Linux::quick_check(&backend.0) {
+            let mut symbols = ibc::SymbolsIndexer::new();
+            symbols.load_dir(path)?;
+            let linux = builder
+                .with_symbols(symbols)
+                .build::<_, icebox::os::Linux<_>>(backend.0)?;
+            return Ok(RawOs(Box::new(linux)));
         }
 
         Err(IceError::from("Failed to guess host OS"))
