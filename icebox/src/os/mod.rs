@@ -36,7 +36,8 @@ pub mod windows;
 #[cfg(feature = "windows")]
 pub use windows::Windows;
 
-use alloc::string::String;
+use alloc::{boxed::Box, string::String};
+use core::fmt;
 use ibc::IceResult;
 
 pub trait Buildable<B: ibc::Backend>: Sized {
@@ -53,6 +54,7 @@ pub struct OsBuilder {
     pub kpgd: Option<ibc::PhysicalAddress>,
     pub kaslr: Option<ibc::VirtualAddress>,
     pub version: Option<String>,
+    pub loader: Option<Box<dyn SymbolLoader + Send + Sync>>,
 }
 
 impl OsBuilder {
@@ -94,4 +96,22 @@ impl OsBuilder {
 #[inline]
 pub fn os_builder() -> OsBuilder {
     OsBuilder::new()
+}
+
+pub trait SymbolLoader {
+    fn load(&self, name: &str, id: &str) -> IceResult<Option<ibc::ModuleSymbols>>;
+}
+
+pub struct EmptyLoader;
+
+impl SymbolLoader for EmptyLoader {
+    fn load(&self, _name: &str, _id: &str) -> IceResult<Option<ibc::ModuleSymbols>> {
+        Ok(None)
+    }
+}
+
+impl fmt::Debug for dyn SymbolLoader + Send + Sync + '_ {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("SymbolLoader").finish_non_exhaustive()
+    }
 }

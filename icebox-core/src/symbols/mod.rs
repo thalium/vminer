@@ -4,7 +4,7 @@ pub mod pdb;
 pub mod symbols_file;
 
 use super::VirtualAddress;
-use crate::{IceError, IceResult};
+use crate::{IceError, IceResult, ResultExt};
 use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
@@ -296,7 +296,7 @@ impl fmt::Debug for ModuleSymbols {
 
 #[derive(Debug, Default)]
 pub struct SymbolsIndexer {
-    modules: OnceMap<Box<str>, Arc<ModuleSymbols>>,
+    modules: OnceMap<Box<str>, Arc<Option<ModuleSymbols>>>,
 }
 
 impl SymbolsIndexer {
@@ -311,7 +311,7 @@ impl SymbolsIndexer {
     }
 
     pub fn get_module(&self, name: &str) -> Option<&ModuleSymbols> {
-        self.modules.get(name)
+        self.modules.get(name)?.as_ref()
     }
 
     pub fn require_module(&self, name: &str) -> IceResult<&ModuleSymbols> {
@@ -322,14 +322,21 @@ impl SymbolsIndexer {
     pub fn load_module(
         &self,
         name: Box<str>,
-        f: &mut dyn FnMut(&str) -> IceResult<Arc<ModuleSymbols>>,
-    ) -> IceResult<&ModuleSymbols> {
-        self.modules.try_insert(name, |name| f(name))
+        f: &mut dyn FnMut(&str) -> IceResult<Arc<Option<ModuleSymbols>>>,
+    ) -> IceResult<Option<&ModuleSymbols>> {
+        let module = self.modules.try_insert(name, |name| {
+            f(name).with_context(|| alloc::format!("failed to load symbols for module \"{name}\""))
+        })?;
+        Ok(module.as_ref())
     }
 
-    pub fn load_from_bytes(&mut self, name: Box<str>, content: &[u8]) -> IceResult<&ModuleSymbols> {
+    pub fn load_from_bytes(
+        &mut self,
+        name: Box<str>,
+        content: &[u8],
+    ) -> IceResult<Option<&ModuleSymbols>> {
         self.load_module(name, &mut |_| {
-            ModuleSymbols::from_bytes(content).map(Arc::new)
+            ModuleSymbols::from_bytes(content).map(Some).map(Arc::new)
         })
     }
 
@@ -338,14 +345,15 @@ impl SymbolsIndexer {
     pub fn load_from_file<P: AsRef<std::path::Path>>(
         &mut self,
         path: P,
-    ) -> IceResult<&ModuleSymbols> {
+    ) -> IceResult<Option<&ModuleSymbols>> {
         self.load_from_file_inner(path.as_ref())
     }
 
     #[cfg(feature = "std")]
-    fn load_from_file_inner(&mut self, path: &std::path::Path) -> IceResult<&ModuleSymbols> {
-        use crate::ResultExt;
-
+    fn load_from_file_inner(
+        &mut self,
+        path: &std::path::Path,
+    ) -> IceResult<Option<&ModuleSymbols>> {
         let name = path
             .file_name()
             .context("no file name")?
@@ -353,7 +361,9 @@ impl SymbolsIndexer {
             .context("non UTF-8 file name")?
             .into();
 
-        self.load_module(name, &mut |_| ModuleSymbols::from_file(path).map(Arc::new))
+        self.load_module(name, &mut |_| {
+            ModuleSymbols::from_file(path).map(Some).map(Arc::new)
+        })
     }
 
     #[cfg(feature = "std")]

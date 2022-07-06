@@ -257,7 +257,7 @@ pub struct Profile {
 
 impl Profile {
     pub fn new(syms: ibc::SymbolsIndexer) -> IceResult<Self> {
-        let kernel = syms.require_module("ntkrnlmp.pdb")?;
+        let kernel = syms.require_module("ntoskrnl.exe")?;
         let layouts = Layouts::new(kernel)?;
         let KiImplementedPhysicalBits = kernel.get_address("KiImplementedPhysicalBits")?.0;
         let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;

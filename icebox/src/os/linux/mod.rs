@@ -94,8 +94,33 @@ impl<B: ibc::Backend> Pointer<'_, profile::Path, Linux<B>> {
     }
 }
 
+#[cfg(feature = "std")]
+pub struct SymbolLoader {
+    root: std::path::PathBuf,
+}
+
+#[cfg(feature = "std")]
+impl SymbolLoader {
+    pub fn with_root(path: std::path::PathBuf) -> IceResult<Self> {
+        std::fs::create_dir_all(&path)?;
+        Ok(Self { root: path })
+    }
+}
+
+#[cfg(feature = "std")]
+impl super::SymbolLoader for SymbolLoader {
+    fn load(&self, name: &str, id: &str) -> IceResult<Option<ibc::ModuleSymbols>> {
+        let path: std::path::PathBuf = [&*self.root, id.as_ref(), name.as_ref()].iter().collect();
+
+        path.exists()
+            .then(|| ibc::ModuleSymbols::from_file(path))
+            .transpose()
+    }
+}
+
 pub struct Linux<B> {
     backend: B,
+    symbols_loader: Box<dyn super::SymbolLoader + Send + Sync>,
     profile: Profile,
     kpgd: PhysicalAddress,
     kaslr: i64,
@@ -142,7 +167,7 @@ fn get_banner_addr<B: ibc::Backend>(
     backend: &B,
     mmu_addr: PhysicalAddress,
 ) -> ibc::MemoryAccessResult<Option<VirtualAddress>> {
-    backend.find_in_kernel_memory(mmu_addr, b"Linux version")
+    backend.find_in_kernel_memory(mmu_addr, b"Linux version ")
 }
 
 impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
@@ -168,6 +193,20 @@ impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
                 .context("could not find banner address")?,
         };
         log::info!("Found Linux banner at 0x{banner_addr:x}");
+        let mut banner = [0; 0x1000];
+        ibc::read_virtual_memory(banner_addr, &mut banner, |addr, buf| {
+            backend.read_virtual_memory(kpgd, addr, buf)
+        })?;
+        let banner = &banner[..memchr::memchr(0, &banner).unwrap()];
+        eprintln!("Banner: {}", String::from_utf8_lossy(banner));
+
+        let symbols_loader = match builder.loader {
+            Some(loader) => loader,
+            #[cfg(feature = "std")]
+            None => Box::new(SymbolLoader::with_root("./data/linux".into())?),
+            #[cfg(not(feature = "std"))]
+            None => Box::new(super::EmptyLoader),
+        };
 
         let symbols = builder.symbols.unwrap_or_else(ibc::SymbolsIndexer::new);
         let profile = Profile::new(symbols)?;
@@ -177,6 +216,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
 
         Ok(Linux {
             backend,
+            symbols_loader,
             profile,
             kpgd,
             kaslr,
@@ -488,7 +528,17 @@ impl<B: ibc::Backend> ibc::Os for Linux<B> {
         module: ibc::Module,
     ) -> IceResult<Option<&ibc::ModuleSymbols>> {
         let name = self.module_name(module, proc)?;
-        Ok(self.profile.syms.get_module(&name))
+        self.profile.syms.load_module(name.into(), &mut |name| {
+            use ibc::Architecture;
+
+            let id = match self.backend.arch().into_runtime() {
+                ibc::arch::RuntimeArchitecture::X86_64(_) => "x86_64",
+                ibc::arch::RuntimeArchitecture::Aarch64(_) => "aarch64",
+            };
+
+            let module = self.symbols_loader.load(name, id)?;
+            Ok(alloc::sync::Arc::new(module))
+        })
     }
 }
 

@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["std", "all_os"]
+# default = ["std", "all_os"]
+default = ["std", "all_os", "download_pdb"]
 std = ["ibc/std", "once_cell/std"]
 serde = ["dep:serde", "ibc/serde"]
 
@@ -17,6 +18,8 @@ windows = ["std", "dep:object", "dep:pdb"]
 all_backends = ["kvm", "dump"]
 kvm = ["std", "dep:libc"]
 dump = ["std"]
+
+download_pdb = ["dep:ureq"]
 
 [dependencies]
 ibc = {package = "icebox-core", version = "0.1", path = "../icebox-core"}
@@ -35,6 +38,8 @@ once_cell = {version = "1.9", default-features = false}
 object = {version = "0.29", default-features = false, features = ["read_core", "pe"], optional = true}
 gimli = {version = "0.26", default-features = false, features = ["read"], optional = true}
 pdb = {version = "0.8", default-features = false, optional = true}
+
+ureq = {version = "2.4", optional = true}
 
 [dev-dependencies]
 serde_json = "1.0"

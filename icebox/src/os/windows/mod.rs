@@ -3,8 +3,13 @@ use core::{fmt, mem, ops::ControlFlow, str};
 use ibc::{IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
 
 mod callstack;
+#[cfg(feature = "std")]
+mod loader;
 mod memory;
 mod profile;
+
+#[cfg(feature = "std")]
+pub use loader::SymbolLoader;
 
 pointer_defs! {
     ibc::Module = profile::LdrDataTableEntry;
@@ -150,9 +155,11 @@ where
 }
 
 const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
+const KERNEL_PDB_STR: &str = "ntkrnlmp.pdb";
 
 pub struct Windows<B> {
     pub backend: B,
+    symbols_loader: Box<dyn super::SymbolLoader + Send + Sync>,
     kpgd: PhysicalAddress,
     base_addr: VirtualAddress,
     profile: profile::Profile,
@@ -301,6 +308,22 @@ impl<B: ibc::Backend> Windows<B> {
         let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
         Ok(Pointer::new(per_cpu, self, KernelSpace))
     }
+
+    fn module_codeview(
+        &self,
+        proc: ibc::Process,
+        module: ibc::Module,
+    ) -> IceResult<Option<Codeview>> {
+        use ibc::Os;
+
+        let (mod_start, mod_end) = self.module_span(module, proc)?;
+        let mod_size = (mod_end - mod_start) as u64;
+        let pgd = self.process_pgd(proc)?;
+
+        pe_get_pdb_guid(mod_start, Some(mod_size), |addr, buf| {
+            self.try_read_process_memory(proc, pgd, addr, buf)
+        })
+    }
 }
 
 impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
@@ -312,6 +335,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
             kaslr: Some(kaslr),
             version: Some(pdb_id),
             symbols: None,
+            loader: None,
         })
     }
 
@@ -336,7 +360,21 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
 
         log::info!("Found kernel at 0x{base_addr:x} (PDB: {pdb_id})");
 
+        let symbols_loader = match builder.loader {
+            Some(loader) => loader,
+            #[cfg(target_os = "windows")]
+            None => Box::new(loader::SymbolLoader::with_system_root()?),
+            #[cfg(all(feature = "std", not(target_os = "windows")))]
+            None => Box::new(loader::SymbolLoader::with_root("./data/windows".into())?),
+            #[cfg(not(feature = "std"))]
+            None => Box::new(super::EmptyLoader),
+        };
+
         let symbols = builder.symbols.unwrap_or_else(ibc::SymbolsIndexer::new);
+        symbols.load_module("ntoskrnl.exe".into(), &mut |_| {
+            let module = symbols_loader.load(KERNEL_PDB_STR, &pdb_id)?;
+            Ok(alloc::sync::Arc::new(module))
+        })?;
         let profile = profile::Profile::new(symbols)?;
 
         let bits = base_addr + profile.fast_syms.KiImplementedPhysicalBits;
@@ -345,6 +383,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
 
         Ok(Windows {
             backend,
+            symbols_loader,
             kpgd,
             base_addr,
             profile,
@@ -659,18 +698,18 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         module: ibc::Module,
     ) -> IceResult<Option<&ibc::ModuleSymbols>> {
-        let (mod_start, mod_end) = self.module_span(module, proc)?;
-        let mod_size = (mod_end - mod_start) as u64;
-        let pgd = self.process_pgd(proc)?;
+        let name = self.module_name(module, proc)?;
+        self.profile.syms.load_module(name.into(), &mut |_| {
+            let codeview = self.module_codeview(proc, module)?;
 
-        let codeview = pe_get_pdb_guid(mod_start, Some(mod_size), |addr, buf| {
-            self.try_read_process_memory(proc, pgd, addr, buf)
-        })?;
-        let codeview = match codeview {
-            Some(codeview) => codeview,
-            None => return Ok(None),
-        };
+            let module = match codeview {
+                Some(codeview) => self
+                    .symbols_loader
+                    .load(codeview.name().unwrap(), &codeview.pdb_id())?,
+                None => None,
+            };
 
-        Ok(self.profile.syms.get_module(codeview.name().unwrap()))
+            Ok(alloc::sync::Arc::new(module))
+        })
     }
 }
