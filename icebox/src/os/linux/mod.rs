@@ -2,11 +2,9 @@ pub mod callstack;
 mod profile;
 
 use super::pointer::{Context, HasLayout, KernelSpace, Pointer, StructOffset};
-use crate::core::{
-    self as ice, IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress,
-};
 use alloc::{string::String, vec::Vec};
 use core::{fmt, ops::ControlFlow};
+use ibc::{IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
 
 pub use profile::Profile;
 
@@ -103,7 +101,7 @@ pub struct Linux<B> {
     kaslr: i64,
 }
 
-impl<B: ice::Backend> Linux<B> {
+impl<B: ibc::Backend> Linux<B> {
     pub fn create(backend: B, symbols: ibc::SymbolsIndexer) -> IceResult<Self> {
         super::OsBuilder::new().with_symbols(symbols).build(backend)
     }
@@ -126,7 +124,7 @@ impl<B: ice::Backend> Linux<B> {
 
     fn process_mm(
         &self,
-        proc: ice::Process,
+        proc: ibc::Process,
     ) -> IceResult<Option<Pointer<profile::MmStruct, Self>>> {
         let proc = self.pointer_of(proc);
         let mut mm = proc.read_pointer_field(|ts| ts.mm)?;
@@ -140,14 +138,14 @@ impl<B: ice::Backend> Linux<B> {
     }
 }
 
-fn get_banner_addr<B: ice::Backend>(
+fn get_banner_addr<B: ibc::Backend>(
     backend: &B,
     mmu_addr: PhysicalAddress,
-) -> ice::MemoryAccessResult<Option<VirtualAddress>> {
+) -> ibc::MemoryAccessResult<Option<VirtualAddress>> {
     backend.find_in_kernel_memory(mmu_addr, b"Linux version")
 }
 
-impl<B: ice::Backend> super::Buildable<B> for Linux<B> {
+impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
     fn quick_check(backend: &B) -> Option<super::OsBuilder> {
         let kpgd = backend.find_kernel_pgd(true, &[]).ok()?;
         let kaslr = get_banner_addr(backend, kpgd).ok()??;
@@ -186,7 +184,7 @@ impl<B: ice::Backend> super::Buildable<B> for Linux<B> {
     }
 }
 
-impl<B: ice::Backend> ice::Os for Linux<B> {
+impl<B: ibc::Backend> ibc::Os for Linux<B> {
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
@@ -249,7 +247,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
                 let vcpu = self.backend.vcpus().get(cpuid);
                 let vcpu_pgd = vcpu.pgd();
 
-                if let ice::arch::runtime::Vcpu::Aarch64(vcpu) = vcpu.into_runtime() {
+                if let ibc::arch::runtime::Vcpu::Aarch64(vcpu) = vcpu.into_runtime() {
                     if vcpu.instruction_pointer().is_kernel() {
                         let current_task = VirtualAddress(vcpu.registers.sp);
                         return Ok(ibc::Thread(current_task));
@@ -292,7 +290,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
             .map(|pid| pid as u64)
     }
 
-    fn process_name(&self, proc: ice::Process) -> IceResult<String> {
+    fn process_name(&self, proc: ibc::Process) -> IceResult<String> {
         let comm = self.pointer_of(proc).read_field(|ts| ts.comm)?;
 
         let buf = match memchr::memchr(0, &comm) {
@@ -303,7 +301,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         Ok(String::from_utf8_lossy(buf).into_owned())
     }
 
-    fn process_pgd(&self, proc: ice::Process) -> IceResult<PhysicalAddress> {
+    fn process_pgd(&self, proc: ibc::Process) -> IceResult<PhysicalAddress> {
         match self.process_mm(proc)? {
             Some(mm) => {
                 let pgd = mm.read_field(|mms| mms.pgd)?;
@@ -319,7 +317,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         }
     }
 
-    fn process_path(&self, proc: ice::Process) -> IceResult<Option<String>> {
+    fn process_path(&self, proc: ibc::Process) -> IceResult<Option<String>> {
         match self.process_mm(proc)? {
             Some(mm) => mm
                 .read_pointer_field(|mm| mm.exe_file)?
@@ -328,7 +326,7 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         }
     }
 
-    fn process_parent(&self, proc: ice::Process) -> IceResult<ice::Process> {
+    fn process_parent(&self, proc: ibc::Process) -> IceResult<ibc::Process> {
         let proc = self
             .pointer_of(proc)
             .read_pointer_field(|ts| ts.real_parent)?;
@@ -351,8 +349,8 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn process_for_each_thread(
         &self,
-        proc: ice::Process,
-        f: &mut dyn FnMut(ice::Thread) -> IceResult<ControlFlow<()>>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Thread) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         self.pointer_of(proc)
             .field(|ts| ts.thread_group)?
@@ -371,8 +369,8 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn process_for_each_vma(
         &self,
-        proc: ice::Process,
-        f: &mut dyn FnMut(ice::Vma) -> IceResult<ControlFlow<()>>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(ibc::Vma) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         let mm = match self.process_mm(proc)? {
             Some(mm) => mm,
@@ -405,13 +403,13 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn process_callstack(
         &self,
-        proc: ice::Process,
-        f: &mut dyn FnMut(&ice::StackFrame) -> IceResult<ControlFlow<()>>,
+        proc: ibc::Process,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         callstack::iter(self, proc, f)
     }
 
-    fn thread_id(&self, thread: ice::Thread) -> IceResult<u64> {
+    fn thread_id(&self, thread: ibc::Thread) -> IceResult<u64> {
         self.pointer_of(thread)
             .read_field(|ts| ts.pid)
             .map(|pid| pid as u64)
@@ -421,26 +419,26 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
         self.process_name(ibc::Process(thread.0)).map(Some)
     }
 
-    fn vma_path(&self, vma: ice::Vma) -> IceResult<Option<String>> {
+    fn vma_path(&self, vma: ibc::Vma) -> IceResult<Option<String>> {
         self.pointer_of(vma)
             .read_pointer_field(|vma| vma.vm_file)?
             .map_non_null(|file| file.field(|file| file.f_path)?.read_file_path())
     }
 
-    fn vma_start(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
+    fn vma_start(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
         self.pointer_of(vma).read_field(|vma| vma.vm_start)
     }
 
-    fn vma_end(&self, vma: ice::Vma) -> IceResult<VirtualAddress> {
+    fn vma_end(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
         self.pointer_of(vma).read_field(|vma| vma.vm_end)
     }
 
-    fn vma_flags(&self, vma: ice::Vma) -> IceResult<ibc::VmaFlags> {
+    fn vma_flags(&self, vma: ibc::Vma) -> IceResult<ibc::VmaFlags> {
         let flags = self.pointer_of(vma).read_field(|vma| vma.vm_flags)?;
         Ok(ibc::VmaFlags(flags))
     }
 
-    fn vma_offset(&self, vma: ice::Vma) -> IceResult<u64> {
+    fn vma_offset(&self, vma: ibc::Vma) -> IceResult<u64> {
         self.pointer_of(vma)
             .read_field(|vma| vma.vm_pgoff)
             .map(|offset| offset * 4096)
@@ -486,9 +484,9 @@ impl<B: ice::Backend> ice::Os for Linux<B> {
 
     fn module_symbols(
         &self,
-        proc: ice::Process,
-        module: ice::Module,
-    ) -> IceResult<Option<&ice::ModuleSymbols>> {
+        proc: ibc::Process,
+        module: ibc::Module,
+    ) -> IceResult<Option<&ibc::ModuleSymbols>> {
         let name = self.module_name(module, proc)?;
         Ok(self.profile.syms.get_module(&name).ok())
     }

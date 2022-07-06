@@ -1,6 +1,6 @@
 use super::pointer::{self, Context, HasLayout, KernelSpace, Pointer, StructOffset};
 use core::{fmt, mem, ops::ControlFlow, str};
-use ibc::{Backend, IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
+use ibc::{IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
 
 mod callstack;
 mod memory;
@@ -253,11 +253,11 @@ where
     Ok(None)
 }
 
-fn find_kernel_pgd<B: Backend>(backend: &B) -> IceResult<PhysicalAddress> {
+fn find_kernel_pgd<B: ibc::Backend>(backend: &B) -> IceResult<PhysicalAddress> {
     backend.find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])
 }
 
-fn find_kernel<B: Backend>(
+fn find_kernel<B: ibc::Backend>(
     backend: &B,
     kpgd: PhysicalAddress,
 ) -> IceResult<Option<(String, VirtualAddress)>> {
@@ -281,7 +281,7 @@ fn find_kernel<B: Backend>(
     Ok(None)
 }
 
-impl<B: Backend> Windows<B> {
+impl<B: ibc::Backend> Windows<B> {
     pub fn create(backend: B, symbols: ibc::SymbolsIndexer) -> IceResult<Self> {
         super::os_builder().with_symbols(symbols).build(backend)
     }
@@ -353,7 +353,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
     }
 }
 
-impl<B: Backend> ibc::Os for Windows<B> {
+impl<B: ibc::Backend> ibc::Os for Windows<B> {
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
