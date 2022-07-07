@@ -209,7 +209,11 @@ impl Codeview {
 
     fn name(&self) -> Option<&str> {
         let i = memchr::memchr(0, &self.name)?;
-        str::from_utf8(&self.name[..i]).ok()
+        let name = str::from_utf8(&self.name[..i]).ok()?;
+        if !name.as_bytes().iter().all(|c| (0x20..0x80).contains(c)) {
+            return None;
+        }
+        Some(name)
     }
 }
 
