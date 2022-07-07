@@ -32,7 +32,7 @@ fn collect_fields(struct_name: &str, fields: &pdb::FieldList) -> Vec<crate::symb
                 })
             }
             _ => {
-                log::warn!("Struct \"{struct_name}\" has weird field: {item:?}");
+                log::debug!("Struct \"{struct_name}\" has unsupported field: {item:?}");
                 None
             }
         })
