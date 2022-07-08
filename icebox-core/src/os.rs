@@ -88,6 +88,8 @@ pub struct StackFrame {
 }
 
 pub trait Os {
+    fn vcpus(&self) -> crate::arch::runtime::Vcpus;
+
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
@@ -221,6 +223,38 @@ pub trait Os {
     fn process_callstack(
         &self,
         proc: Process,
+        f: &mut dyn FnMut(&StackFrame) -> IceResult<ControlFlow<()>>,
+    ) -> IceResult<()> {
+        use crate::arch::{Vcpu, Vcpus};
+
+        let vcpus = self.vcpus();
+
+        // Get pointers from the current CPU
+        #[allow(clippy::never_loop)]
+        let (instruction_pointer, stack_pointer, base_pointer) = 'res: loop {
+            for i in 0..vcpus.count() {
+                if self.current_process(i)? == proc {
+                    let vcpu = vcpus.get(i);
+                    break 'res (
+                        vcpu.instruction_pointer(),
+                        vcpu.stack_pointer(),
+                        vcpu.base_pointer(),
+                    );
+                }
+            }
+
+            return Err(crate::IceError::new("Not a running process"));
+        };
+
+        self.process_callstack_with_regs(proc, instruction_pointer, stack_pointer, base_pointer, f)
+    }
+
+    fn process_callstack_with_regs(
+        &self,
+        proc: Process,
+        instruction_pointer: VirtualAddress,
+        stack_pointer: VirtualAddress,
+        base_pointer: Option<VirtualAddress>,
         f: &mut dyn FnMut(&StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()>;
 

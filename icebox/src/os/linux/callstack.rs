@@ -230,33 +230,16 @@ impl<B: ibc::Backend> Linux<B> {
 pub fn iter<B: ibc::Backend>(
     linux: &Linux<B>,
     proc: ibc::Process,
+    instruction_pointer: VirtualAddress,
+    stack_pointer: VirtualAddress,
+    mut base_pointer: Option<VirtualAddress>,
     f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
 ) -> IceResult<()> {
-    use ibc::arch::{Vcpu, Vcpus};
-
     let ctx = Context::new(linux, proc)?;
     let mut cie_cache = HashMap::new();
     let mut unwind_ctx = gimli::UnwindContext::new();
 
-    let vcpus = linux.backend.vcpus();
-    let registers = dwarf_registers(vcpus.arch());
-
-    // Get pointers from the current CPU
-    #[allow(clippy::never_loop)]
-    let (instruction_pointer, stack_pointer, mut base_pointer) = 'res: loop {
-        for i in 0..vcpus.count() {
-            if linux.current_process(i)? == proc {
-                let vcpu = vcpus.get(i);
-                break 'res (
-                    vcpu.instruction_pointer(),
-                    vcpu.stack_pointer(),
-                    vcpu.base_pointer(),
-                );
-            }
-        }
-
-        return Err(IceError::new("Not a running process"));
-    };
+    let registers = dwarf_registers(linux.backend.arch());
 
     let get_base_pointer = |bp: Option<VirtualAddress>| {
         bp.ok_or_else(|| IceError::new("missing required register rpb"))

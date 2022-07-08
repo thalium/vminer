@@ -158,7 +158,7 @@ const KERNEL_PDB: &[u8] = b"ntkrnlmp.pdb\0";
 const KERNEL_PDB_STR: &str = "ntkrnlmp.pdb";
 
 pub struct Windows<B> {
-    pub backend: B,
+    backend: B,
     symbols_loader: Box<dyn super::SymbolLoader + Send + Sync>,
     kpgd: PhysicalAddress,
     base_addr: VirtualAddress,
@@ -397,6 +397,11 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
 }
 
 impl<B: ibc::Backend> ibc::Os for Windows<B> {
+    fn vcpus(&self) -> ibc::arch::runtime::Vcpus {
+        use ibc::arch::Vcpus;
+        self.backend.vcpus().into_runtime()
+    }
+
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
@@ -618,12 +623,15 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
             .iterate_list(|module| module.InLoadOrderLinks, |module| f(module.into()))
     }
 
-    fn process_callstack(
+    fn process_callstack_with_regs(
         &self,
         proc: ibc::Process,
+        instruction_pointer: VirtualAddress,
+        stack_pointer: VirtualAddress,
+        base_pointer: Option<VirtualAddress>,
         f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
-        self.iter_process_callstack(proc, f)
+        self.iter_callstack(proc, instruction_pointer, stack_pointer, base_pointer, f)
     }
 
     fn thread_process(&self, thread: ibc::Thread) -> IceResult<ibc::Process> {

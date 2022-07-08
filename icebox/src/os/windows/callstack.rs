@@ -667,42 +667,13 @@ impl<B: Backend> Windows<B> {
         }
     }
 
-    pub fn iter_process_callstack(
+    pub(crate) fn iter_callstack(
         &self,
         proc: ibc::Process,
-        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
-    ) -> IceResult<()> {
-        use ibc::arch::{Vcpu, Vcpus};
-
-        let vcpus = self.backend.vcpus();
-
-        // Get pointers from the current CPU
-        #[allow(clippy::never_loop)]
-        let (instruction_pointer, stack_pointer, base_pointer) = 'res: loop {
-            for i in 0..vcpus.count() {
-                if self.current_process(i)? == proc {
-                    let vcpu = vcpus.get(i);
-                    break 'res (
-                        vcpu.instruction_pointer(),
-                        vcpu.stack_pointer(),
-                        vcpu.base_pointer(),
-                    );
-                }
-            }
-
-            return Err(IceError::new("Not a running process"));
-        };
-
-        self.iter_callstack(proc, f, instruction_pointer, stack_pointer, base_pointer)
-    }
-
-    pub fn iter_callstack(
-        &self,
-        proc: ibc::Process,
-        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
         instruction_pointer: VirtualAddress,
         stack_pointer: VirtualAddress,
         mut base_pointer: Option<VirtualAddress>,
+        f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
         let ctx = Context::new(self, proc)?;
         let mut modules = AllModules::collect(self, proc)?;

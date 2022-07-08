@@ -225,6 +225,11 @@ impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
 }
 
 impl<B: ibc::Backend> ibc::Os for Linux<B> {
+    fn vcpus(&self) -> ibc::arch::runtime::Vcpus {
+        use ibc::arch::Vcpus;
+        self.backend.vcpus().into_runtime()
+    }
+
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
@@ -441,12 +446,22 @@ impl<B: ibc::Backend> ibc::Os for Linux<B> {
         })
     }
 
-    fn process_callstack(
+    fn process_callstack_with_regs(
         &self,
         proc: ibc::Process,
+        instruction_pointer: VirtualAddress,
+        stack_pointer: VirtualAddress,
+        base_pointer: Option<VirtualAddress>,
         f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
-        callstack::iter(self, proc, f)
+        callstack::iter(
+            self,
+            proc,
+            instruction_pointer,
+            stack_pointer,
+            base_pointer,
+            f,
+        )
     }
 
     fn thread_id(&self, thread: ibc::Thread) -> IceResult<u64> {
