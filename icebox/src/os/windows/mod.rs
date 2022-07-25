@@ -265,7 +265,9 @@ where
 }
 
 fn find_kernel_pgd<B: ibc::Backend>(backend: &B) -> IceResult<PhysicalAddress> {
-    backend.find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])
+    backend
+        .find_kernel_pgd(false, &[VirtualAddress(0xfffff78000000000)])
+        .context("could not find kernel PGD")
 }
 
 fn find_kernel<B: ibc::Backend>(
@@ -346,9 +348,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
     fn build(backend: B, builder: super::OsBuilder) -> IceResult<Self> {
         let kpgd = match builder.kpgd {
             Some(kpgd) => kpgd,
-            None => backend
-                .find_kernel_pgd(true, &[])
-                .context("could not find kernel PGD")?,
+            None => find_kernel_pgd(&backend)?,
         };
         log::debug!("Found Windows PGD at 0x{kpgd:x}");
 

@@ -12,6 +12,8 @@ use crate::{
 };
 
 fn try_all_addresses(test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
+    log::debug!("Trying all addresses to guess kernel PGD");
+
     for addr in (0..u32::MAX as u64).step_by(0x1000) {
         let addr = PhysicalAddress(addr);
         if test(addr) {
