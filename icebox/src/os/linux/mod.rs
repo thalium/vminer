@@ -161,6 +161,12 @@ impl<B: ibc::Backend> Linux<B> {
 
         mm.map_non_null(Ok)
     }
+
+    fn vma_offset(&self, vma: ibc::Vma) -> IceResult<u64> {
+        self.pointer_of(vma)
+            .read_field(|vma| vma.vm_pgoff)
+            .map(|offset| offset * 4096)
+    }
 }
 
 fn get_banner_addr<B: ibc::Backend>(
@@ -491,12 +497,6 @@ impl<B: ibc::Backend> ibc::Os for Linux<B> {
     fn vma_flags(&self, vma: ibc::Vma) -> IceResult<ibc::VmaFlags> {
         let flags = self.pointer_of(vma).read_field(|vma| vma.vm_flags)?;
         Ok(ibc::VmaFlags(flags))
-    }
-
-    fn vma_offset(&self, vma: ibc::Vma) -> IceResult<u64> {
-        self.pointer_of(vma)
-            .read_field(|vma| vma.vm_pgoff)
-            .map(|offset| offset * 4096)
     }
 
     fn module_span(

@@ -676,10 +676,6 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
         Err(ibc::IceError::unimplemented())
     }
 
-    fn vma_offset(&self, _vma: ibc::Vma) -> IceResult<u64> {
-        Ok(0)
-    }
-
     fn module_span(
         &self,
         module: ibc::Module,

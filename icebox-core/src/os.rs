@@ -266,7 +266,6 @@ pub trait Os {
     fn vma_start(&self, vma: Vma) -> IceResult<VirtualAddress>;
     fn vma_end(&self, vma: Vma) -> IceResult<VirtualAddress>;
     fn vma_flags(&self, vma: Vma) -> IceResult<VmaFlags>;
-    fn vma_offset(&self, vma: Vma) -> IceResult<u64>;
     fn vma_contains(&self, vma: Vma, addr: VirtualAddress) -> IceResult<bool> {
         Ok(self.vma_start(vma)? <= addr && addr < self.vma_end(vma)?)
     }
