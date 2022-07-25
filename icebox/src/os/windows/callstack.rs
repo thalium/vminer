@@ -509,9 +509,9 @@ fn read_unwind_codes(
     while let Some(uwop) = codes.next() {
         let (op_offset, op) = uwop.context("invalid unwind code")?;
 
-        if offset.is_some() && Some(op_offset as u32) > offset && !matches!(op, UnwindOp::Epilog) {
+        if offset.is_some() && Some(op_offset as u32) > offset {
             log::trace!("Skipped part of function prolog");
-            break;
+            continue;
         }
 
         match op {
