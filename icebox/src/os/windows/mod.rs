@@ -458,7 +458,7 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
     }
 
     fn init_process(&self) -> IceResult<ibc::Process> {
-        Err(ibc::IceError::unimplemented())
+        Err(ibc::IceError::unsupported())
     }
 
     fn for_each_kernel_module(

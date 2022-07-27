@@ -74,18 +74,18 @@ impl Error for object::Error {}
 #[non_exhaustive]
 pub enum MemoryAccessError {
     OutOfBounds,
+    Unsupported,
     #[cfg(feature = "std")]
     Io(std::io::Error),
-    Other(Box<dyn Error + Send + Sync>),
 }
 
 impl fmt::Display for MemoryAccessError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::OutOfBounds => f.write_str("out of bounds memory access"),
+            Self::Unsupported => f.write_str("unsupported operation"),
             #[cfg(feature = "std")]
-            Self::Io(_) => f.write_str("i/o error"),
-            Self::Other(e) => e.fmt(f),
+            Self::Io(err) => err.fmt(f),
         }
     }
 }
@@ -94,7 +94,7 @@ impl Error for MemoryAccessError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             #[cfg(feature = "std")]
-            Self::Io(e) => Some(e),
+            Self::Io(err) => err.source(),
             _ => None,
         }
     }
@@ -117,10 +117,8 @@ impl From<MemoryAccessError> for std::io::Error {
                 std::io::ErrorKind::UnexpectedEof,
                 "out of bounds memory access",
             ),
+            MemoryAccessError::Unsupported => std::io::Error::from(std::io::ErrorKind::Unsupported),
             MemoryAccessError::Io(error) => error,
-            MemoryAccessError::Other(error) => {
-                std::io::Error::new(std::io::ErrorKind::Other, error)
-            }
         }
     }
 }
@@ -174,6 +172,7 @@ enum Repr {
     InvalidPage(u64),
 
     UnsupportedArchitecture,
+    Unsupported,
     Unimplemented,
 
     MissingModule(Box<str>),
@@ -240,6 +239,11 @@ impl IceError {
     }
 
     #[cold]
+    pub fn unsupported() -> Self {
+        Self::from_repr(Repr::Unsupported)
+    }
+
+    #[cold]
     pub fn unimplemented() -> Self {
         Self::from_repr(Repr::Unimplemented)
     }
@@ -255,10 +259,11 @@ impl fmt::Display for Repr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Repr::Memory(_) => f.write_str("failed to access physical memory"),
-            Repr::InvalidPage(_) => f.write_str("failed to translate virtual address"),
+            Repr::InvalidPage(_) => f.write_str("encountered invalid page"),
             Repr::UnsupportedArchitecture => {
                 f.write_str("operation unsupported by the architecture")
             }
+            Repr::Unsupported => f.write_str("unsupported operation"),
             Repr::Unimplemented => f.write_str("unimplemented"),
             Repr::MissingModule(name) => {
                 f.write_fmt(format_args!("missing required module \"{name}\""))
