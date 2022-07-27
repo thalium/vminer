@@ -3,9 +3,8 @@ use crate::{
     TranslationResult, VirtualAddress,
 };
 
-pub trait RawBackend {
+pub trait RawBackend: Memory {
     type Arch: for<'a> Architecture<'a>;
-    type Memory: Memory + ?Sized;
 
     #[inline]
     fn arch(&self) -> Self::Arch {
@@ -15,11 +14,9 @@ pub trait RawBackend {
     }
 
     fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus;
-
-    fn memory(&self) -> &Self::Memory;
 }
 
-pub trait Backend {
+pub trait Backend: Memory {
     type Arch: for<'a> Architecture<'a>;
 
     #[inline]
@@ -30,10 +27,6 @@ pub trait Backend {
     }
 
     fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus;
-
-    fn memory_mappings(&self) -> &[MemoryMap];
-
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
     #[inline]
     fn read_virtual_memory(
@@ -43,7 +36,7 @@ pub trait Backend {
         buf: &mut [u8],
     ) -> TranslationResult<()> {
         let addr = self.virtual_to_physical(mmu_addr, addr)?;
-        self.read_memory(addr, buf)?;
+        self.read_physical(addr, buf)?;
         Ok(())
     }
 
@@ -67,8 +60,7 @@ pub trait Backend {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
     ) -> TranslationResult<PhysicalAddress> {
-        self.arch()
-            .virtual_to_physical(&BackendMemory(self), mmu_addr, addr)
+        self.arch().virtual_to_physical(self, mmu_addr, addr)
     }
 
     #[inline]
@@ -89,7 +81,7 @@ pub trait Backend {
         use arch::Vcpus;
 
         self.vcpus()
-            .find_kernel_pgd(&BackendMemory(self), use_per_cpu, additionnal)
+            .find_kernel_pgd(self, use_per_cpu, additionnal)
             .ok_or_else(|| "could not find kernel page directory".into())
     }
 
@@ -99,8 +91,7 @@ pub trait Backend {
         mmu_addr: PhysicalAddress,
         needle: &[u8],
     ) -> MemoryAccessResult<Option<VirtualAddress>> {
-        self.arch()
-            .find_in_kernel_memory(&BackendMemory(self), mmu_addr, needle)
+        self.arch().find_in_kernel_memory(self, mmu_addr, needle)
     }
 
     #[inline]
@@ -136,16 +127,6 @@ impl<B: RawBackend> Backend for B {
     }
 
     #[inline]
-    fn memory_mappings(&self) -> &[MemoryMap] {
-        self.memory().mappings()
-    }
-
-    #[inline]
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        self.memory().read(addr, buf)
-    }
-
-    #[inline]
     fn find_kernel_pgd(
         &self,
         use_per_cpu: bool,
@@ -154,7 +135,7 @@ impl<B: RawBackend> Backend for B {
         use arch::Vcpus;
 
         self.vcpus()
-            .find_kernel_pgd(self.memory(), use_per_cpu, additionnal)
+            .find_kernel_pgd(self, use_per_cpu, additionnal)
             .ok_or_else(|| "could not find kernel page directory".into())
     }
 
@@ -164,8 +145,7 @@ impl<B: RawBackend> Backend for B {
         mmu_addr: PhysicalAddress,
         needle: &[u8],
     ) -> MemoryAccessResult<Option<VirtualAddress>> {
-        self.arch()
-            .find_in_kernel_memory(self.memory(), mmu_addr, needle)
+        self.arch().find_in_kernel_memory(self, mmu_addr, needle)
     }
 }
 
@@ -180,16 +160,6 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
     #[inline]
     fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus {
         (**self).vcpus()
-    }
-
-    #[inline]
-    fn memory_mappings(&self) -> &[MemoryMap] {
-        (**self).memory_mappings()
-    }
-
-    #[inline]
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        (**self).read_memory(addr, buf)
     }
 
     #[inline]
@@ -238,6 +208,34 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
 #[derive(Debug)]
 pub struct RuntimeBackend<B>(pub B);
 
+impl<B: Backend> Memory for RuntimeBackend<B> {
+    #[inline]
+    fn memory_mappings(&self) -> &[MemoryMap] {
+        self.0.memory_mappings()
+    }
+
+    #[inline]
+    fn is_valid(&self, addr: PhysicalAddress, size: usize) -> bool {
+        self.0.is_valid(addr, size)
+    }
+
+    #[inline]
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        self.0.read_physical(addr, buf)
+    }
+
+    #[inline]
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<u64>> {
+        self.0.search(addr, page_size, finder, buf)
+    }
+}
+
 impl<B: Backend> Backend for RuntimeBackend<B> {
     type Arch = arch::runtime::Architecture;
 
@@ -251,16 +249,6 @@ impl<B: Backend> Backend for RuntimeBackend<B> {
         use arch::Vcpus;
 
         self.0.vcpus().into_runtime()
-    }
-
-    #[inline]
-    fn memory_mappings(&self) -> &[MemoryMap] {
-        self.0.memory_mappings()
-    }
-
-    #[inline]
-    fn read_memory(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        self.0.read_memory(addr, buf)
     }
 
     #[inline]
@@ -332,7 +320,7 @@ impl<B: Backend + ?Sized> Iterator for KernelSearchIterator<'_, '_, B> {
             .backend
             .arch()
             .find_in_kernel_memory_raw(
-                &BackendMemory(self.backend),
+                &self.backend,
                 self.mmu_addr,
                 self.base_search_addr,
                 &self.finder,
@@ -350,19 +338,5 @@ impl<B: Backend + ?Sized> Iterator for KernelSearchIterator<'_, '_, B> {
                 Err(err.into())
             }
         })
-    }
-}
-
-struct BackendMemory<'a, B: Backend + ?Sized>(&'a B);
-
-impl<B: Backend + ?Sized> Memory for BackendMemory<'_, B> {
-    #[inline]
-    fn mappings(&self) -> &[MemoryMap] {
-        self.0.memory_mappings()
-    }
-
-    #[inline]
-    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        self.0.read_memory(addr, buf)
     }
 }

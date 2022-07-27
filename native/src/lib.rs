@@ -108,14 +108,18 @@ impl Drop for X86_64Backend {
 }
 
 impl ibc::Memory for X86_64Backend {
-    fn mappings(&self) -> &[ibc::mem::MemoryMap] {
+    fn memory_mappings(&self) -> &[ibc::mem::MemoryMap] {
         unsafe {
             let MemoryMapping { maps, len } = (self.memory_mapping)(self.data);
             core::slice::from_raw_parts(maps.cast(), len)
         }
     }
 
-    fn read(&self, addr: ibc::PhysicalAddress, buf: &mut [u8]) -> ibc::MemoryAccessResult<()> {
+    fn read_physical(
+        &self,
+        addr: ibc::PhysicalAddress,
+        buf: &mut [u8],
+    ) -> ibc::MemoryAccessResult<()> {
         unsafe {
             let size = buf.len();
             let res = (self.read_memory)(self.data, addr.into(), buf.as_mut_ptr(), size);
@@ -133,15 +137,10 @@ impl ibc::Memory for X86_64Backend {
 
 impl ibc::RawBackend for X86_64Backend {
     type Arch = ibc::arch::X86_64;
-    type Memory = Self;
 
     fn vcpus(&self) -> <Self::Arch as ibc::Architecture>::Vcpus {
         let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
         bytemuck::cast_slice(vcpus)
-    }
-
-    fn memory(&self) -> &Self::Memory {
-        self
     }
 }
 

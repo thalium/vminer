@@ -128,7 +128,7 @@ impl<Mem: ibc::Memory> DumbDump<Mem> {
     pub fn write<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
         let mut out = io::BufWriter::new(fs::File::create(path)?);
 
-        let mappings = self.mem.mappings();
+        let mappings = self.mem.memory_mappings();
 
         let mut header = Header {
             magic: MAGIC,
@@ -192,7 +192,7 @@ impl DumbDump<ibc::mem::RawMemory<Vec<u8>>> {
         let mut offset = 0;
         for mapping in &mappings {
             let next_offset = offset + (mapping.end - mapping.start) as usize;
-            backend.read_memory(mapping.start, &mut mem[offset..next_offset])?;
+            backend.read_physical(mapping.start, &mut mem[offset..next_offset])?;
             offset = next_offset;
         }
 
@@ -209,9 +209,36 @@ impl DumbDump<ibc::mem::RawMemory<Vec<u8>>> {
     }
 }
 
+impl<Mem: ibc::Memory> ibc::Memory for DumbDump<Mem> {
+    #[inline]
+    fn memory_mappings(&self) -> &[ibc::mem::MemoryMap] {
+        self.mem.memory_mappings()
+    }
+
+    #[inline]
+    fn is_valid(&self, addr: PhysicalAddress, size: usize) -> bool {
+        self.mem.is_valid(addr, size)
+    }
+
+    #[inline]
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> ibc::MemoryAccessResult<()> {
+        self.mem.read_physical(addr, buf)
+    }
+
+    #[inline]
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> ibc::MemoryAccessResult<Option<u64>> {
+        self.mem.search(addr, page_size, finder, buf)
+    }
+}
+
 impl<Mem: ibc::Memory> ibc::RawBackend for DumbDump<Mem> {
     type Arch = arch::RuntimeArchitecture;
-    type Memory = ibc::mem::MemRemap<Mem>;
 
     #[inline]
     fn vcpus(&self) -> arch::runtime::Vcpus {
@@ -219,10 +246,5 @@ impl<Mem: ibc::Memory> ibc::RawBackend for DumbDump<Mem> {
             Vcpus::X86_64(vcpus) => arch::runtime::Vcpus::X86_64(vcpus),
             Vcpus::Aarch64(vcpus) => arch::runtime::Vcpus::Aarch64(vcpus),
         }
-    }
-
-    #[inline]
-    fn memory(&self) -> &Self::Memory {
-        &self.mem
     }
 }

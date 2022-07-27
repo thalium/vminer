@@ -280,7 +280,7 @@ fn get_regs(pid: libc::pid_t) -> IceResult<Vec<arch::Vcpu>> {
 }
 
 pub struct Kvm {
-    mem: Memory,
+    mem: ibc::mem::MemRemap<ibc::mem::File>,
     vcpus: Vec<arch::Vcpu>,
 }
 
@@ -336,19 +336,57 @@ impl Kvm {
     }
 
     pub fn connect(pid: libc::pid_t) -> IceResult<Kvm> {
-        let mem = Self::find_memory(pid)?;
-        let vcpus = get_regs(pid)?;
-        let mem = Memory::new(mem);
-
-        Ok(Kvm { mem, vcpus })
+        Self::create(pid, |size| {
+            (
+                vec![ibc::mem::MemoryMap {
+                    start: ibc::PhysicalAddress(0),
+                    end: ibc::PhysicalAddress(size),
+                }],
+                vec![ibc::PhysicalAddress(0)],
+            )
+        })
     }
 
     pub fn with_default_qemu_mappings(pid: libc::pid_t) -> IceResult<Kvm> {
-        let mem = Self::find_memory(pid)?;
-        let vcpus = get_regs(pid)?;
-        let mem = Memory::with_default_qemu_mappings(mem);
+        let default_qemu_mappings = |size| {
+            if cfg!(target_arch = "x86_64") {
+                if size <= 3 << 30 {
+                    (
+                        vec![ibc::mem::MemoryMap {
+                            start: ibc::PhysicalAddress(0),
+                            end: ibc::PhysicalAddress(size),
+                        }],
+                        vec![ibc::PhysicalAddress(0)],
+                    )
+                } else {
+                    (
+                        vec![
+                            ibc::mem::MemoryMap {
+                                start: ibc::PhysicalAddress(0),
+                                end: ibc::PhysicalAddress(3 << 30),
+                            },
+                            ibc::mem::MemoryMap {
+                                start: ibc::PhysicalAddress(4 << 30),
+                                end: ibc::PhysicalAddress(size + (1 << 30)),
+                            },
+                        ],
+                        vec![ibc::PhysicalAddress(0), ibc::PhysicalAddress(3 << 30)],
+                    )
+                }
+            } else if cfg!(target_arch = "aarch64") {
+                (
+                    vec![ibc::mem::MemoryMap {
+                        start: ibc::PhysicalAddress(1 << 30),
+                        end: ibc::PhysicalAddress(size + (1 << 30)),
+                    }],
+                    vec![ibc::PhysicalAddress(0)],
+                )
+            } else {
+                unreachable!()
+            }
+        };
 
-        Ok(Kvm { mem, vcpus })
+        Self::create(pid, default_qemu_mappings)
     }
 
     pub fn with_memory_mappings(
@@ -356,100 +394,43 @@ impl Kvm {
         mappings: Vec<ibc::mem::MemoryMap>,
         remap_at: Vec<ibc::PhysicalAddress>,
     ) -> IceResult<Kvm> {
+        Self::create(pid, |_| (mappings, remap_at))
+    }
+
+    fn create<F>(pid: libc::pid_t, make_mappings: F) -> IceResult<Kvm>
+    where
+        F: FnOnce(u64) -> (Vec<ibc::mem::MemoryMap>, Vec<ibc::PhysicalAddress>),
+    {
         let mem = Self::find_memory(pid)?;
         let vcpus = get_regs(pid)?;
-        let mem = Memory::with_mappings(mem, mappings, remap_at);
+        let (mappings, remap_at) = make_mappings(mem.size());
+        let mem = ibc::mem::MemRemap::new(mem, mappings, remap_at);
 
         Ok(Kvm { mem, vcpus })
     }
 }
 
-pub struct Memory(ibc::mem::MemRemap<ibc::mem::File>);
-
-impl Memory {
+impl ibc::Memory for Kvm {
     #[inline]
-    fn new(file: ibc::mem::File) -> Self {
-        let mappings = vec![ibc::mem::MemoryMap {
-            start: ibc::PhysicalAddress(0),
-            end: ibc::PhysicalAddress(file.size()),
-        }];
-        Self::with_mappings(file, mappings, vec![ibc::PhysicalAddress(0)])
+    fn memory_mappings(&self) -> &[ibc::mem::MemoryMap] {
+        self.mem.memory_mappings()
     }
 
     #[inline]
-    fn with_default_qemu_mappings(file: ibc::mem::File) -> Self {
-        let size = file.size();
-
-        let (mappings, remap_at) = if cfg!(target_arch = "x86_64") {
-            if size <= 3 << 30 {
-                (
-                    vec![ibc::mem::MemoryMap {
-                        start: ibc::PhysicalAddress(0),
-                        end: ibc::PhysicalAddress(size),
-                    }],
-                    vec![ibc::PhysicalAddress(0)],
-                )
-            } else {
-                (
-                    vec![
-                        ibc::mem::MemoryMap {
-                            start: ibc::PhysicalAddress(0),
-                            end: ibc::PhysicalAddress(3 << 30),
-                        },
-                        ibc::mem::MemoryMap {
-                            start: ibc::PhysicalAddress(4 << 30),
-                            end: ibc::PhysicalAddress(size + (1 << 30)),
-                        },
-                    ],
-                    vec![ibc::PhysicalAddress(0), ibc::PhysicalAddress(3 << 30)],
-                )
-            }
-        } else if cfg!(target_arch = "aarch64") {
-            (
-                vec![ibc::mem::MemoryMap {
-                    start: ibc::PhysicalAddress(1 << 30),
-                    end: ibc::PhysicalAddress(size + (1 << 30)),
-                }],
-                vec![ibc::PhysicalAddress(0)],
-            )
-        } else {
-            unreachable!()
-        };
-
-        Self::with_mappings(file, mappings, remap_at)
-    }
-
-    #[inline]
-    fn with_mappings(
-        file: ibc::mem::File,
-        mappings: Vec<ibc::mem::MemoryMap>,
-        remap_at: Vec<ibc::PhysicalAddress>,
-    ) -> Self {
-        Memory(ibc::mem::MemRemap::new(file, mappings, remap_at))
-    }
-}
-
-impl ibc::Memory for Memory {
-    fn mappings(&self) -> &[ibc::mem::MemoryMap] {
-        self.0.mappings()
-    }
-
-    fn read(&self, addr: ibc::PhysicalAddress, buf: &mut [u8]) -> ibc::MemoryAccessResult<()> {
-        self.0.read(addr, buf)
+    fn read_physical(
+        &self,
+        addr: ibc::PhysicalAddress,
+        buf: &mut [u8],
+    ) -> ibc::MemoryAccessResult<()> {
+        self.mem.read_physical(addr, buf)
     }
 }
 
 impl ibc::RawBackend for Kvm {
     type Arch = arch::Arch;
-    type Memory = Memory;
 
     #[inline]
     fn vcpus(&self) -> &[arch::Vcpu] {
         &self.vcpus
-    }
-
-    #[inline]
-    fn memory(&self) -> &Self::Memory {
-        &self.mem
     }
 }

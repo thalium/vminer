@@ -14,11 +14,11 @@ pub struct MemoryMap {
 ///
 /// This trait defines additional optional methods for specialisation
 pub trait Memory {
-    fn mappings(&self) -> &[MemoryMap];
+    fn memory_mappings(&self) -> &[MemoryMap];
 
     #[inline]
     fn is_valid(&self, addr: PhysicalAddress, size: usize) -> bool {
-        for mapping in self.mappings() {
+        for mapping in self.memory_mappings() {
             if mapping.start <= addr && addr + (size as u64) <= mapping.end {
                 return true;
             }
@@ -27,7 +27,7 @@ pub trait Memory {
         false
     }
 
-    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()>;
 
     /// Search in a memory page with a finder.
     ///
@@ -45,7 +45,7 @@ pub trait Memory {
         match buf.get_mut(..page_size as usize) {
             // Nice case, all the page fits in the buffer
             Some(buf) => {
-                self.read(addr, buf)?;
+                self.read_physical(addr, buf)?;
                 Ok(finder.find(buf).map(|i| i as u64))
             }
             // This is a bit more complicated, as we need several reads.
@@ -55,7 +55,7 @@ pub trait Memory {
                 for offset in (0..page_size).step_by(buf.len() - finder.needle().len()) {
                     let addr = addr + offset;
                     let size = core::cmp::min(buf.len(), (page_size - offset) as usize);
-                    self.read(addr, &mut buf[..size])?;
+                    self.read_physical(addr, &mut buf[..size])?;
                     if let Some(index) = finder.find(&buf[..size]) {
                         return Ok(Some(index as u64));
                     }
@@ -70,14 +70,48 @@ pub trait Memory {
     fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
         let mut buffer = [0; 1 << 16];
 
-        for mapping in self.mappings() {
+        for mapping in self.memory_mappings() {
             for addr in (mapping.start.0..mapping.end.0).step_by(buffer.len() as _) {
-                self.read(PhysicalAddress(addr), &mut buffer)?;
+                self.read_physical(PhysicalAddress(addr), &mut buffer)?;
                 writer.write_all(&buffer)?;
             }
         }
 
         Ok(())
+    }
+}
+
+impl<M: Memory + ?Sized> Memory for alloc::sync::Arc<M> {
+    #[inline]
+    fn memory_mappings(&self) -> &[MemoryMap] {
+        (**self).memory_mappings()
+    }
+
+    #[inline]
+    fn is_valid(&self, addr: PhysicalAddress, size: usize) -> bool {
+        (**self).is_valid(addr, size)
+    }
+
+    #[inline]
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        (**self).read_physical(addr, buf)
+    }
+
+    #[inline]
+    fn search(
+        &self,
+        addr: PhysicalAddress,
+        page_size: u64,
+        finder: &memchr::memmem::Finder,
+        buf: &mut [u8],
+    ) -> MemoryAccessResult<Option<u64>> {
+        (**self).search(addr, page_size, finder, buf)
+    }
+
+    #[cfg(feature = "std")]
+    #[inline]
+    fn dump(&self, writer: &mut dyn io::Write) -> io::Result<()> {
+        (**self).dump(writer)
     }
 }
 
@@ -101,12 +135,12 @@ impl<T: AsRef<[u8]>> RawMemory<T> {
 
 impl<T: AsRef<[u8]> + ?Sized> Memory for RawMemory<T> {
     #[inline]
-    fn mappings(&self) -> &[MemoryMap] {
+    fn memory_mappings(&self) -> &[MemoryMap] {
         core::slice::from_ref(&self.mapping)
     }
 
     #[inline]
-    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         (|| {
             let offset = addr.0.try_into().ok()?;
             let this = self.bytes.as_ref().get(offset..)?;
@@ -158,11 +192,11 @@ impl<M: Memory> MemRemap<M> {
 }
 
 impl<M: Memory + ?Sized> Memory for MemRemap<M> {
-    fn mappings(&self) -> &[MemoryMap] {
+    fn memory_mappings(&self) -> &[MemoryMap] {
         &self.mappings
     }
 
-    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         assert!(self.mappings.len() == self.remap_at.len());
 
         let mut i = 0;
@@ -179,19 +213,19 @@ impl<M: Memory + ?Sized> Memory for MemRemap<M> {
             i += 1;
         };
 
-        self.inner.read(addr, buf)
+        self.inner.read_physical(addr, buf)
     }
 }
 
 impl<M: Memory + ?Sized> Memory for &'_ M {
     #[inline]
-    fn mappings(&self) -> &[MemoryMap] {
-        (**self).mappings()
+    fn memory_mappings(&self) -> &[MemoryMap] {
+        (**self).memory_mappings()
     }
 
     #[inline]
-    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        (**self).read(addr, buf)
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        (**self).read_physical(addr, buf)
     }
 
     #[inline]
@@ -214,13 +248,13 @@ impl<M: Memory + ?Sized> Memory for &'_ M {
 
 impl<M: Memory + ?Sized> Memory for alloc::boxed::Box<M> {
     #[inline]
-    fn mappings(&self) -> &[MemoryMap] {
-        (**self).mappings()
+    fn memory_mappings(&self) -> &[MemoryMap] {
+        (**self).memory_mappings()
     }
 
     #[inline]
-    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
-        (**self).read(addr, buf)
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+        (**self).read_physical(addr, buf)
     }
 
     #[inline]
@@ -280,12 +314,12 @@ impl File {
 #[cfg(feature = "std")]
 impl Memory for File {
     #[inline]
-    fn mappings(&self) -> &[MemoryMap] {
+    fn memory_mappings(&self) -> &[MemoryMap] {
         core::slice::from_ref(&self.mapping)
     }
 
     #[inline]
-    fn read(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
+    fn read_physical(&self, addr: PhysicalAddress, buf: &mut [u8]) -> MemoryAccessResult<()> {
         use sync_file::ReadAt;
 
         if !self.is_valid(addr, buf.len()) {

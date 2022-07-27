@@ -176,7 +176,7 @@ fn virtual_to_physical<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
 
         // Each entry is 64 bits (8 bytes) large. This should probably be
         // changed to support 32 bits.
-        memory.read(
+        memory.read_physical(
             table_addr + 8 * index,
             bytemuck::bytes_of_mut(&mut mmu_entry),
         )?;
@@ -213,7 +213,7 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
     };
 
     let mut table = [MmuEntry(0u64); 512];
-    match memory.read(table_addr, bytemuck::bytes_of_mut(&mut table)) {
+    match memory.read_physical(table_addr, bytemuck::bytes_of_mut(&mut table)) {
         Err(crate::MemoryAccessError::OutOfBounds) => return Ok(None),
         Err(err) => return Err(err),
         _ => (),

@@ -131,7 +131,7 @@ impl Backend {
         len: usize,
     ) -> PyResult<&'py PyBytes> {
         PyBytes::new_with(py, len, |buf| {
-            self.0.read_memory(addr.into(), buf).convert_err()
+            self.0.read_physical(addr.into(), buf).convert_err()
         })
     }
 

@@ -106,7 +106,7 @@ impl<B: ibc::Backend> super::Windows<B> {
 
         if pte.is_valid() {
             let addr_base = PhysicalAddress(pte.0 & ibc::mask_range(12, 48));
-            self.backend.read_memory(addr_base + offset, buf)?;
+            self.backend.read_physical(addr_base + offset, buf)?;
             return Ok(());
         }
 
@@ -115,7 +115,7 @@ impl<B: ibc::Backend> super::Windows<B> {
         match pte.classify() {
             MmPteKind::Transition => {
                 self.backend
-                    .read_memory(pte.transition_page() + offset, buf)?;
+                    .read_physical(pte.transition_page() + offset, buf)?;
                 Ok(())
             }
             MmPteKind::Zero => {
@@ -150,7 +150,7 @@ impl<B: ibc::Backend> super::Windows<B> {
             }
             MmPteKind::Transition => {
                 self.backend
-                    .read_memory(pte.transition_page() + offset, buf)?;
+                    .read_physical(pte.transition_page() + offset, buf)?;
                 Ok(())
             }
             MmPteKind::Vad => match proc {
