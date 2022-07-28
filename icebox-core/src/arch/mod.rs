@@ -8,7 +8,8 @@ pub mod x86_64;
 pub use x86_64::X86_64;
 
 use crate::{
-    addr::MmuEntry, mask, MemoryAccessResult, PhysicalAddress, TranslationResult, VirtualAddress,
+    addr::MmuEntry, mask, MemoryAccessResult, PhysicalAddress, TranslationResult, VcpuError,
+    VcpuResult, VirtualAddress,
 };
 
 fn try_all_addresses(test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalAddress> {
@@ -25,84 +26,279 @@ fn try_all_addresses(test: impl Fn(PhysicalAddress) -> bool) -> Option<PhysicalA
 }
 
 fn make_address_test<'a>(
-    vcpus: &'a (impl Vcpus<'a> + Copy),
+    vcpus: &'a (impl HasVcpus + ?Sized),
     memory: &'a (impl crate::Memory + ?Sized),
     use_per_cpu: bool,
     additionnal: &'a [&[VirtualAddress]],
 ) -> impl Fn(PhysicalAddress) -> bool + 'a {
-    move |addr| {
-        let test_one = |test_addr| match vcpus.arch().virtual_to_physical(memory, addr, test_addr) {
-            Ok(addr) => memory.is_valid(addr, 1),
-            _ => false,
-        };
+    let mut addresses = additionnal.concat();
 
-        let valid = additionnal.iter().copied().flatten().copied().all(test_one);
+    if use_per_cpu {
+        addresses.reserve(vcpus.vcpus_count());
 
-        if use_per_cpu {
-            valid
-                && vcpus
-                    .into_iter()
-                    .filter_map(|vcpu| vcpu.kernel_per_cpu())
-                    .all(test_one)
-        } else {
-            valid
+        for vcpu in vcpus.iter_vcpus() {
+            match vcpus.kernel_per_cpu(vcpu) {
+                Ok(Some(addr)) => addresses.push(addr),
+                Ok(None) => (),
+                Err(err) => log::warn!("Failed to get kernel per cpu address: {err}"),
+            }
         }
     }
+
+    move |addr| {
+        addresses.iter().all(|&test_addr| {
+            match vcpus.arch().virtual_to_physical(memory, addr, test_addr) {
+                Ok(addr) => memory.is_valid(addr, 1),
+                _ => false,
+            }
+        })
+    }
 }
 
-/// Architecture-independant operations for vCPUs lists
-pub trait Vcpus<'a>: IntoIterator<Item = <Self::Arch as Architecture<'a>>::Vcpu> {
-    type Arch: Architecture<'a>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VcpuId(pub usize);
 
-    fn arch(&self) -> Self::Arch;
+#[derive(Debug, Clone)]
+pub struct VcpuIterator(core::ops::Range<usize>);
 
-    fn count(&self) -> usize;
+impl Iterator for VcpuIterator {
+    type Item = VcpuId;
 
-    fn get(&self, id: usize) -> <Self::Arch as Architecture<'a>>::Vcpu;
-
-    fn kernel_per_cpu(&self, cpuid: usize) -> Option<VirtualAddress> {
-        self.get(cpuid).kernel_per_cpu()
+    #[inline]
+    fn next(&mut self) -> Option<VcpuId> {
+        self.0.next().map(VcpuId)
     }
 
-    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
-        &self,
-        memory: &M,
-        use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
-    ) -> Option<PhysicalAddress>;
-
-    fn into_runtime(self) -> runtime::Vcpus<'a>;
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
 }
 
-/// Architecture-independant operations for vCPUs
-pub trait Vcpu<'a> {
-    type Arch: Architecture<'a>;
+impl ExactSizeIterator for VcpuIterator {
+    #[inline]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+pub trait HasVcpus {
+    type Arch: for<'a> Architecture<'a>;
 
     fn arch(&self) -> Self::Arch;
 
-    fn get_regs(&self) -> <Self::Arch as Architecture<'a>>::Registers;
+    fn vcpus_count(&self) -> usize;
 
-    fn instruction_pointer(&self) -> VirtualAddress;
+    #[inline]
+    fn iter_vcpus(&self) -> VcpuIterator {
+        VcpuIterator(0..self.vcpus_count())
+    }
 
-    fn stack_pointer(&self) -> VirtualAddress;
+    fn registers(&self, vcpu: VcpuId) -> VcpuResult<<Self::Arch as Architecture>::Registers>;
 
-    fn base_pointer(&self) -> Option<VirtualAddress>;
+    fn special_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::SpecialRegisters>;
 
-    fn pgd(&self) -> PhysicalAddress;
+    fn other_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::OtherRegisters>;
 
-    fn kernel_per_cpu(&self) -> Option<VirtualAddress>;
+    #[inline]
+    fn instruction_pointer(&self, vcpu: VcpuId) -> VcpuResult<VirtualAddress> {
+        self.arch().instruction_pointer(self, vcpu)
+    }
 
-    fn into_runtime(self) -> runtime::Vcpu<'a>;
+    #[inline]
+    fn stack_pointer(&self, vcpu: VcpuId) -> VcpuResult<VirtualAddress> {
+        self.arch().stack_pointer(self, vcpu)
+    }
+
+    #[inline]
+    fn base_pointer(&self, vcpu: VcpuId) -> VcpuResult<Option<VirtualAddress>> {
+        self.arch().base_pointer(self, vcpu)
+    }
+
+    #[inline]
+    fn pgd(&self, vcpu: VcpuId) -> VcpuResult<PhysicalAddress> {
+        self.arch().pgd(self, vcpu)
+    }
+
+    #[inline]
+    fn kernel_per_cpu(&self, vcpu: VcpuId) -> VcpuResult<Option<VirtualAddress>> {
+        self.arch().kernel_per_cpu(self, vcpu)
+    }
+}
+
+#[derive(Debug)]
+pub struct AssumeX86_64<'a, Vcpus: ?Sized>(pub &'a Vcpus);
+
+impl<Vcpus: HasVcpus + ?Sized> HasVcpus for AssumeX86_64<'_, Vcpus> {
+    type Arch = X86_64;
+
+    #[inline]
+    fn arch(&self) -> Self::Arch {
+        X86_64
+    }
+
+    #[inline]
+    fn vcpus_count(&self) -> usize {
+        self.0.vcpus_count()
+    }
+
+    #[inline]
+    fn registers(&self, vcpu: VcpuId) -> VcpuResult<<Self::Arch as Architecture>::Registers> {
+        match self.0.registers(vcpu)?.into() {
+            runtime::Registers::X86_64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    #[inline]
+    fn special_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::SpecialRegisters> {
+        match self.0.special_registers(vcpu)?.into() {
+            runtime::SpecialRegisters::X86_64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    #[inline]
+    fn other_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::OtherRegisters> {
+        match self.0.other_registers(vcpu)?.into() {
+            runtime::OtherRegisters::X86_64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    // We don't forward other methods here to check the architecture
+}
+
+#[derive(Debug)]
+pub struct AssumeAarch64<'a, Vcpus: ?Sized>(pub &'a Vcpus);
+
+impl<Vcpus: HasVcpus + ?Sized> HasVcpus for AssumeAarch64<'_, Vcpus> {
+    type Arch = Aarch64;
+
+    #[inline]
+    fn arch(&self) -> Self::Arch {
+        Aarch64
+    }
+
+    #[inline]
+    fn vcpus_count(&self) -> usize {
+        self.0.vcpus_count()
+    }
+
+    #[inline]
+    fn registers(&self, vcpu: VcpuId) -> VcpuResult<<Self::Arch as Architecture>::Registers> {
+        match self.0.registers(vcpu)?.into() {
+            runtime::Registers::Aarch64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    #[inline]
+    fn special_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::SpecialRegisters> {
+        match self.0.special_registers(vcpu)?.into() {
+            runtime::SpecialRegisters::Aarch64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    #[inline]
+    fn other_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::OtherRegisters> {
+        match self.0.other_registers(vcpu)?.into() {
+            runtime::OtherRegisters::Aarch64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    // We don't forward other methods here to check the architecture
+}
+
+impl<V: HasVcpus + ?Sized> HasVcpus for alloc::sync::Arc<V> {
+    type Arch = V::Arch;
+
+    #[inline]
+    fn arch(&self) -> Self::Arch {
+        (**self).arch()
+    }
+
+    #[inline]
+    fn vcpus_count(&self) -> usize {
+        (**self).vcpus_count()
+    }
+
+    #[inline]
+    fn registers(&self, vcpu: VcpuId) -> VcpuResult<<Self::Arch as Architecture>::Registers> {
+        (**self).registers(vcpu)
+    }
+
+    #[inline]
+    fn special_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::SpecialRegisters> {
+        (**self).special_registers(vcpu)
+    }
+
+    #[inline]
+    fn other_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::OtherRegisters> {
+        (**self).other_registers(vcpu)
+    }
+
+    #[inline]
+    fn instruction_pointer(&self, vcpu: VcpuId) -> VcpuResult<VirtualAddress> {
+        (**self).instruction_pointer(vcpu)
+    }
+
+    #[inline]
+    fn stack_pointer(&self, vcpu: VcpuId) -> VcpuResult<VirtualAddress> {
+        (**self).stack_pointer(vcpu)
+    }
+
+    #[inline]
+    fn base_pointer(&self, vcpu: VcpuId) -> VcpuResult<Option<VirtualAddress>> {
+        (**self).base_pointer(vcpu)
+    }
+
+    #[inline]
+    fn pgd(&self, vcpu: VcpuId) -> VcpuResult<PhysicalAddress> {
+        (**self).pgd(vcpu)
+    }
+
+    #[inline]
+    fn kernel_per_cpu(&self, vcpu: VcpuId) -> VcpuResult<Option<VirtualAddress>> {
+        (**self).kernel_per_cpu(vcpu)
+    }
 }
 
 /// A hardware architecture
 ///
 /// This trait has a lifetime, which will be removed when GAT are stable
 pub trait Architecture<'a> {
-    type Vcpu: Vcpu<'a, Arch = Self>;
-    type Vcpus: Vcpus<'a, Arch = Self>;
-    type Registers;
     type Endian: crate::Endianness;
+
+    type Registers: Into<runtime::Registers>;
+    type SpecialRegisters: Into<runtime::SpecialRegisters>;
+    type OtherRegisters: Into<runtime::OtherRegisters>;
 
     fn into_runtime(self) -> runtime::Architecture;
 
@@ -114,6 +310,14 @@ pub trait Architecture<'a> {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
     ) -> TranslationResult<PhysicalAddress>;
+
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        vcpus: &(impl HasVcpus<Arch = Self> + ?Sized),
+        use_per_cpu: bool,
+        additionnal: &[VirtualAddress],
+    ) -> crate::IceResult<Option<PhysicalAddress>>;
 
     fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(
         &self,
@@ -132,6 +336,36 @@ pub trait Architecture<'a> {
     ) -> MemoryAccessResult<Option<VirtualAddress>>;
 
     fn kernel_base(&self) -> VirtualAddress;
+
+    fn instruction_pointer<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: VcpuId,
+    ) -> VcpuResult<VirtualAddress>;
+
+    fn stack_pointer<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: VcpuId,
+    ) -> VcpuResult<VirtualAddress>;
+
+    fn base_pointer<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: VcpuId,
+    ) -> VcpuResult<Option<VirtualAddress>>;
+
+    fn pgd<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: VcpuId,
+    ) -> VcpuResult<PhysicalAddress>;
+
+    fn kernel_per_cpu<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: VcpuId,
+    ) -> VcpuResult<Option<VirtualAddress>>;
 }
 
 /// The description of how a MMU works

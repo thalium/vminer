@@ -135,14 +135,47 @@ impl ibc::Memory for X86_64Backend {
     }
 }
 
-impl ibc::RawBackend for X86_64Backend {
+impl ibc::HasVcpus for X86_64Backend {
     type Arch = ibc::arch::X86_64;
 
-    fn vcpus(&self) -> <Self::Arch as ibc::Architecture>::Vcpus {
+    fn arch(&self) -> Self::Arch {
+        ibc::arch::X86_64
+    }
+
+    fn vcpus_count(&self) -> usize {
         let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
-        bytemuck::cast_slice(vcpus)
+        vcpus.len()
+    }
+
+    fn registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::Registers> {
+        let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
+        let vcpu = vcpus.get(vcpu.0).ok_or(ibc::VcpuError::InvalidId)?;
+        Ok(bytemuck::cast(vcpu.registers))
+    }
+
+    fn special_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::SpecialRegisters> {
+        let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
+        let vcpu = vcpus.get(vcpu.0).ok_or(ibc::VcpuError::InvalidId)?;
+        Ok(bytemuck::cast(vcpu.special_registers))
+    }
+
+    fn other_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::OtherRegisters> {
+        let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
+        let vcpu = vcpus.get(vcpu.0).ok_or(ibc::VcpuError::InvalidId)?;
+        Ok(bytemuck::cast(vcpu.other_registers))
     }
 }
+
+impl ibc::RawBackend for X86_64Backend {}
 
 #[no_mangle]
 pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {

@@ -87,9 +87,7 @@ pub struct StackFrame {
     pub module: Option<Module>,
 }
 
-pub trait Os {
-    fn vcpus(&self) -> crate::arch::runtime::Vcpus;
-
+pub trait Os: crate::HasVcpus {
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
@@ -136,9 +134,9 @@ pub trait Os {
     ) -> IceResult<()>;
 
     fn init_process(&self) -> IceResult<Process>;
-    fn current_thread(&self, cpuid: usize) -> IceResult<Thread>;
-    fn current_process(&self, cpuid: usize) -> IceResult<Process> {
-        let thread = self.current_thread(cpuid)?;
+    fn current_thread(&self, vcpu: crate::VcpuId) -> IceResult<Thread>;
+    fn current_process(&self, vcpu: crate::VcpuId) -> IceResult<Process> {
+        let thread = self.current_thread(vcpu)?;
         self.thread_process(thread)
     }
     fn find_process_by_name(&self, name: &str) -> IceResult<Option<Process>> {
@@ -225,20 +223,15 @@ pub trait Os {
         proc: Process,
         f: &mut dyn FnMut(&StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
-        use crate::arch::{Vcpu, Vcpus};
-
-        let vcpus = self.vcpus();
-
         // Get pointers from the current CPU
         #[allow(clippy::never_loop)]
         let (instruction_pointer, stack_pointer, base_pointer) = 'res: loop {
-            for i in 0..vcpus.count() {
-                if self.current_process(i)? == proc {
-                    let vcpu = vcpus.get(i);
+            for vcpu in self.iter_vcpus() {
+                if self.current_process(vcpu)? == proc {
                     break 'res (
-                        vcpu.instruction_pointer(),
-                        vcpu.stack_pointer(),
-                        vcpu.base_pointer(),
+                        self.instruction_pointer(vcpu)?,
+                        self.stack_pointer(vcpu)?,
+                        self.base_pointer(vcpu)?,
                     );
                 }
             }

@@ -3,31 +3,9 @@ use crate::{
     TranslationResult, VirtualAddress,
 };
 
-pub trait RawBackend: Memory {
-    type Arch: for<'a> Architecture<'a>;
+pub trait RawBackend: Memory + arch::HasVcpus {}
 
-    #[inline]
-    fn arch(&self) -> Self::Arch {
-        use arch::Vcpus;
-
-        self.vcpus().arch()
-    }
-
-    fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus;
-}
-
-pub trait Backend: Memory {
-    type Arch: for<'a> Architecture<'a>;
-
-    #[inline]
-    fn arch(&self) -> Self::Arch {
-        use arch::Vcpus;
-
-        self.vcpus().arch()
-    }
-
-    fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus;
-
+pub trait Backend: Memory + arch::HasVcpus {
     #[inline]
     fn read_virtual_memory(
         &self,
@@ -64,24 +42,13 @@ pub trait Backend: Memory {
     }
 
     #[inline]
-    fn kernel_per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
-        use arch::Vcpus;
-
-        self.vcpus()
-            .kernel_per_cpu(cpuid)
-            .ok_or_else(|| "could not find per_cpu address".into())
-    }
-
-    #[inline]
     fn find_kernel_pgd(
         &self,
         use_per_cpu: bool,
         additionnal: &[VirtualAddress],
     ) -> IceResult<PhysicalAddress> {
-        use arch::Vcpus;
-
-        self.vcpus()
-            .find_kernel_pgd(self, use_per_cpu, additionnal)
+        self.arch()
+            .find_kernel_pgd(self, self, use_per_cpu, additionnal)?
             .ok_or_else(|| "could not find kernel page directory".into())
     }
 
@@ -113,55 +80,9 @@ pub trait Backend: Memory {
     }
 }
 
-impl<B: RawBackend> Backend for B {
-    type Arch = B::Arch;
-
-    #[inline]
-    fn arch(&self) -> Self::Arch {
-        self.arch()
-    }
-
-    #[inline]
-    fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus {
-        self.vcpus()
-    }
-
-    #[inline]
-    fn find_kernel_pgd(
-        &self,
-        use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
-    ) -> IceResult<PhysicalAddress> {
-        use arch::Vcpus;
-
-        self.vcpus()
-            .find_kernel_pgd(self, use_per_cpu, additionnal)
-            .ok_or_else(|| "could not find kernel page directory".into())
-    }
-
-    #[inline]
-    fn find_in_kernel_memory(
-        &self,
-        mmu_addr: PhysicalAddress,
-        needle: &[u8],
-    ) -> MemoryAccessResult<Option<VirtualAddress>> {
-        self.arch().find_in_kernel_memory(self, mmu_addr, needle)
-    }
-}
+impl<B: RawBackend> Backend for B {}
 
 impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
-    type Arch = B::Arch;
-
-    #[inline]
-    fn arch(&self) -> Self::Arch {
-        (**self).arch()
-    }
-
-    #[inline]
-    fn vcpus(&self) -> <Self::Arch as Architecture>::Vcpus {
-        (**self).vcpus()
-    }
-
     #[inline]
     fn read_virtual_memory(
         &self,
@@ -179,11 +100,6 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
         addr: VirtualAddress,
     ) -> TranslationResult<PhysicalAddress> {
         (**self).virtual_to_physical(mmu_addr, addr)
-    }
-
-    #[inline]
-    fn kernel_per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
-        (**self).kernel_per_cpu(cpuid)
     }
 
     #[inline]
@@ -236,21 +152,60 @@ impl<B: Backend> Memory for RuntimeBackend<B> {
     }
 }
 
-impl<B: Backend> Backend for RuntimeBackend<B> {
-    type Arch = arch::runtime::Architecture;
+impl<B: Backend> arch::HasVcpus for RuntimeBackend<B> {
+    type Arch = arch::RuntimeArchitecture;
 
-    #[inline]
     fn arch(&self) -> Self::Arch {
         self.0.arch().into_runtime()
     }
 
-    #[inline]
-    fn vcpus(&self) -> arch::runtime::Vcpus {
-        use arch::Vcpus;
-
-        self.0.vcpus().into_runtime()
+    fn vcpus_count(&self) -> usize {
+        self.0.vcpus_count()
     }
 
+    fn registers(
+        &self,
+        vcpu: arch::VcpuId,
+    ) -> crate::VcpuResult<<Self::Arch as Architecture>::Registers> {
+        self.0.registers(vcpu).map(Into::into)
+    }
+
+    fn special_registers(
+        &self,
+        vcpu: crate::VcpuId,
+    ) -> crate::VcpuResult<<Self::Arch as Architecture>::SpecialRegisters> {
+        self.0.special_registers(vcpu).map(Into::into)
+    }
+
+    fn other_registers(
+        &self,
+        vcpu: crate::VcpuId,
+    ) -> crate::VcpuResult<<Self::Arch as Architecture>::OtherRegisters> {
+        self.0.other_registers(vcpu).map(Into::into)
+    }
+
+    fn instruction_pointer(&self, vcpu: arch::VcpuId) -> crate::VcpuResult<VirtualAddress> {
+        self.0.instruction_pointer(vcpu)
+    }
+
+    fn stack_pointer(&self, vcpu: arch::VcpuId) -> crate::VcpuResult<VirtualAddress> {
+        self.0.stack_pointer(vcpu)
+    }
+
+    fn base_pointer(&self, vcpu: arch::VcpuId) -> crate::VcpuResult<Option<VirtualAddress>> {
+        self.0.base_pointer(vcpu)
+    }
+
+    fn pgd(&self, vcpu: arch::VcpuId) -> crate::VcpuResult<PhysicalAddress> {
+        self.0.pgd(vcpu)
+    }
+
+    fn kernel_per_cpu(&self, vcpu: arch::VcpuId) -> crate::VcpuResult<Option<VirtualAddress>> {
+        self.0.kernel_per_cpu(vcpu)
+    }
+}
+
+impl<B: Backend> Backend for RuntimeBackend<B> {
     #[inline]
     fn read_virtual_memory(
         &self,
@@ -277,11 +232,6 @@ impl<B: Backend> Backend for RuntimeBackend<B> {
         addr: VirtualAddress,
     ) -> TranslationResult<PhysicalAddress> {
         self.0.virtual_to_physical(mmu_addr, addr)
-    }
-
-    #[inline]
-    fn kernel_per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
-        self.0.kernel_per_cpu(cpuid)
     }
 
     #[inline]

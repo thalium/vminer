@@ -310,8 +310,11 @@ impl<B: ibc::Backend> Windows<B> {
     }
 
     #[inline]
-    fn kpcr(&self, cpuid: usize) -> IceResult<Pointer<profile::Kpcr, Self>> {
-        let per_cpu = self.backend.kernel_per_cpu(cpuid)?;
+    fn kpcr(&self, vcpu: ibc::VcpuId) -> IceResult<Pointer<profile::Kpcr, Self>> {
+        let per_cpu = self
+            .backend
+            .kernel_per_cpu(vcpu)?
+            .context("failed to get kernel per cpu")?;
         Ok(Pointer::new(per_cpu, self, KernelSpace))
     }
 
@@ -396,12 +399,60 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
     }
 }
 
-impl<B: ibc::Backend> ibc::Os for Windows<B> {
-    fn vcpus(&self) -> ibc::arch::runtime::Vcpus {
-        use ibc::arch::Vcpus;
-        self.backend.vcpus().into_runtime()
+impl<B: ibc::Backend> ibc::HasVcpus for Windows<B> {
+    type Arch = B::Arch;
+
+    fn arch(&self) -> Self::Arch {
+        self.backend.arch()
     }
 
+    fn vcpus_count(&self) -> usize {
+        self.backend.vcpus_count()
+    }
+
+    fn registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::Registers> {
+        self.backend.registers(vcpu)
+    }
+
+    fn special_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::SpecialRegisters> {
+        self.backend.special_registers(vcpu)
+    }
+
+    fn other_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::OtherRegisters> {
+        self.backend.other_registers(vcpu)
+    }
+
+    fn instruction_pointer(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<VirtualAddress> {
+        self.backend.instruction_pointer(vcpu)
+    }
+
+    fn stack_pointer(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<VirtualAddress> {
+        self.backend.stack_pointer(vcpu)
+    }
+
+    fn base_pointer(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<Option<VirtualAddress>> {
+        self.backend.base_pointer(vcpu)
+    }
+
+    fn pgd(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<PhysicalAddress> {
+        self.backend.pgd(vcpu)
+    }
+
+    fn kernel_per_cpu(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<Option<VirtualAddress>> {
+        self.backend.kernel_per_cpu(vcpu)
+    }
+}
+
+impl<B: ibc::Backend> ibc::Os for Windows<B> {
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
@@ -472,9 +523,9 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
         head.iterate_list(|entry| entry.InLoadOrderLinks, |module| f(module.into()))
     }
 
-    fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
+    fn current_thread(&self, vcpu: ibc::VcpuId) -> IceResult<ibc::Thread> {
         let thread = self
-            .kpcr(cpuid)?
+            .kpcr(vcpu)?
             .field(|kpcr| kpcr.Prcb)?
             .read_pointer_field(|kprcb| kprcb.CurrentThread)?;
         Ok(thread.into())

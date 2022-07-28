@@ -7,7 +7,7 @@ mod addr;
 pub use addr::{PhysicalAddress, VirtualAddress};
 
 pub mod arch;
-pub use arch::Architecture;
+pub use arch::{Architecture, HasVcpus, VcpuId};
 
 mod backend;
 pub use backend::{Backend, RawBackend, RuntimeBackend};
@@ -18,7 +18,7 @@ pub use endian::{BigEndian, Endianness, LittleEndian, RuntimeEndian};
 mod error;
 pub use error::{
     Error, IceError, IceResult, MemoryAccessError, MemoryAccessResult, ResultExt, TranslationError,
-    TranslationResult, TranslationResultExt,
+    TranslationResult, TranslationResultExt, VcpuError, VcpuResult,
 };
 
 pub mod mem;

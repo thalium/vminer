@@ -142,9 +142,9 @@ impl<B: ibc::Backend> Linux<B> {
         ptr.to_pointer(self, KernelSpace)
     }
 
-    pub fn per_cpu(&self, cpuid: usize) -> IceResult<VirtualAddress> {
+    pub fn per_cpu(&self, vcpu: ibc::VcpuId) -> IceResult<VirtualAddress> {
         let per_cpu_offset = self.profile.fast_syms.per_cpu_offset + self.kaslr;
-        self.read_kernel_value(per_cpu_offset + 8 * cpuid as u64)
+        self.read_kernel_value(per_cpu_offset + 8 * vcpu.0 as u64)
     }
 
     fn process_mm(
@@ -230,12 +230,60 @@ impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
     }
 }
 
-impl<B: ibc::Backend> ibc::Os for Linux<B> {
-    fn vcpus(&self) -> ibc::arch::runtime::Vcpus {
-        use ibc::arch::Vcpus;
-        self.backend.vcpus().into_runtime()
+impl<B: ibc::Backend> ibc::HasVcpus for Linux<B> {
+    type Arch = B::Arch;
+
+    fn arch(&self) -> Self::Arch {
+        self.backend.arch()
     }
 
+    fn vcpus_count(&self) -> usize {
+        self.backend.vcpus_count()
+    }
+
+    fn registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::Registers> {
+        self.backend.registers(vcpu)
+    }
+
+    fn special_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::SpecialRegisters> {
+        self.backend.special_registers(vcpu)
+    }
+
+    fn other_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::OtherRegisters> {
+        self.backend.other_registers(vcpu)
+    }
+
+    fn instruction_pointer(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<VirtualAddress> {
+        self.backend.instruction_pointer(vcpu)
+    }
+
+    fn stack_pointer(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<VirtualAddress> {
+        self.backend.stack_pointer(vcpu)
+    }
+
+    fn base_pointer(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<Option<VirtualAddress>> {
+        self.backend.base_pointer(vcpu)
+    }
+
+    fn pgd(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<PhysicalAddress> {
+        self.backend.pgd(vcpu)
+    }
+
+    fn kernel_per_cpu(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<Option<VirtualAddress>> {
+        self.backend.kernel_per_cpu(vcpu)
+    }
+}
+
+impl<B: ibc::Backend> ibc::Os for Linux<B> {
     fn read_virtual_memory(
         &self,
         mmu_addr: PhysicalAddress,
@@ -276,10 +324,10 @@ impl<B: ibc::Backend> ibc::Os for Linux<B> {
         Ok(ibc::Process(self.profile.fast_syms.init_task + self.kaslr))
     }
 
-    fn current_thread(&self, cpuid: usize) -> IceResult<ibc::Thread> {
+    fn current_thread(&self, vcpu: ibc::VcpuId) -> IceResult<ibc::Thread> {
         match self.profile.fast_syms.current_task {
             Some(current_task) => {
-                let current_task = self.per_cpu(cpuid)? + current_task;
+                let current_task = self.per_cpu(vcpu)? + current_task;
                 let addr = self.read_kernel_value(current_task)?;
                 Ok(ibc::Thread(addr))
             }
@@ -293,14 +341,14 @@ impl<B: ibc::Backend> ibc::Os for Linux<B> {
                 // FIXME: This will always yield the thread group leader instead
                 // of the current thread
 
-                use ibc::arch::{Vcpu, Vcpus};
+                use ibc::{Architecture, HasVcpus};
 
-                let vcpu = self.backend.vcpus().get(cpuid);
-                let vcpu_pgd = vcpu.pgd();
+                let vcpu_pgd = self.backend.pgd(vcpu)?;
 
-                if let ibc::arch::runtime::Vcpu::Aarch64(vcpu) = vcpu.into_runtime() {
-                    if vcpu.instruction_pointer().is_kernel() {
-                        let current_task = VirtualAddress(vcpu.registers.sp);
+                if let ibc::arch::RuntimeArchitecture::Aarch64(_) = self.arch().into_runtime() {
+                    if self.instruction_pointer(vcpu)?.is_kernel() {
+                        let current_task =
+                            VirtualAddress(ibc::arch::AssumeAarch64(self).registers(vcpu)?.sp);
                         return Ok(ibc::Thread(current_task));
                     }
                 }

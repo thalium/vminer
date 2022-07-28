@@ -1,6 +1,6 @@
 use std::{fmt, ops::ControlFlow};
 
-use ibc::{IceResult, Os, VirtualAddress};
+use ibc::{arch::HasVcpus, IceResult, Os, VirtualAddress};
 use icebox::{backends::kvm_dump::DumbDump, os::Linux};
 use once_cell::sync::Lazy;
 
@@ -126,22 +126,20 @@ fn proc_tree_aarch64() {
 fn current_process_x86_64() {
     let linux = Arch::X86_64.linux();
 
-    let proc = linux.current_process(0).unwrap();
-    assert_eq!(linux.process_id(proc).unwrap(), 0);
-
-    let proc = linux.current_process(1).unwrap();
-    assert_eq!(linux.process_id(proc).unwrap(), 651);
+    for (vcpu, pid) in linux.iter_vcpus().zip([0, 651]) {
+        let proc = linux.current_process(vcpu).unwrap();
+        assert_eq!(linux.process_id(proc).unwrap(), pid);
+    }
 }
 
 #[test]
 fn current_process_aarch64() {
     let linux = Arch::Aarch64.linux();
 
-    let proc = linux.current_process(0).unwrap();
-    assert_eq!(linux.process_id(proc).unwrap(), 420);
-
-    let proc = linux.current_process(1).unwrap();
-    assert_eq!(linux.process_id(proc).unwrap(), 0);
+    for (vcpu, pid) in linux.iter_vcpus().zip([420, 0]) {
+        let proc = linux.current_process(vcpu).unwrap();
+        assert_eq!(linux.process_id(proc).unwrap(), pid);
+    }
 }
 
 fn vmas(arch: Arch) {
@@ -194,11 +192,13 @@ fn callstack(arch: Arch) {
     }
 
     let linux = arch.linux();
-    let mut proc = linux.current_process(0).unwrap();
-    if linux.process_is_kernel(proc).unwrap() {
-        proc = linux.current_process(1).unwrap();
-        assert!(!linux.process_is_kernel(proc).unwrap());
-    }
+    let proc = linux
+        .iter_vcpus()
+        .find_map(|vcpu| {
+            let proc = linux.current_process(vcpu).unwrap();
+            (!linux.process_is_kernel(proc).unwrap()).then(|| proc)
+        })
+        .unwrap();
 
     let mut frames = Vec::new();
     linux

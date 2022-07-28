@@ -1,7 +1,7 @@
 use bytemuck::Zeroable;
 use ibc::{
-    arch::{self, aarch64, x86_64, Vcpus as _},
-    IceResult, Memory, PhysicalAddress,
+    arch::{self, aarch64, x86_64, HasVcpus},
+    Architecture, IceResult, Memory, PhysicalAddress,
 };
 use std::{
     fs,
@@ -31,17 +31,11 @@ impl Vcpus {
         let mut vcpus = Vec::with_capacity(n_vcpus as usize);
 
         for _ in 0..n_vcpus {
-            let mut vcpu = x86_64::Vcpu {
-                registers: Zeroable::zeroed(),
-                special_registers: Zeroable::zeroed(),
-                lstar: 0,
-                gs_kernel_base: 0,
-            };
+            let mut vcpu = x86_64::Vcpu::zeroed();
 
             reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.registers))?;
             reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.special_registers))?;
-            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.lstar))?;
-            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.gs_kernel_base))?;
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.other_registers))?;
 
             vcpus.push(vcpu);
         }
@@ -53,13 +47,11 @@ impl Vcpus {
         let mut vcpus = Vec::with_capacity(n_vcpus as usize);
 
         for _ in 0..n_vcpus {
-            let mut vcpu = aarch64::Vcpu {
-                registers: Zeroable::zeroed(),
-                special_registers: Zeroable::zeroed(),
-            };
+            let mut vcpu = aarch64::Vcpu::zeroed();
 
             reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.registers))?;
             reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.special_registers))?;
+            reader.read_exact(bytemuck::bytes_of_mut(&mut vcpu.other_registers))?;
 
             vcpus.push(vcpu);
         }
@@ -156,14 +148,14 @@ impl<Mem: ibc::Memory> DumbDump<Mem> {
                 for vcpu in vcpus {
                     out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
                     out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
-                    out.write_all(bytemuck::bytes_of(&vcpu.lstar))?;
-                    out.write_all(bytemuck::bytes_of(&vcpu.gs_kernel_base))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.other_registers))?;
                 }
             }
             Vcpus::Aarch64(vcpus) => {
                 for vcpu in vcpus {
                     out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
                     out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.other_registers))?;
                 }
             }
         }
@@ -175,7 +167,7 @@ impl<Mem: ibc::Memory> DumbDump<Mem> {
 }
 
 impl DumbDump<ibc::mem::RawMemory<Vec<u8>>> {
-    pub fn dump_vm<B: ibc::Backend>(backend: &B) -> io::Result<Self> {
+    pub fn dump_vm<B: ibc::Backend>(backend: &B) -> IceResult<Self> {
         let mappings = backend.memory_mappings().to_owned();
 
         let mut remap_addr = PhysicalAddress(0);
@@ -196,9 +188,31 @@ impl DumbDump<ibc::mem::RawMemory<Vec<u8>>> {
             offset = next_offset;
         }
 
-        let vcpus = match backend.vcpus().into_runtime() {
-            arch::runtime::Vcpus::X86_64(vcpus) => Vcpus::X86_64(vcpus.to_vec()),
-            arch::runtime::Vcpus::Aarch64(vcpus) => Vcpus::Aarch64(vcpus.to_vec()),
+        let vcpus = match backend.arch().into_runtime() {
+            arch::RuntimeArchitecture::X86_64(_) => {
+                let backend = ibc::arch::AssumeX86_64(backend);
+                let mut vcpus = Vec::with_capacity(backend.vcpus_count());
+                for vcpu in backend.iter_vcpus() {
+                    vcpus.push(ibc::arch::x86_64::Vcpu {
+                        registers: backend.registers(vcpu)?,
+                        special_registers: backend.special_registers(vcpu)?,
+                        other_registers: backend.other_registers(vcpu)?,
+                    })
+                }
+                Vcpus::X86_64(vcpus)
+            }
+            arch::RuntimeArchitecture::Aarch64(_) => {
+                let backend = ibc::arch::AssumeAarch64(backend);
+                let mut vcpus = Vec::with_capacity(backend.vcpus_count());
+                for vcpu in backend.iter_vcpus() {
+                    vcpus.push(ibc::arch::aarch64::Vcpu {
+                        registers: backend.registers(vcpu)?,
+                        special_registers: backend.special_registers(vcpu)?,
+                        other_registers: backend.other_registers(vcpu)?,
+                    })
+                }
+                Vcpus::Aarch64(vcpus)
+            }
         };
 
         let mem = ibc::mem::RawMemory::new(mem);
@@ -237,14 +251,82 @@ impl<Mem: ibc::Memory> ibc::Memory for DumbDump<Mem> {
     }
 }
 
-impl<Mem: ibc::Memory> ibc::RawBackend for DumbDump<Mem> {
-    type Arch = arch::RuntimeArchitecture;
+impl<Mem> ibc::HasVcpus for DumbDump<Mem> {
+    type Arch = ibc::arch::RuntimeArchitecture;
 
-    #[inline]
-    fn vcpus(&self) -> arch::runtime::Vcpus {
+    fn arch(&self) -> Self::Arch {
         match &self.vcpus {
-            Vcpus::X86_64(vcpus) => arch::runtime::Vcpus::X86_64(vcpus),
-            Vcpus::Aarch64(vcpus) => arch::runtime::Vcpus::Aarch64(vcpus),
+            Vcpus::X86_64(_) => ibc::arch::RuntimeArchitecture::X86_64(ibc::arch::X86_64),
+            Vcpus::Aarch64(_) => ibc::arch::RuntimeArchitecture::Aarch64(ibc::arch::Aarch64),
         }
     }
+
+    fn vcpus_count(&self) -> usize {
+        match &self.vcpus {
+            Vcpus::X86_64(vcpus) => vcpus.len(),
+            Vcpus::Aarch64(vcpus) => vcpus.len(),
+        }
+    }
+
+    fn registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::Registers> {
+        Ok(match &self.vcpus {
+            Vcpus::X86_64(vcpus) => ibc::arch::runtime::Registers::X86_64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(ibc::VcpuError::InvalidId)?
+                    .registers,
+            ),
+            Vcpus::Aarch64(vcpus) => ibc::arch::runtime::Registers::Aarch64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(ibc::VcpuError::InvalidId)?
+                    .registers,
+            ),
+        })
+    }
+
+    fn special_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::SpecialRegisters> {
+        Ok(match &self.vcpus {
+            Vcpus::X86_64(vcpus) => ibc::arch::runtime::SpecialRegisters::X86_64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(ibc::VcpuError::InvalidId)?
+                    .special_registers,
+            ),
+            Vcpus::Aarch64(vcpus) => ibc::arch::runtime::SpecialRegisters::Aarch64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(ibc::VcpuError::InvalidId)?
+                    .special_registers,
+            ),
+        })
+    }
+
+    fn other_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::OtherRegisters> {
+        Ok(match &self.vcpus {
+            Vcpus::X86_64(vcpus) => ibc::arch::runtime::OtherRegisters::X86_64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(ibc::VcpuError::InvalidId)?
+                    .other_registers,
+            ),
+            Vcpus::Aarch64(vcpus) => ibc::arch::runtime::OtherRegisters::Aarch64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(ibc::VcpuError::InvalidId)?
+                    .other_registers,
+            ),
+        })
+    }
 }
+
+impl<Mem: ibc::Memory> ibc::RawBackend for DumbDump<Mem> {}

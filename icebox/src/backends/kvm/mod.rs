@@ -234,34 +234,20 @@ fn start_listener(
     Ok(thread::spawn(move || {
         let mut registers = bytemuck::Zeroable::zeroed();
         let mut special_registers = bytemuck::Zeroable::zeroed();
-        #[cfg(target_arch = "x86_64")]
-        let mut msrs = [0; 2];
+        let mut other_registers = bytemuck::Zeroable::zeroed();
 
         let (mut socket, _) = listener.accept()?;
 
         (0..fds_len)
             .map(|_| {
-                #[cfg(target_arch = "x86_64")]
-                {
-                    socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
-                    socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
-                    socket.read_exact(bytemuck::bytes_of_mut(&mut msrs))?;
-                    Ok(arch::Vcpu {
-                        registers,
-                        special_registers,
-                        lstar: msrs[0],
-                        gs_kernel_base: msrs[1],
-                    })
-                }
-                #[cfg(target_arch = "aarch64")]
-                {
-                    socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
-                    socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
-                    Ok(arch::Vcpu {
-                        registers,
-                        special_registers,
-                    })
-                }
+                socket.read_exact(bytemuck::bytes_of_mut(&mut registers))?;
+                socket.read_exact(bytemuck::bytes_of_mut(&mut special_registers))?;
+                socket.read_exact(bytemuck::bytes_of_mut(&mut other_registers))?;
+                Ok(arch::Vcpu {
+                    registers,
+                    special_registers,
+                    other_registers,
+                })
             })
             .collect()
     }))
@@ -426,11 +412,49 @@ impl ibc::Memory for Kvm {
     }
 }
 
-impl ibc::RawBackend for Kvm {
+impl ibc::HasVcpus for Kvm {
     type Arch = arch::Arch;
 
-    #[inline]
-    fn vcpus(&self) -> &[arch::Vcpu] {
-        &self.vcpus
+    fn arch(&self) -> Self::Arch {
+        arch::Arch
+    }
+
+    fn vcpus_count(&self) -> usize {
+        self.vcpus.len()
+    }
+
+    fn registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::Registers> {
+        Ok(self
+            .vcpus
+            .get(vcpu.0)
+            .ok_or(ibc::VcpuError::InvalidId)?
+            .registers)
+    }
+
+    fn special_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::SpecialRegisters> {
+        Ok(self
+            .vcpus
+            .get(vcpu.0)
+            .ok_or(ibc::VcpuError::InvalidId)?
+            .special_registers)
+    }
+
+    fn other_registers(
+        &self,
+        vcpu: ibc::VcpuId,
+    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::OtherRegisters> {
+        Ok(self
+            .vcpus
+            .get(vcpu.0)
+            .ok_or(ibc::VcpuError::InvalidId)?
+            .other_registers)
     }
 }
+
+impl ibc::RawBackend for Kvm {}

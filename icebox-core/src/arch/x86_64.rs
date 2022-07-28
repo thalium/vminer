@@ -1,7 +1,6 @@
-use bytemuck::{Pod, Zeroable};
-
 use super::runtime;
 use crate::{LittleEndian, PhysicalAddress, VirtualAddress};
+use bytemuck::{Pod, Zeroable};
 
 #[derive(Debug, Clone, Copy)]
 pub struct X86_64;
@@ -11,106 +10,7 @@ pub struct X86_64;
 pub struct Vcpu {
     pub registers: Registers,
     pub special_registers: SpecialRegisters,
-    pub lstar: u64,
-    pub gs_kernel_base: u64,
-}
-
-impl<'a> super::Vcpu<'a> for &'a Vcpu {
-    type Arch = X86_64;
-
-    #[inline]
-    fn arch(&self) -> X86_64 {
-        X86_64
-    }
-
-    #[inline]
-    fn get_regs(&self) -> Registers {
-        self.registers
-    }
-
-    #[inline]
-    fn into_runtime(self) -> runtime::Vcpu<'a> {
-        runtime::Vcpu::X86_64(self)
-    }
-
-    #[inline]
-    fn instruction_pointer(&self) -> VirtualAddress {
-        VirtualAddress(self.registers.rip)
-    }
-
-    #[inline]
-    fn stack_pointer(&self) -> VirtualAddress {
-        VirtualAddress(self.registers.rsp)
-    }
-
-    fn base_pointer(&self) -> Option<VirtualAddress> {
-        Some(VirtualAddress(self.registers.rbp))
-    }
-
-    fn pgd(&self) -> PhysicalAddress {
-        PhysicalAddress(self.special_registers.cr3 & crate::mask_range(12, 48))
-    }
-
-    #[inline]
-    fn kernel_per_cpu(&self) -> Option<VirtualAddress> {
-        let per_cpu = VirtualAddress(self.special_registers.gs.base);
-        if per_cpu.is_kernel() {
-            return Some(per_cpu);
-        }
-
-        let per_cpu = VirtualAddress(self.gs_kernel_base);
-        if per_cpu.is_kernel() {
-            return Some(per_cpu);
-        }
-
-        None
-    }
-}
-
-impl<'a> super::Vcpus<'a> for &'a [Vcpu] {
-    type Arch = X86_64;
-
-    #[inline]
-    fn arch(&self) -> X86_64 {
-        X86_64
-    }
-
-    #[inline]
-    fn count(&self) -> usize {
-        self.len()
-    }
-
-    #[inline]
-    fn get(&self, id: usize) -> &'a Vcpu {
-        &self[id]
-    }
-
-    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
-        &self,
-        memory: &M,
-        use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
-    ) -> Option<PhysicalAddress> {
-        // To check if a CR3 is valid, try to translate addresses with it
-        let addresses = &[additionnal, &[VirtualAddress(self[0].lstar)]];
-        let test = super::make_address_test(self, memory, use_per_cpu, addresses);
-
-        // First, try cr3 registers
-        for vcpu in *self {
-            let addr = PhysicalAddress(vcpu.special_registers.cr3);
-            if test(addr) {
-                return Some(addr);
-            }
-        }
-
-        // If it didn't work, try all addresses !
-        super::try_all_addresses(test)
-    }
-
-    #[inline]
-    fn into_runtime(self) -> runtime::Vcpus<'a> {
-        runtime::Vcpus::X86_64(self)
-    }
+    pub other_registers: OtherRegisters,
 }
 
 struct MmuDesc;
@@ -128,10 +28,11 @@ impl super::MmuDesc for MmuDesc {
 }
 
 impl<'a> super::Architecture<'a> for X86_64 {
-    type Registers = Registers;
-    type Vcpu = &'a Vcpu;
-    type Vcpus = &'a [Vcpu];
     type Endian = LittleEndian;
+
+    type Registers = Registers;
+    type SpecialRegisters = SpecialRegisters;
+    type OtherRegisters = OtherRegisters;
 
     #[inline]
     fn into_runtime(self) -> runtime::Architecture {
@@ -152,13 +53,28 @@ impl<'a> super::Architecture<'a> for X86_64 {
         super::virtual_to_physical::<MmuDesc, M>(memory, mmu_addr, addr)
     }
 
-    fn find_in_kernel_memory<M: crate::Memory + ?Sized>(
+    fn find_kernel_pgd<M: crate::Memory + ?Sized>(
         &self,
         memory: &M,
-        mmu_addr: PhysicalAddress,
-        needle: &[u8],
-    ) -> crate::MemoryAccessResult<Option<VirtualAddress>> {
-        super::find_in_kernel_memory::<MmuDesc, M>(memory, mmu_addr, needle, self.kernel_base())
+        vcpus: &(impl super::HasVcpus<Arch = Self> + ?Sized),
+        use_per_cpu: bool,
+        additionnal: &[VirtualAddress],
+    ) -> crate::IceResult<Option<PhysicalAddress>> {
+        // To check if a CR3 is valid, try to translate addresses with it
+        let lstar = VirtualAddress(vcpus.other_registers(crate::VcpuId(0))?.lstar);
+        let addresses = &[additionnal, &[lstar]];
+        let test = super::make_address_test(vcpus, memory, use_per_cpu, addresses);
+
+        // First, try cr3 registers
+        for vcpu in vcpus.iter_vcpus() {
+            let addr = vcpus.pgd(vcpu)?;
+            if test(addr) {
+                return Ok(Some(addr));
+            }
+        }
+
+        // If it didn't work, try all addresses !
+        Ok(super::try_all_addresses(test))
     }
 
     fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(
@@ -178,9 +94,72 @@ impl<'a> super::Architecture<'a> for X86_64 {
         )
     }
 
+    fn find_in_kernel_memory<M: crate::Memory + ?Sized>(
+        &self,
+        memory: &M,
+        mmu_addr: PhysicalAddress,
+        needle: &[u8],
+    ) -> crate::MemoryAccessResult<Option<VirtualAddress>> {
+        super::find_in_kernel_memory::<MmuDesc, M>(memory, mmu_addr, needle, self.kernel_base())
+    }
+
     #[inline]
     fn kernel_base(&self) -> VirtualAddress {
         VirtualAddress(0xffff_f800_0000_0000)
+    }
+
+    fn instruction_pointer<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: crate::VcpuId,
+    ) -> crate::VcpuResult<VirtualAddress> {
+        let regs = vcpus.registers(vcpu)?;
+        Ok(VirtualAddress(regs.rip))
+    }
+
+    fn stack_pointer<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: crate::VcpuId,
+    ) -> crate::VcpuResult<VirtualAddress> {
+        let regs = vcpus.registers(vcpu)?;
+        Ok(VirtualAddress(regs.rsp))
+    }
+
+    fn base_pointer<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: crate::VcpuId,
+    ) -> crate::VcpuResult<Option<VirtualAddress>> {
+        let regs = vcpus.registers(vcpu)?;
+        Ok(Some(VirtualAddress(regs.rbp)))
+    }
+
+    fn pgd<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: crate::VcpuId,
+    ) -> crate::VcpuResult<PhysicalAddress> {
+        let regs = vcpus.special_registers(vcpu)?;
+        Ok(PhysicalAddress(regs.cr3))
+    }
+
+    fn kernel_per_cpu<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: crate::VcpuId,
+    ) -> crate::VcpuResult<Option<VirtualAddress>> {
+        let per_cpu = VirtualAddress(vcpus.special_registers(vcpu)?.gs.base);
+        if per_cpu.is_kernel() {
+            return Ok(Some(per_cpu));
+        }
+
+        let per_cpu = VirtualAddress(vcpus.other_registers(vcpu)?.gs_kernel_base);
+        if per_cpu.is_kernel() {
+            return Ok(Some(per_cpu));
+        }
+
+        Ok(None)
     }
 }
 
@@ -254,4 +233,32 @@ pub struct SpecialRegisters {
     pub efer: u64,
     pub apic_base: u64,
     pub interrupt_bitmap: [u64; 4],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct OtherRegisters {
+    pub lstar: u64,
+    pub gs_kernel_base: u64,
+}
+
+impl From<Registers> for super::runtime::Registers {
+    #[inline]
+    fn from(regs: Registers) -> Self {
+        Self::X86_64(regs)
+    }
+}
+
+impl From<SpecialRegisters> for super::runtime::SpecialRegisters {
+    #[inline]
+    fn from(regs: SpecialRegisters) -> Self {
+        Self::X86_64(regs)
+    }
+}
+
+impl From<OtherRegisters> for super::runtime::OtherRegisters {
+    #[inline]
+    fn from(regs: OtherRegisters) -> Self {
+        Self::X86_64(regs)
+    }
 }

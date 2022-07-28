@@ -71,6 +71,40 @@ impl Error for core::str::Utf8Error {}
 impl Error for object::Error {}
 
 #[derive(Debug)]
+pub enum VcpuError {
+    Unsupported,
+    InvalidId,
+    BadArchitecture,
+    #[cfg(feature = "std")]
+    Io(std::io::Error),
+}
+
+pub type VcpuResult<T> = Result<T, VcpuError>;
+
+impl fmt::Display for VcpuError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsupported => f.write_str("unsupported operation"),
+            Self::InvalidId => f.write_str("invalid vCPU ID"),
+            Self::BadArchitecture => f.write_str("wrong architecture"),
+            #[cfg(feature = "std")]
+            Self::Io(err) => err.fmt(f),
+        }
+    }
+}
+
+impl Error for VcpuError {
+    #[inline]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            #[cfg(feature = "std")]
+            Self::Io(err) => err.source(),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum MemoryAccessError {
     OutOfBounds,
@@ -169,6 +203,7 @@ impl Error for TranslationError {
 #[derive(Debug)]
 enum Repr {
     Memory(MemoryAccessError),
+    Vcpu(VcpuError),
     InvalidPage(u64),
 
     UnsupportedArchitecture,
@@ -259,6 +294,7 @@ impl fmt::Display for Repr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Repr::Memory(_) => f.write_str("failed to access physical memory"),
+            Repr::Vcpu(_) => f.write_str("failed to access registers"),
             Repr::InvalidPage(_) => f.write_str("encountered invalid page"),
             Repr::UnsupportedArchitecture => {
                 f.write_str("operation unsupported by the architecture")
@@ -311,6 +347,7 @@ impl Error for IceError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match &*self.repr {
             Repr::Memory(err) => Some(err),
+            Repr::Vcpu(err) => Some(err),
             #[cfg(feature = "std")]
             Repr::Io(err) => Some(err),
             Repr::Context(_, err) => Some(&**err.as_ref()?),
@@ -338,6 +375,13 @@ impl From<MemoryAccessError> for IceError {
     #[cold]
     fn from(err: MemoryAccessError) -> Self {
         Self::from_repr(Repr::Memory(err))
+    }
+}
+
+impl From<VcpuError> for IceError {
+    #[cold]
+    fn from(err: VcpuError) -> Self {
+        Self::from_repr(Repr::Vcpu(err))
     }
 }
 

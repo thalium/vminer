@@ -95,7 +95,7 @@ impl From<&ibc::StackFrame> for StackFrame {
     }
 }
 
-pub struct Os(Box<dyn ibc::Os + Send + Sync>);
+pub struct Os(Box<dyn ibc::Os<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl Os {
     fn new(backend: Backend) -> IceResult<Box<Self>> {
@@ -203,19 +203,19 @@ pub unsafe extern "C" fn try_read_process_memory(
 #[no_mangle]
 pub extern "C" fn os_current_process(
     os: &Os,
-    cpuid: usize,
+    vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Process>>,
 ) -> *mut Error {
-    error::wrap_result(proc, os.0.current_process(cpuid))
+    error::wrap_result(proc, os.0.current_process(ibc::VcpuId(vcpu)))
 }
 
 #[no_mangle]
 pub extern "C" fn os_current_thread(
     os: &Os,
-    cpuid: usize,
+    vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Thread>>,
 ) -> *mut Error {
-    error::wrap_result(proc, os.0.current_thread(cpuid))
+    error::wrap_result(proc, os.0.current_thread(ibc::VcpuId(vcpu)))
 }
 
 #[no_mangle]

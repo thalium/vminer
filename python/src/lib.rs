@@ -186,7 +186,7 @@ impl Dump {
 }
 
 #[pyclass]
-struct RawOs(Box<dyn ibc::Os + Send + Sync>);
+struct RawOs(Box<dyn ibc::Os<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl RawOs {
     fn new(backend: Backend, path: &str) -> IceResult<Self> {
@@ -235,13 +235,15 @@ impl Os {
         Ok(self.make_proc(py, init))
     }
 
-    fn current_thread(&self, py: Python, cpuid: usize) -> PyResult<Thread> {
-        let thread = self.0.borrow(py)?.0.current_thread(cpuid).convert_err()?;
+    fn current_thread(&self, py: Python, vcpu: usize) -> PyResult<Thread> {
+        let os = self.0.borrow(py)?;
+        let thread = os.0.current_thread(ibc::VcpuId(vcpu)).convert_err()?;
         Ok(Thread::new(py, thread, &self.0))
     }
 
-    fn current_process(&self, py: Python, cpuid: usize) -> PyResult<Process> {
-        let proc = self.0.borrow(py)?.0.current_process(cpuid).convert_err()?;
+    fn current_process(&self, py: Python, vcpu: usize) -> PyResult<Process> {
+        let os = self.0.borrow(py)?;
+        let proc = os.0.current_process(ibc::VcpuId(vcpu)).convert_err()?;
         Ok(self.make_proc(py, proc))
     }
 

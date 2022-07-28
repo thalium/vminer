@@ -101,11 +101,15 @@ typedef struct X86_64SpecialRegisters {
   uint64_t interrupt_bitmap[4];
 } X86_64SpecialRegisters;
 
+typedef struct X86_64OtherRegisters {
+  uint64_t lstar;
+  uint64_t gs_kernel_base;
+} X86_64OtherRegisters;
+
 typedef struct X86_64Vcpu {
   struct X86_64Registers registers;
   struct X86_64SpecialRegisters special_registers;
-  uint64_t lstar;
-  uint64_t gs_kernel_base;
+  struct X86_64OtherRegisters other_registers;
 } X86_64Vcpu;
 
 typedef struct X86_64Vcpus {
@@ -254,9 +258,9 @@ struct Error *try_read_process_memory(const struct Os *os,
                                       uint8_t *buf,
                                       uintptr_t buf_size);
 
-struct Error *os_current_process(const struct Os *os, uintptr_t cpuid, struct Process *proc);
+struct Error *os_current_process(const struct Os *os, uintptr_t vcpu, struct Process *proc);
 
-struct Error *os_current_thread(const struct Os *os, uintptr_t cpuid, struct Thread *proc);
+struct Error *os_current_thread(const struct Os *os, uintptr_t vcpu, struct Thread *proc);
 
 struct Error *os_processes(const struct Os *os, struct Process *procs, uintptr_t *n_procs);
 

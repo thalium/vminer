@@ -6,8 +6,7 @@ use core::mem;
 pub struct X86_64Vcpu {
     pub registers: X86_64Registers,
     pub special_registers: X86_64SpecialRegisters,
-    pub lstar: u64,
-    pub gs_kernel_base: u64,
+    pub other_registers: X86_64OtherRegisters,
 }
 
 #[repr(C)]
@@ -102,4 +101,11 @@ pub struct X86_64SpecialRegisters {
     pub efer: u64,
     pub apic_base: u64,
     pub interrupt_bitmap: [u64; 4],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct X86_64OtherRegisters {
+    pub lstar: u64,
+    pub gs_kernel_base: u64,
 }
