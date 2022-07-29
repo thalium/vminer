@@ -186,6 +186,15 @@ impl<B: ibc::Backend> Linux<B> {
         frame: &mut ibc::StackFrame,
         f: &mut dyn FnMut(&ibc::StackFrame) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
+        // We don't support kernel unwinding yet, so give the incomplete frame
+        // that we have and error out.
+        if frame.instruction_pointer.is_kernel() {
+            return match f(frame)? {
+                ControlFlow::Continue(()) => Err("kernel unwinding is not supported".into()),
+                ControlFlow::Break(()) => Ok(()),
+            };
+        }
+
         // Current IP is not in a module. If both IP and SP are
         // valid addresses, we can suppose that we went through
         // JIT code.
