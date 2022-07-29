@@ -1,7 +1,8 @@
 use core::{fmt::Write as _, mem};
 
 use crate::{
-    c_char, cstring, error, symbols::Symbols, Backend, Error, PhysicalAddress, VirtualAddress,
+    backend::Backend, c_char, cstring, error, error::Error, symbols::Symbols, PhysicalAddress,
+    VirtualAddress,
 };
 use alloc::boxed::Box;
 use ibc::{IceError, IceResult};

@@ -204,7 +204,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
             backend.read_virtual_memory(kpgd, addr, buf)
         })?;
         let banner = &banner[..memchr::memchr(0, &banner).unwrap()];
-        eprintln!("Banner: {}", String::from_utf8_lossy(banner));
+        log::debug!("Banner: \"{}\"", String::from_utf8_lossy(banner));
 
         let symbols_loader = match builder.loader {
             Some(loader) => loader,

@@ -26,6 +26,12 @@ static Logger LOGGER = {
 	.log = send_log,
 };
 
+typedef struct X86_64Vcpu {
+  struct X86_64Registers registers;
+  struct X86_64SpecialRegisters special_registers;
+  struct X86_64OtherRegisters other_registers;
+} X86_64Vcpu;
+
 typedef struct {
 	X86_64Vcpu *vcpus;
 	int n_vcpus;
@@ -56,21 +62,29 @@ int32_t read_memory(const void *data, struct PhysicalAddress addr, void *buf, ui
 	return 0;
 }
 
-MemoryMapping memory_mapping(const void *data) {
+MemoryMapping memory_mappings(const void *data) {
 	const MyBackend *backend_data = data;
 	return backend_data->mappings;
 }
 
-struct X86_64Vcpus get_vcpus(const void *data) {
+struct X86_64Registers get_registers(const void *data, uintptr_t vcpu) {
 	const MyBackend *backend_data = data;
-	return (X86_64Vcpus){
-		.pointer = backend_data->vcpus,
-		.len = backend_data->n_vcpus,
-	};
+	return backend_data->vcpus[vcpu].registers;
+}
+
+struct X86_64SpecialRegisters get_special_registers(const void *data, uintptr_t vcpu) {
+	const MyBackend *backend_data = data;
+	return backend_data->vcpus[vcpu].special_registers;
+}
+
+struct X86_64OtherRegisters get_other_registers(const void *data, uintptr_t vcpu) {
+	const MyBackend *backend_data = data;
+	return backend_data->vcpus[vcpu].other_registers;
 }
 
 void drop(void *data) {
 	MyBackend *backend_data = data;
+	close(backend_data->file_fd);
 	free(backend_data->vcpus);
 	free(backend_data);
 }
@@ -91,20 +105,20 @@ Backend *make_dump(const char *path) {
 
 	if(read(backend_data->file_fd, &header, sizeof header) != sizeof header) {
 		perror("read header");
-		return NULL;
+		goto error0;
 	}
 
 	if(header.arch != 0) {
 		printf("Wrong arch: %d\n", header.arch);
-		return NULL;
+		goto error0;
 	}
 
 	backend_data->mappings.len = header.n_mappings;
 	int n_mappings = header.n_mappings * sizeof(MemoryMapping);
 	MemoryMap *maps = malloc(n_mappings);
 	if(read(backend_data->file_fd, maps, n_mappings) != n_mappings) {
-		perror("read vcpus");
-		return NULL;
+		perror("read mappings");
+		goto error1;
 	}
 	backend_data->mappings.maps = maps;
 
@@ -113,18 +127,37 @@ Backend *make_dump(const char *path) {
 	backend_data->vcpus = malloc(vcpu_size);
 	if(read(backend_data->file_fd, backend_data->vcpus, vcpu_size) != vcpu_size) {
 		perror("read vcpus");
-		return NULL;
+		goto error2;
+	}
+
+	if((int)(backend_data->offset = lseek(backend_data->file_fd, 0, SEEK_CUR)) == -1) {
+		perror("lseek");
+		goto error2;
 	}
 
 	X86_64Backend x86_64_dump = {
 		.data = backend_data,
+		.vcpus_count = header.n_vcpus,
 		.read_memory = read_memory,
-		.memory_mapping = memory_mapping,
-		.get_vcpus = get_vcpus,
+		.memory_mappings = memory_mappings,
+		.registers = get_registers,
+		.special_registers = get_special_registers,
+		.other_registers = get_other_registers,
 		.drop = drop,
 	};
 
 	return backend_make(x86_64_dump);
+
+error2:
+	free(backend_data->vcpus);
+error1:
+	free(maps);
+error0:
+	if(close(backend_data->file_fd) == -1) {
+		perror("close");
+	}
+	free(backend_data);
+	return NULL;
 }
 
 int main() {

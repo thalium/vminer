@@ -23,6 +23,15 @@ typedef struct Symbols Symbols;
 
 typedef struct VmaFlags VmaFlags;
 
+#if defined(CUSTOM_ALLOCATOR)
+typedef struct Allocator {
+  void *data;
+  void *(*alloc)(void*, uintptr_t, uintptr_t);
+  void (*dealloc)(void*, void*, uintptr_t, uintptr_t);
+  void *(*realloc)(void*, void*, uintptr_t, uintptr_t, uintptr_t);
+} Allocator;
+#endif
+
 typedef struct PhysicalAddress {
   uint64_t val;
 } PhysicalAddress;
@@ -106,33 +115,16 @@ typedef struct X86_64OtherRegisters {
   uint64_t gs_kernel_base;
 } X86_64OtherRegisters;
 
-typedef struct X86_64Vcpu {
-  struct X86_64Registers registers;
-  struct X86_64SpecialRegisters special_registers;
-  struct X86_64OtherRegisters other_registers;
-} X86_64Vcpu;
-
-typedef struct X86_64Vcpus {
-  const struct X86_64Vcpu *pointer;
-  uintptr_t len;
-} X86_64Vcpus;
-
 typedef struct X86_64Backend {
   void *data;
   int32_t (*read_memory)(const void *data, struct PhysicalAddress addr, void *buf, uintptr_t size);
-  struct MemoryMapping (*memory_mapping)(const void *data);
-  struct X86_64Vcpus (*get_vcpus)(const void *data);
+  struct MemoryMapping (*memory_mappings)(const void *data);
+  uintptr_t vcpus_count;
+  struct X86_64Registers (*registers)(const void *data, uintptr_t vcpu);
+  struct X86_64SpecialRegisters (*special_registers)(const void *data, uintptr_t vcpu);
+  struct X86_64OtherRegisters (*other_registers)(const void *data, uintptr_t vcpu);
   void (*drop)(void *data);
 } X86_64Backend;
-
-#if defined(CUSTOM_ALLOCATOR)
-typedef struct Allocator {
-  void *data;
-  void *(*alloc)(void*, uintptr_t, uintptr_t);
-  void (*dealloc)(void*, void*, uintptr_t, uintptr_t);
-  void *(*realloc)(void*, void*, uintptr_t, uintptr_t, uintptr_t);
-} Allocator;
-#endif
 
 typedef struct LogRecord {
   enum LogLevel level;
@@ -184,18 +176,6 @@ typedef struct StackFrame {
 extern "C" {
 #endif // __cplusplus
 
-struct Backend *backend_make(struct X86_64Backend backend);
-
-#if defined(STD)
-struct Error *kvm_connect(int32_t pid, struct Backend **kvm);
-#endif
-
-#if defined(STD)
-struct Error *read_dump(const char *path, struct Backend **dump);
-#endif
-
-void backend_free(struct Backend *backend);
-
 #if defined(CUSTOM_ALLOCATOR)
 int set_allocator(struct Allocator allocator);
 #endif
@@ -211,6 +191,18 @@ void deallocate(void *ptr, uintptr_t size, uintptr_t align);
 #if defined(CUSTOM_ALLOCATOR)
 void *reallocate(void *ptr, uintptr_t size, uintptr_t align, uintptr_t new_size);
 #endif
+
+struct Backend *backend_make(struct X86_64Backend backend);
+
+#if defined(STD)
+struct Error *kvm_connect(int32_t pid, struct Backend **kvm);
+#endif
+
+#if defined(STD)
+struct Error *read_dump(const char *path, struct Backend **dump);
+#endif
+
+void backend_free(struct Backend *backend);
 
 struct Error *error_with_message(struct Error *err, char *context);
 

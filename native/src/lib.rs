@@ -7,23 +7,17 @@ extern crate alloc;
 mod allocator;
 mod arch;
 mod array;
+mod backend;
 mod cstring;
 mod error;
 mod logging;
 mod os;
 mod symbols;
 
-use crate::error::Error;
-use alloc::{boxed::Box, sync::Arc};
-#[cfg(feature = "std")]
-use core::mem;
-
 #[allow(non_camel_case_types)]
 pub type c_char = u8;
 #[allow(non_camel_case_types)]
 pub type c_void = u8;
-
-pub struct Backend(Arc<dyn ibc::Backend<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
 
 #[repr(C)]
 pub struct PhysicalAddress {
@@ -57,157 +51,4 @@ impl From<VirtualAddress> for ibc::VirtualAddress {
     fn from(addr: VirtualAddress) -> Self {
         Self(addr.val)
     }
-}
-
-#[repr(C)]
-pub struct MemoryMap {
-    start: PhysicalAddress,
-    end: PhysicalAddress,
-}
-
-#[repr(C)]
-pub struct MemoryMapping {
-    maps: *const MemoryMap,
-    len: usize,
-}
-
-impl Backend {
-    fn new<B>(backend: B) -> Box<Self>
-    where
-        B: ibc::Backend + Send + Sync + 'static,
-    {
-        Box::new(Self(Arc::new(ibc::RuntimeBackend(backend))))
-    }
-}
-
-#[repr(C)]
-pub struct X86_64Backend {
-    data: *mut c_void,
-    read_memory: unsafe extern "C" fn(
-        data: *const c_void,
-        addr: PhysicalAddress,
-        buf: *mut c_void,
-        size: usize,
-    ) -> i32,
-    memory_mapping: unsafe extern "C" fn(data: *const c_void) -> MemoryMapping,
-    get_vcpus: unsafe extern "C" fn(data: *const c_void) -> arch::X86_64Vcpus,
-    drop: Option<unsafe extern "C" fn(data: *mut c_void)>,
-}
-
-unsafe impl Send for X86_64Backend {}
-unsafe impl Sync for X86_64Backend {}
-
-impl Drop for X86_64Backend {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(drop) = self.drop {
-                drop(self.data);
-            }
-        }
-    }
-}
-
-impl ibc::Memory for X86_64Backend {
-    fn memory_mappings(&self) -> &[ibc::mem::MemoryMap] {
-        unsafe {
-            let MemoryMapping { maps, len } = (self.memory_mapping)(self.data);
-            core::slice::from_raw_parts(maps.cast(), len)
-        }
-    }
-
-    fn read_physical(
-        &self,
-        addr: ibc::PhysicalAddress,
-        buf: &mut [u8],
-    ) -> ibc::MemoryAccessResult<()> {
-        unsafe {
-            let size = buf.len();
-            let res = (self.read_memory)(self.data, addr.into(), buf.as_mut_ptr(), size);
-            match res {
-                0 => Ok(()),
-                #[cfg(feature = "std")]
-                _ if res > 0 => Err(ibc::MemoryAccessError::Io(
-                    std::io::Error::from_raw_os_error(res),
-                )),
-                _ => Err(ibc::MemoryAccessError::OutOfBounds),
-            }
-        }
-    }
-}
-
-impl ibc::HasVcpus for X86_64Backend {
-    type Arch = ibc::arch::X86_64;
-
-    fn arch(&self) -> Self::Arch {
-        ibc::arch::X86_64
-    }
-
-    fn vcpus_count(&self) -> usize {
-        let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
-        vcpus.len()
-    }
-
-    fn registers(
-        &self,
-        vcpu: ibc::VcpuId,
-    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::Registers> {
-        let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
-        let vcpu = vcpus.get(vcpu.0).ok_or(ibc::VcpuError::InvalidId)?;
-        Ok(bytemuck::cast(vcpu.registers))
-    }
-
-    fn special_registers(
-        &self,
-        vcpu: ibc::VcpuId,
-    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::SpecialRegisters> {
-        let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
-        let vcpu = vcpus.get(vcpu.0).ok_or(ibc::VcpuError::InvalidId)?;
-        Ok(bytemuck::cast(vcpu.special_registers))
-    }
-
-    fn other_registers(
-        &self,
-        vcpu: ibc::VcpuId,
-    ) -> ibc::VcpuResult<<Self::Arch as ibc::Architecture>::OtherRegisters> {
-        let vcpus = unsafe { (self.get_vcpus)(self.data).as_vcpus() };
-        let vcpu = vcpus.get(vcpu.0).ok_or(ibc::VcpuError::InvalidId)?;
-        Ok(bytemuck::cast(vcpu.other_registers))
-    }
-}
-
-impl ibc::RawBackend for X86_64Backend {}
-
-#[no_mangle]
-pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
-    Backend::new(backend)
-}
-
-#[cfg(all(target_os = "linux", feature = "std"))]
-#[no_mangle]
-pub extern "C" fn kvm_connect(
-    pid: i32,
-    kvm: Option<&mut mem::MaybeUninit<Box<Backend>>>,
-) -> *mut Error {
-    error::wrap(kvm, || {
-        let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
-        Ok(Backend::new(kvm))
-    })
-}
-
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn read_dump(
-    path: *const c_char,
-    dump: Option<&mut mem::MaybeUninit<Box<Backend>>>,
-) -> *mut Error {
-    error::wrap(dump, || {
-        let path = cstring::from_ut8(path)?;
-        let dump = icebox::backends::kvm_dump::DumbDump::read(&*path)?;
-        Ok(Backend::new(dump))
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn backend_free(backend: Option<Box<Backend>>) {
-    drop(backend);
 }

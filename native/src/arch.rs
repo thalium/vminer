@@ -1,35 +1,17 @@
 use bytemuck::{Pod, Zeroable};
 use core::mem;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-pub struct X86_64Vcpu {
-    pub registers: X86_64Registers,
-    pub special_registers: X86_64SpecialRegisters,
-    pub other_registers: X86_64OtherRegisters,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct X86_64Vcpus {
-    pointer: *const X86_64Vcpu,
-    len: usize,
-}
-
 const _: () = {
-    assert!(mem::size_of::<X86_64Vcpu>() == mem::size_of::<ibc::arch::x86_64::Vcpu>());
     assert!(mem::size_of::<X86_64Registers>() == mem::size_of::<ibc::arch::x86_64::Registers>());
     assert!(
         mem::size_of::<X86_64SpecialRegisters>()
             == mem::size_of::<ibc::arch::x86_64::SpecialRegisters>()
     );
+    assert!(
+        mem::size_of::<X86_64OtherRegisters>()
+            == mem::size_of::<ibc::arch::x86_64::OtherRegisters>()
+    );
 };
-
-impl X86_64Vcpus {
-    pub unsafe fn as_vcpus<'a>(self) -> &'a [X86_64Vcpu] {
-        core::slice::from_raw_parts(self.pointer, self.len)
-    }
-}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
