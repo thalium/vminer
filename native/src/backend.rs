@@ -147,7 +147,7 @@ impl ibc::HasVcpus for X86_64Backend {
     }
 }
 
-impl ibc::RawBackend for X86_64Backend {}
+impl ibc::Backend for X86_64Backend {}
 
 #[no_mangle]
 pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {

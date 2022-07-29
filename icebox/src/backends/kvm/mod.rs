@@ -457,4 +457,4 @@ impl ibc::HasVcpus for Kvm {
     }
 }
 
-impl ibc::RawBackend for Kvm {}
+impl ibc::Backend for Kvm {}

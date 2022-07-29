@@ -329,4 +329,4 @@ impl<Mem> ibc::HasVcpus for DumbDump<Mem> {
     }
 }
 
-impl<Mem: ibc::Memory> ibc::RawBackend for DumbDump<Mem> {}
+impl<Mem: ibc::Memory> ibc::Backend for DumbDump<Mem> {}

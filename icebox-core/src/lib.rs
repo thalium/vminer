@@ -10,7 +10,7 @@ pub mod arch;
 pub use arch::{Architecture, HasVcpus, VcpuId};
 
 mod backend;
-pub use backend::{Backend, RawBackend, RuntimeBackend};
+pub use backend::{Backend, RuntimeBackend};
 
 mod endian;
 pub use endian::{BigEndian, Endianness, LittleEndian, RuntimeEndian};

@@ -3,8 +3,6 @@ use crate::{
     TranslationResult, VirtualAddress,
 };
 
-pub trait RawBackend: Memory + arch::HasVcpus {}
-
 pub trait Backend: Memory + arch::HasVcpus {
     #[inline]
     fn read_virtual_memory(
@@ -79,8 +77,6 @@ pub trait Backend: Memory + arch::HasVcpus {
         }
     }
 }
-
-impl<B: RawBackend> Backend for B {}
 
 impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
     #[inline]
