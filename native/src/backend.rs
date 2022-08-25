@@ -174,7 +174,7 @@ pub unsafe extern "C" fn read_dump(
 ) -> *mut Error {
     error::wrap(dump, || {
         let path = cstring::from_ut8(path)?;
-        let dump = icebox::backends::kvm_dump::DumbDump::read(&*path)?;
+        let dump = icebox::backends::kvm_dump::DumbDump::read(path)?;
         Ok(Backend::new(dump))
     })
 }

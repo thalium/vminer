@@ -1,3 +1,6 @@
+// FIXME: Remove this when upgrading pyo3 to 0.17
+#![allow(clippy::borrow_deref_ref)]
+
 use std::{ops::ControlFlow, sync::Arc};
 
 use ibc::{IceError, IceResult};

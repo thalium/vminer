@@ -395,7 +395,7 @@ impl LazyType {
         let res = self.with_inner(|ty| match ty {
             LazyTypeInner::Unresolved(offset) => {
                 let index = types
-                    .binary_search_by_key(&*offset, |entry| entry.offset)
+                    .binary_search_by_key(offset, |entry| entry.offset)
                     .ok()?;
                 let inner_typ = types.get(index)?;
                 inner_typ.typ.clone().into_resolved()
