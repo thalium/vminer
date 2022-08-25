@@ -142,10 +142,11 @@ impl<'a> super::Architecture<'a> for Aarch64 {
 
     fn base_pointer<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
         &self,
-        _vcpus: &Vcpus,
-        _vcpu: crate::VcpuId,
+        vcpus: &Vcpus,
+        vcpu: crate::VcpuId,
     ) -> VcpuResult<Option<VirtualAddress>> {
-        Ok(None)
+        let registers = vcpus.registers(vcpu)?;
+        Ok(Some(VirtualAddress(registers.regs[29])))
     }
 
     fn pgd<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
