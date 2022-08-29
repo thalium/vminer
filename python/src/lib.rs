@@ -1,17 +1,14 @@
 // FIXME: Remove this when upgrading pyo3 to 0.17
 #![allow(clippy::borrow_deref_ref)]
 
-use std::{ops::ControlFlow, sync::Arc};
-
-use ibc::{IceError, IceResult};
+use icebox_core::{self as ibc, Backend as _, IceError, IceResult};
 use pyo3::{
     exceptions,
     once_cell::GILOnceCell,
     prelude::*,
     types::{PyBytes, PyString},
 };
-
-use icebox_core::{self as ibc, Backend as _};
+use std::{ops::ControlFlow, sync::Arc};
 
 pyo3::create_exception!(icebox, IceboxError, pyo3::exceptions::PyException);
 
@@ -700,7 +697,8 @@ impl CallStackIter {
 
 /// Python module for Icebox
 #[pymodule]
-fn icebox(py: Python, m: &PyModule) -> PyResult<()> {
+#[pyo3(name = "icebox")]
+fn icebox_module(py: Python, m: &PyModule) -> PyResult<()> {
     let logger = pyo3_log::Logger::new(py, pyo3_log::Caching::Loggers)?;
     if let Err(err) = logger.install() {
         log::error!("{}", err);
