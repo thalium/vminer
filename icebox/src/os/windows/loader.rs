@@ -1,4 +1,4 @@
-use ibc::{IceResult, ResultExt};
+use ibc::IceResult;
 use std::{io::Read, path::PathBuf};
 
 pub struct SymbolLoader {
@@ -34,10 +34,9 @@ impl SymbolLoader {
         let mut pdb = Vec::new();
         ureq::get(&url)
             .call()
-            .context("failed to dowload PDB")?
+            .map_err(ibc::IceError::new)?
             .into_reader()
-            .read_to_end(&mut pdb)
-            .context("failed to dowload PDB")?;
+            .read_to_end(&mut pdb)?;
 
         // Save it to the filesystem
         let res = (|| {
@@ -61,7 +60,13 @@ impl super::super::SymbolLoader for SymbolLoader {
             ibc::ModuleSymbols::from_file(path).map(Some)
         } else {
             #[cfg(feature = "download_pdb")]
-            return self.download_pdb(&path, name, id).map(Some);
+            match self.download_pdb(&path, name, id) {
+                Ok(module) => Ok(Some(module)),
+                Err(err) => {
+                    log::error!("Failed to dowload PDB: {err}");
+                    Ok(None)
+                }
+            }
 
             #[cfg(not(feature = "download_pdb"))]
             Ok(None)

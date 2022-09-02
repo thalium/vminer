@@ -383,10 +383,14 @@ pub trait Os: crate::HasVcpus {
 
         let symbol = match fun_start {
             Some(fun_start) => self
-                .module_resolve_symbol_exact(fun_start, proc, module)?
-                .map(|s| (s, (addr - fun_start) as u64)),
-            None => self.module_resolve_symbol(addr, proc, module)?,
+                .module_resolve_symbol_exact(fun_start, proc, module)
+                .map(|s| s.map(|s| (s, (addr - fun_start) as u64))),
+            None => self.module_resolve_symbol(addr, proc, module),
         };
+        let symbol = symbol.unwrap_or_else(|err| {
+            log::error!("{err}");
+            None
+        });
 
         Ok(match symbol {
             Some((symbol, 0)) => format!("{mod_name}!{symbol}"),
