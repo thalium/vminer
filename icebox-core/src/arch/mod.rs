@@ -83,7 +83,7 @@ impl ExactSizeIterator for VcpuIterator {
 }
 
 pub trait HasVcpus {
-    type Arch: for<'a> Architecture<'a>;
+    type Arch: Architecture;
 
     fn arch(&self) -> Self::Arch;
 
@@ -293,7 +293,7 @@ impl<V: HasVcpus + ?Sized> HasVcpus for alloc::sync::Arc<V> {
 /// A hardware architecture
 ///
 /// This trait has a lifetime, which will be removed when GAT are stable
-pub trait Architecture<'a> {
+pub trait Architecture {
     type Endian: crate::Endianness;
 
     type Registers: Into<runtime::Registers>;

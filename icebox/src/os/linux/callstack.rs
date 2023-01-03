@@ -390,7 +390,7 @@ struct DwarfRegisters {
     bp: Option<gimli::Register>,
 }
 
-fn dwarf_registers<A: for<'a> ibc::Architecture<'a>>(arch: A) -> DwarfRegisters {
+fn dwarf_registers<A: ibc::Architecture>(arch: A) -> DwarfRegisters {
     match arch.into_runtime() {
         ibc::arch::RuntimeArchitecture::X86_64(_) => DwarfRegisters {
             ip: gimli::X86_64::RA,

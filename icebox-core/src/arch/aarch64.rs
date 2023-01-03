@@ -28,7 +28,7 @@ impl super::MmuDesc for MmuDesc {
     }
 }
 
-impl<'a> super::Architecture<'a> for Aarch64 {
+impl super::Architecture for Aarch64 {
     type Endian = LittleEndian;
 
     type Registers = Registers;

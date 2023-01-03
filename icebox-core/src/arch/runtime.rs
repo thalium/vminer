@@ -46,7 +46,7 @@ macro_rules! dispatch {
     };
 }
 
-impl<'a> arch::Architecture<'a> for Architecture {
+impl arch::Architecture for Architecture {
     type Endian = RuntimeEndian;
 
     type Registers = Registers;
