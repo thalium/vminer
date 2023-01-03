@@ -16,13 +16,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        run: rustup toolchain install stable && rustup default stable
 
       - name: cargo clippy
         run: cargo clippy -- -D warnings
@@ -32,30 +29,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          target: aarch64-unknown-none
-          toolchain: stable
-          override: true
+        run: rustup toolchain install stable && rustup default stable && rustup target add aarch64-unknown-none
 
       - name: cargo check
-        run: cargo check -p icebox
+        run: cargo check -p icebox --target aarch64-unknown-none --no-default-features
 
   fmt:
     name: Check formatting
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        uses: actions/checkout@v3
 
       - name: cargo fmt -- --check
         run: cargo fmt -- --check
@@ -72,10 +59,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Get test data
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: thalium/icebox2_data
           lfs: true
@@ -89,10 +76,7 @@ jobs:
         run: zstd -d data/linux-5.10-aarch64/dump.zst -o data/linux-5.10-aarch64/dump
 
       - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        run: rustup toolchain install stable && rustup default stable
 
       - name: cargo test
         run: cargo test -p icebox --all-features
