@@ -28,7 +28,7 @@ enum Vcpus {
 
 impl Vcpus {
     fn read_x86_64<R: Read>(mut reader: R, n_vcpus: usize) -> io::Result<Self> {
-        let mut vcpus = Vec::with_capacity(n_vcpus as usize);
+        let mut vcpus = Vec::with_capacity(n_vcpus);
 
         for _ in 0..n_vcpus {
             let mut vcpu = x86_64::Vcpu::zeroed();
@@ -44,7 +44,7 @@ impl Vcpus {
     }
 
     fn read_aarch64<R: Read>(mut reader: R, n_vcpus: usize) -> io::Result<Self> {
-        let mut vcpus = Vec::with_capacity(n_vcpus as usize);
+        let mut vcpus = Vec::with_capacity(n_vcpus);
 
         for _ in 0..n_vcpus {
             let mut vcpu = aarch64::Vcpu::zeroed();

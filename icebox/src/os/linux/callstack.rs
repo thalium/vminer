@@ -86,7 +86,7 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
             Ok(i) => Some(&self.modules[i]),
             Err(i) => {
                 let module = &self.modules[i.checked_sub(1)?];
-                module.contains(addr).then(|| module)
+                module.contains(addr).then_some(module)
             }
         }
     }

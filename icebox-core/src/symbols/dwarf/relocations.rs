@@ -158,7 +158,6 @@ fn add_relocations(
         if offset as u64 != offset64 {
             continue;
         }
-        let offset = offset as usize;
         match relocation.kind() {
             object::RelocationKind::Absolute => {
                 if let object::RelocationTarget::Symbol(symbol_idx) = relocation.target() {

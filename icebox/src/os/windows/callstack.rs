@@ -260,7 +260,7 @@ impl UnwindData {
                 Ok(i) => Some(functions[i]),
                 Err(i) => i.checked_sub(1).and_then(|i| {
                     let fun = functions[i];
-                    fun.contains(offset).then(|| fun)
+                    fun.contains(offset).then_some(fun)
                 }),
             })
         }
@@ -282,7 +282,7 @@ impl UnwindData {
 
         let frame_infos = read_u8(unwind_data)?;
         let frame_register = frame_infos & 0x0f;
-        let frame_register_offset = (frame_register != 0).then(|| frame_infos & 0xf0);
+        let frame_register_offset = (frame_register != 0).then_some(frame_infos & 0xf0);
 
         let unwind_codes = read_slice(unwind_data, 2 * unwind_code_count as usize)?;
 
@@ -347,7 +347,7 @@ impl AllModules {
             Ok(i) => Some(&mut self.0[i]),
             Err(i) => {
                 let vma = &mut self.0[i.checked_sub(1)?];
-                vma.contains(addr).then(|| vma)
+                vma.contains(addr).then_some(vma)
             }
         }
     }

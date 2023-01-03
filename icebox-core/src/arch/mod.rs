@@ -477,7 +477,7 @@ fn find_in_kernel_memory_inner<Mmu: MmuDesc, M: crate::Memory + ?Sized>(
             // for the pattern in memory
             let addr = entry.take_bits(shift, Mmu::ADDR_BITS);
             match memory.search(addr + offset, page_size - offset, finder, buf) {
-                Ok(Some(i)) => return Ok(Some(base_addr + offset + i as u64)),
+                Ok(Some(i)) => return Ok(Some(base_addr + offset + i)),
                 Ok(None) | Err(crate::MemoryAccessError::OutOfBounds) => (),
                 Err(err) => return Err(err),
             }

@@ -16,7 +16,7 @@ pub fn force_mmap(pid: u32) -> std::io::Result<()> {
     let mut bytes_read = 0;
 
     loop {
-        let read = unsafe { VirtualQueryEx(process, address, &mut region, dwlength) };
+        let read = unsafe { VirtualQueryEx(process, Some(address), &mut region, dwlength) };
         if read == 0 {
             return Ok(());
         }
@@ -44,7 +44,7 @@ pub fn force_mmap(pid: u32) -> std::io::Result<()> {
                 region.BaseAddress,
                 buffer.as_mut_ptr().cast(),
                 region.RegionSize,
-                &mut bytes_read,
+                Some(&mut bytes_read),
             )
         };
 

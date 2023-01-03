@@ -28,7 +28,7 @@ fn collect_fields(struct_name: &str, fields: &pdb::FieldList) -> Vec<crate::symb
                     .to_owned();
                 Some(crate::symbols::StructField {
                     name,
-                    offset: member.offset as u64,
+                    offset: member.offset,
                 })
             }
             _ => {
@@ -84,7 +84,7 @@ pub fn load_types<'s, S: pdb::Source<'s> + 's>(
 
             Some(crate::symbols::OwnedStruct {
                 name,
-                size: ty.size as u64,
+                size: ty.size,
                 fields,
             })
         }

@@ -21,7 +21,7 @@ cty = "0.2.2"
 spin = {version = "0.9", default-features = false, features = ["once"], optional = true}
 
 log = "0.4"
-env_logger = {version = "0.9", optional = true}
+env_logger = {version = "0.10", optional = true}
 
 [build-dependencies]
 cbindgen = {version = "0.24", default-features = false}

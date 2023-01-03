@@ -41,7 +41,7 @@ impl SymbolLoader {
         // Save it to the filesystem
         let res = (|| {
             std::fs::create_dir_all(path.parent().unwrap())?;
-            std::fs::write(&path, &pdb)
+            std::fs::write(path, &pdb)
         })();
         if let Err(err) = res {
             log::error!("Failed to write PDB at {}: {err}", path.display());
