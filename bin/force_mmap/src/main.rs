@@ -16,7 +16,7 @@ pub fn main() {
     }
 
     if let Err(err) = force_mmap(pid) {
-        eprintln!("Error: {}", err);
+        eprintln!("Error: {err}");
         std::process::exit(1);
     }
 }
@@ -32,9 +32,9 @@ fn force_mmap(pid: i32) -> std::io::Result<()> {
     };
     use sync_file::ReadAt;
 
-    let maps = fs::File::open(format!("/proc/{}/maps", pid))?;
+    let maps = fs::File::open(format!("/proc/{pid}/maps"))?;
     let mut maps = io::BufReader::new(maps);
-    let mem = sync_file::RandomAccessFile::open(format!("/proc/{}/mem", pid))?;
+    let mem = sync_file::RandomAccessFile::open(format!("/proc/{pid}/mem"))?;
 
     let mut buffer = Vec::new();
     let mut line = String::with_capacity(128);
@@ -57,7 +57,7 @@ fn force_mmap(pid: i32) -> std::io::Result<()> {
         .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
 
         if readable {
-            println!("Mapping {:x}-{:x}", start, end);
+            println!("Mapping {start:x}-{end:x}");
             buffer.resize((end - start) as usize, 0);
             mem.read_exact_at(&mut buffer, start)?;
         }

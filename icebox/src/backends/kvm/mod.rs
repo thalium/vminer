@@ -26,7 +26,7 @@ const TOTAL_LEN: usize = LIB_PATH.len() + FUN_NAME.len();
 
 /// Finds the loading address of a library's text in a process' address space
 fn find_lib(pid: libc::pid_t, name: &str) -> IceResult<u64> {
-    let path = format!("/proc/{}/maps", pid);
+    let path = format!("/proc/{pid}/maps");
     let file = fs::File::open(&path)?;
     let file = io::BufReader::new(file);
 
@@ -213,7 +213,7 @@ fn get_vcpus_fds(pid: libc::pid_t) -> IceResult<Vec<i32>> {
         None
     }
 
-    let fds = fs::read_dir(format!("/proc/{}/fd", pid))?
+    let fds = fs::read_dir(format!("/proc/{pid}/fd"))?
         .filter_map(read_one)
         .collect();
     log::debug!("Found KVM vCPU files: {fds:?}");
@@ -275,7 +275,7 @@ impl Kvm {
     ///
     /// This is pretty sure to be the largest mapping
     fn find_memory(pid: libc::pid_t) -> IceResult<ibc::mem::File> {
-        let mut maps = io::BufReader::new(fs::File::open(format!("/proc/{}/maps", pid))?);
+        let mut maps = io::BufReader::new(fs::File::open(format!("/proc/{pid}/maps"))?);
         let mut line = String::with_capacity(200);
 
         let mut map_guess = 0;
@@ -315,7 +315,7 @@ impl Kvm {
         log::debug!("Found KVM memory of size 0x{map_size:x} at address 0x{map_guess:x}",);
 
         Ok(ibc::mem::File::open(
-            format!("/proc/{}/mem", pid),
+            format!("/proc/{pid}/mem"),
             map_guess,
             map_guess + map_size,
         )?)

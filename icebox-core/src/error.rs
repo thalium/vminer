@@ -285,7 +285,7 @@ impl IceError {
 
     pub fn print_backtrace(&self) -> String {
         let mut trace = String::new();
-        fmt::write(&mut trace, format_args!("{:#}", self)).unwrap();
+        fmt::write(&mut trace, format_args!("{self:#}")).unwrap();
         trace
     }
 }
@@ -305,11 +305,10 @@ impl fmt::Display for Repr {
                 f.write_fmt(format_args!("missing required module \"{name}\""))
             }
             Repr::MissingSymbol(sym) => {
-                f.write_fmt(format_args!("missing required symbol \"{}\"", sym))
+                f.write_fmt(format_args!("missing required symbol \"{sym}\""))
             }
             Repr::MissingField(field, typ) => f.write_fmt(format_args!(
-                "missing required field \"{}\" in type \"{}\"",
-                field, typ
+                "missing required field \"{field}\" in type \"{typ}\""
             )),
             Repr::NullPtr => f.write_str("attempted to deref NULL pointer"),
             #[cfg(feature = "std")]
@@ -332,7 +331,7 @@ impl fmt::Display for IceError {
             }
 
             while let Some(cause) = current {
-                f.write_fmt(format_args!("\n    {}", cause))?;
+                f.write_fmt(format_args!("\n    {cause}"))?;
                 current = cause.source();
             }
 
