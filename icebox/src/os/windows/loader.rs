@@ -1,4 +1,4 @@
-use ibc::IceResult;
+use ibc::{IceResult, ResultExt};
 use std::{io::Read, path::PathBuf};
 
 pub struct SymbolLoader {
@@ -7,9 +7,25 @@ pub struct SymbolLoader {
 }
 
 impl SymbolLoader {
-    #[cfg(target_os = "windows")]
-    pub fn with_system_root() -> IceResult<Self> {
-        Self::with_root(r"C:\ProgramData\Dbg\sym".into())
+    pub fn with_default_root() -> IceResult<Self> {
+        let path = match std::env::var_os("_NT_SYMBOl_PATH") {
+            Some(path) => PathBuf::from(path),
+
+            #[cfg(target_os = "windows")]
+            None => PathBuf::from(r"C:\ProgramData\Dbg\sym"),
+
+            #[cfg(not(target_os = "windows"))]
+            None => {
+                let home = std::env::var_os("HOME").context("cannot find home directory")?;
+                let mut cache = PathBuf::from(home);
+                cache.push(".cache/PDB/");
+                cache
+            }
+        };
+
+        log::info!("Using PDB cache directory at {}", path.display());
+
+        Self::with_root(path)
     }
 
     pub fn with_root(root: PathBuf) -> IceResult<Self> {

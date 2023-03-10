@@ -369,10 +369,8 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
 
         let symbols_loader = match builder.loader {
             Some(loader) => loader,
-            #[cfg(target_os = "windows")]
-            None => Box::new(loader::SymbolLoader::with_system_root()?),
-            #[cfg(all(feature = "std", not(target_os = "windows")))]
-            None => Box::new(loader::SymbolLoader::with_root("./data/windows".into())?),
+            #[cfg(feature = "std")]
+            None => Box::new(loader::SymbolLoader::with_default_root()?),
             #[cfg(not(feature = "std"))]
             None => Box::new(super::EmptyLoader),
         };
