@@ -1,7 +1,6 @@
-use crate::{arch, c_char, c_void, cstring, error, error::Error};
+use crate::{arch, cstring, error};
 use alloc::{boxed::Box, sync::Arc};
-#[cfg(feature = "std")]
-use core::mem;
+use core::ffi::{c_char, c_void};
 
 #[repr(C)]
 pub struct MemoryMap {
@@ -82,7 +81,7 @@ impl ibc::Memory for X86_64Backend {
         match self.read_memory {
             Some(read_memory) => unsafe {
                 let size = buf.len();
-                match read_memory(self.data, addr, buf.as_mut_ptr(), size) {
+                match read_memory(self.data, addr, buf.as_mut_ptr().cast(), size) {
                     0 => Ok(()),
                     #[cfg(feature = "std")]
                     res if res > 0 => Err(ibc::MemoryAccessError::Io(
@@ -156,11 +155,8 @@ pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
 
 #[cfg(all(target_os = "linux", feature = "std"))]
 #[no_mangle]
-pub extern "C" fn kvm_connect(
-    pid: i32,
-    kvm: Option<&mut mem::MaybeUninit<Box<Backend>>>,
-) -> *mut Error {
-    error::wrap(kvm, || {
+pub extern "C" fn kvm_connect(pid: i32) -> Option<Box<Backend>> {
+    error::wrap_box(|| {
         let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
         Ok(Backend::new(kvm))
     })
@@ -168,11 +164,8 @@ pub extern "C" fn kvm_connect(
 
 #[cfg(feature = "std")]
 #[no_mangle]
-pub unsafe extern "C" fn read_dump(
-    path: *const c_char,
-    dump: Option<&mut mem::MaybeUninit<Box<Backend>>>,
-) -> *mut Error {
-    error::wrap(dump, || {
+pub unsafe extern "C" fn read_dump(path: *const c_char) -> Option<Box<Backend>> {
+    error::wrap_box(|| {
         let path = cstring::from_ut8(path)?;
         let dump = icebox::backends::kvm_dump::DumbDump::read(path)?;
         Ok(Backend::new(dump))

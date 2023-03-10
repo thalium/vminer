@@ -1,5 +1,5 @@
-use crate::{c_char, c_void};
 use alloc::{string::String, vec::Vec};
+use core::ffi::{c_char, c_int, c_void};
 
 #[repr(C)]
 pub struct LogRecord {
@@ -35,7 +35,7 @@ impl From<log::Level> for LogLevel {
 #[repr(C)]
 pub struct Logger {
     data: *mut c_void,
-    enabled: Option<unsafe extern "C" fn(data: *mut c_void, level: LogLevel) -> cty::c_int>,
+    enabled: Option<unsafe extern "C" fn(data: *mut c_void, level: LogLevel) -> c_int>,
     log: Option<unsafe extern "C" fn(data: *mut c_void, message: &LogRecord)>,
     flush: Option<unsafe extern "C" fn(data: *mut c_void)>,
 }
@@ -80,9 +80,11 @@ impl log::Log for Logger {
 
         let message = LogRecord {
             level: record.level().into(),
-            message: message.as_ptr(),
-            target: raw_target.as_ptr(),
-            file: file.as_ref().map_or(core::ptr::null(), |f| f.as_ptr()),
+            message: message.as_ptr().cast(),
+            target: raw_target.as_ptr().cast(),
+            file: file
+                .as_ref()
+                .map_or(core::ptr::null(), |f| f.as_ptr().cast()),
             line: record.line().unwrap_or(0),
         };
 

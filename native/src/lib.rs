@@ -14,11 +14,6 @@ mod logging;
 mod os;
 mod symbols;
 
-#[allow(non_camel_case_types)]
-pub type c_char = u8;
-#[allow(non_camel_case_types)]
-pub type c_void = u8;
-
 #[repr(C)]
 pub struct PhysicalAddress {
     val: u64,

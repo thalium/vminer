@@ -195,14 +195,18 @@ void *reallocate(void *ptr, uintptr_t size, uintptr_t align, uintptr_t new_size)
 struct Backend *backend_make(struct X86_64Backend backend);
 
 #if defined(STD)
-struct Error *kvm_connect(int32_t pid, struct Backend **kvm);
+struct Backend *kvm_connect(int32_t pid);
 #endif
 
 #if defined(STD)
-struct Error *read_dump(const char *path, struct Backend **dump);
+struct Backend *read_dump(const char *path);
 #endif
 
 void backend_free(struct Backend *backend);
+
+struct Error *take_last_error(void);
+
+uintptr_t print_last_error(char *str, uintptr_t max_len);
 
 struct Error *error_with_message(struct Error *err, char *context);
 
@@ -218,132 +222,129 @@ bool set_logger(struct Logger *logger);
 bool set_default_logger(void);
 #endif
 
-struct Error *os_new(struct Backend *backend, struct Os **os);
+struct Os *os_new(struct Backend *backend);
 
-struct Error *os_new_linux(struct Backend *backend, struct Symbols *profile, struct Os **os);
+struct Os *os_new_linux(struct Backend *backend, struct Symbols *profile);
 
 void os_free(struct Os *os);
 
-struct Error *read_virtual_memory(const struct Os *os,
-                                  struct PhysicalAddress mmu_addr,
-                                  struct VirtualAddress addr,
-                                  uint8_t *buf,
-                                  uintptr_t buf_size);
+int read_virtual_memory(const struct Os *os,
+                        struct PhysicalAddress mmu_addr,
+                        struct VirtualAddress addr,
+                        uint8_t *buf,
+                        uintptr_t buf_size);
 
-struct Error *try_read_virtual_memory(const struct Os *os,
-                                      struct PhysicalAddress mmu_addr,
-                                      struct VirtualAddress addr,
-                                      uint8_t *buf,
-                                      uintptr_t buf_size);
+int try_read_virtual_memory(const struct Os *os,
+                            struct PhysicalAddress mmu_addr,
+                            struct VirtualAddress addr,
+                            uint8_t *buf,
+                            uintptr_t buf_size);
 
-struct Error *read_process_memory(const struct Os *os,
-                                  struct PhysicalAddress mmu_addr,
-                                  struct VirtualAddress addr,
-                                  struct Process proc,
-                                  uint8_t *buf,
-                                  uintptr_t buf_size);
+int read_process_memory(const struct Os *os,
+                        struct PhysicalAddress mmu_addr,
+                        struct VirtualAddress addr,
+                        struct Process proc,
+                        uint8_t *buf,
+                        uintptr_t buf_size);
 
-struct Error *try_read_process_memory(const struct Os *os,
-                                      struct PhysicalAddress mmu_addr,
-                                      struct VirtualAddress addr,
-                                      struct Process proc,
-                                      uint8_t *buf,
-                                      uintptr_t buf_size);
+int try_read_process_memory(const struct Os *os,
+                            struct PhysicalAddress mmu_addr,
+                            struct VirtualAddress addr,
+                            struct Process proc,
+                            uint8_t *buf,
+                            uintptr_t buf_size);
 
-struct Error *os_current_process(const struct Os *os, uintptr_t vcpu, struct Process *proc);
+int os_current_process(const struct Os *os, uintptr_t vcpu, struct Process *proc);
 
-struct Error *os_current_thread(const struct Os *os, uintptr_t vcpu, struct Thread *proc);
+int os_current_thread(const struct Os *os, uintptr_t vcpu, struct Thread *proc);
 
-struct Error *os_processes(const struct Os *os, struct Process *procs, uintptr_t *n_procs);
+intptr_t os_processes(const struct Os *os, struct Process *procs, uintptr_t n_procs);
 
-struct Error *process_id(const struct Os *os, struct Process proc, uint64_t *pid);
+int process_id(const struct Os *os, struct Process proc, uint64_t *pid);
 
-struct Error *process_name(const struct Os *os, struct Process proc, char *name, uintptr_t max_len);
+intptr_t process_name(const struct Os *os, struct Process proc, char *name, uintptr_t max_len);
 
-struct Error *process_pgd(const struct Os *os, struct Process proc, struct PhysicalAddress *pgd);
+int process_pgd(const struct Os *os, struct Process proc, struct PhysicalAddress *pgd);
 
-struct Error *process_path(const struct Os *os, struct Process proc, char *name, uintptr_t max_len);
+intptr_t process_path(const struct Os *os, struct Process proc, char *name, uintptr_t max_len);
 
-struct Error *process_parent(const struct Os *os, struct Process proc, struct Process *parent);
+int process_parent(const struct Os *os, struct Process proc, struct Process *parent);
 
-struct Error *process_vmas(const struct Os *os,
-                           struct Process proc,
-                           struct Vma *vmas,
-                           uintptr_t *n_vmas);
+intptr_t process_vmas(const struct Os *os, struct Process proc, struct Vma *vmas, uintptr_t n_vmas);
 
-struct Error *process_threads(const struct Os *os,
-                              struct Process proc,
-                              struct Thread *threads,
-                              uintptr_t *n_threads);
-
-struct Error *process_children(const struct Os *os,
-                               struct Process proc,
-                               struct Process *children,
-                               uintptr_t *n_children);
-
-struct Error *process_modules(const struct Os *os,
-                              struct Process proc,
-                              struct Module *modules,
-                              uintptr_t *n_modules);
-
-struct Error *process_callstack(const struct Os *os,
-                                struct Process proc,
-                                struct StackFrame *frames,
-                                uintptr_t *n_frames);
-
-struct Error *thread_id(const struct Os *os, struct Thread thread, uint64_t *tid);
-
-struct Error *thread_name(const struct Os *os, struct Thread thread, char *name, uintptr_t max_len);
-
-struct Error *thread_process(const struct Os *os, struct Thread thread, struct Process *proc);
-
-struct Error *vma_start(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
-
-struct Error *vma_end(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
-
-struct Error *vma_path(const struct Os *os, struct Vma vma, char *path, uintptr_t max_len);
-
-struct Error *module_start(const struct Os *os,
-                           struct Module module,
-                           struct Process proc,
-                           struct VirtualAddress *start);
-
-struct Error *module_end(const struct Os *os,
-                         struct Module module,
+intptr_t process_threads(const struct Os *os,
                          struct Process proc,
-                         struct VirtualAddress *end);
+                         struct Thread *threads,
+                         uintptr_t n_threads);
 
-struct Error *module_name(const struct Os *os,
-                          struct Module module,
+intptr_t process_children(const struct Os *os,
                           struct Process proc,
-                          char *name,
-                          uintptr_t max_len);
+                          struct Process *children,
+                          uintptr_t n_children);
 
-struct Error *module_path(const struct Os *os,
-                          struct Module module,
-                          struct Process proc,
-                          char *path,
-                          uintptr_t max_len);
+intptr_t process_modules(const struct Os *os,
+                         struct Process proc,
+                         struct Module *modules,
+                         uintptr_t n_modules);
 
-struct Error *resolve_symbol(const struct Os *os,
-                             struct Process proc,
-                             struct VirtualAddress addr,
-                             char *symbol,
-                             uintptr_t max_len);
+intptr_t process_callstack(const struct Os *os,
+                           struct Process proc,
+                           struct StackFrame *frames,
+                           uintptr_t n_frames);
+
+int thread_id(const struct Os *os, struct Thread thread, uint64_t *tid);
+
+intptr_t thread_name(const struct Os *os, struct Thread thread, char *name, uintptr_t max_len);
+
+int thread_process(const struct Os *os, struct Thread thread, struct Process *proc);
+
+int vma_start(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
+
+int vma_end(const struct Os *os, struct Vma vma, struct VirtualAddress *proc);
+
+intptr_t vma_path(const struct Os *os, struct Vma vma, char *path, uintptr_t max_len);
+
+int module_start(const struct Os *os,
+                 struct Module module,
+                 struct Process proc,
+                 struct VirtualAddress *start);
+
+int module_end(const struct Os *os,
+               struct Module module,
+               struct Process proc,
+               struct VirtualAddress *end);
+
+intptr_t module_name(const struct Os *os,
+                     struct Module module,
+                     struct Process proc,
+                     char *name,
+                     uintptr_t max_len);
+
+intptr_t module_path(const struct Os *os,
+                     struct Module module,
+                     struct Process proc,
+                     char *path,
+                     uintptr_t max_len);
+
+intptr_t resolve_symbol(const struct Os *os,
+                        struct Process proc,
+                        struct VirtualAddress addr,
+                        char *symbol,
+                        uintptr_t max_len);
 
 struct Symbols *symbols_new(void);
 
-struct Error *symbols_load_from_bytes(struct Symbols *indexer,
-                                      const char *name,
-                                      const uint8_t *data,
-                                      uintptr_t len);
+int symbols_load_from_bytes(struct Symbols *indexer,
+                            const char *name,
+                            const uint8_t *data,
+                            uintptr_t len);
 
 #if defined(STD)
-struct Error *symbols_load_from_file(struct Symbols *indexer, const char *path);
+int symbols_load_from_file(struct Symbols *indexer, const char *path);
 #endif
 
 #if defined(STD)
-struct Error *symbols_load_dir(struct Symbols *indexer, const char *path);
+int symbols_load_dir(struct Symbols *indexer, const char *path);
 #endif
 
 void symbols_free(struct Symbols *indexer);

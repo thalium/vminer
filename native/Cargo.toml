@@ -17,7 +17,6 @@ icebox = {path = "../icebox", default-features = false, features = ["linux"]}
 ibc = {package = "icebox-core", path = "../icebox-core"}
 
 bytemuck = "1.9"
-cty = "0.2.2"
 spin = {version = "0.9", default-features = false, features = ["once"], optional = true}
 
 log = "0.4"

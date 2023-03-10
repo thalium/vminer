@@ -1,6 +1,6 @@
-use crate::error::{self, Error};
-use crate::{c_char, cstring};
+use crate::{cstring, error};
 use alloc::boxed::Box;
+use core::ffi::{c_char, c_int};
 use ibc::SymbolsIndexer;
 
 #[derive(Default)]
@@ -17,7 +17,7 @@ pub unsafe extern "C" fn symbols_load_from_bytes(
     name: *const c_char,
     data: *const u8,
     len: usize,
-) -> *mut Error {
+) -> c_int {
     error::wrap_unit(|| {
         let data = core::slice::from_raw_parts(data, len);
         let name = cstring::from_ut8(name)?.into();
@@ -31,7 +31,7 @@ pub unsafe extern "C" fn symbols_load_from_bytes(
 pub unsafe extern "C" fn symbols_load_from_file(
     indexer: &mut Symbols,
     path: *const c_char,
-) -> *mut Error {
+) -> c_int {
     error::wrap_unit(|| {
         let path = cstring::from_ut8(path)?;
         indexer.0.load_from_file(path)?;
@@ -41,10 +41,7 @@ pub unsafe extern "C" fn symbols_load_from_file(
 
 #[cfg(feature = "std")]
 #[no_mangle]
-pub unsafe extern "C" fn symbols_load_dir(
-    indexer: &mut Symbols,
-    path: *const c_char,
-) -> *mut Error {
+pub unsafe extern "C" fn symbols_load_dir(indexer: &mut Symbols, path: *const c_char) -> c_int {
     error::wrap_unit(|| {
         let path = cstring::from_ut8(path)?;
         indexer.0.load_dir(path)

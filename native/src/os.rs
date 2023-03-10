@@ -1,10 +1,12 @@
-use core::{fmt::Write as _, mem};
-
 use crate::{
-    backend::Backend, c_char, cstring, error, error::Error, symbols::Symbols, PhysicalAddress,
-    VirtualAddress,
+    array, backend::Backend, cstring, error, symbols::Symbols, PhysicalAddress, VirtualAddress,
 };
 use alloc::boxed::Box;
+use core::{
+    ffi::{c_char, c_int},
+    fmt::Write as _,
+    mem,
+};
 use ibc::{IceError, IceResult};
 
 #[repr(C)]
@@ -117,20 +119,13 @@ impl Os {
 }
 
 #[no_mangle]
-pub extern "C" fn os_new(
-    backend: Box<Backend>,
-    os: Option<&mut mem::MaybeUninit<Box<Os>>>,
-) -> *mut Error {
-    error::wrap_result(os, Os::new(*backend))
+pub extern "C" fn os_new(backend: Box<Backend>) -> Option<Box<Os>> {
+    error::wrap_box_result(Os::new(*backend))
 }
 
 #[no_mangle]
-pub extern "C" fn os_new_linux(
-    backend: Box<Backend>,
-    profile: Box<Symbols>,
-    os: Option<&mut mem::MaybeUninit<Box<Os>>>,
-) -> *mut Error {
-    error::wrap(os, || {
+pub extern "C" fn os_new_linux(backend: Box<Backend>, profile: Box<Symbols>) -> Option<Box<Os>> {
+    error::wrap_box(|| {
         let linux = icebox::os::Linux::create(backend.0, profile.0)?;
         Ok(Box::new(Os(Box::new(linux))))
     })
@@ -148,7 +143,7 @@ pub unsafe extern "C" fn read_virtual_memory(
     addr: VirtualAddress,
     buf: *mut u8,
     buf_size: usize,
-) -> *mut Error {
+) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
     error::wrap_unit_result(os.0.read_virtual_memory(mmu_addr.into(), addr.into(), buf))
 }
@@ -160,7 +155,7 @@ pub unsafe extern "C" fn try_read_virtual_memory(
     addr: VirtualAddress,
     buf: *mut u8,
     buf_size: usize,
-) -> *mut Error {
+) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
     error::wrap_unit_result(os.0.try_read_virtual_memory(mmu_addr.into(), addr.into(), buf))
 }
@@ -173,7 +168,7 @@ pub unsafe extern "C" fn read_process_memory(
     proc: Process,
     buf: *mut u8,
     buf_size: usize,
-) -> *mut Error {
+) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
     error::wrap_unit_result(os.0.read_process_memory(
         proc.into(),
@@ -191,7 +186,7 @@ pub unsafe extern "C" fn try_read_process_memory(
     proc: Process,
     buf: *mut u8,
     buf_size: usize,
-) -> *mut Error {
+) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
     error::wrap_unit_result(os.0.try_read_process_memory(
         proc.into(),
@@ -206,7 +201,7 @@ pub extern "C" fn os_current_process(
     os: &Os,
     vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Process>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(proc, os.0.current_process(ibc::VcpuId(vcpu)))
 }
 
@@ -215,18 +210,13 @@ pub extern "C" fn os_current_thread(
     os: &Os,
     vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Thread>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(proc, os.0.current_thread(ibc::VcpuId(vcpu)))
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn os_processes(
-    os: &Os,
-    procs: *mut Process,
-    n_procs: *mut usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
-        let mut procs = crate::array::Array::new(procs, n_procs);
+pub unsafe extern "C" fn os_processes(os: &Os, procs: *mut Process, n_procs: usize) -> isize {
+    array::fill(procs, n_procs, |procs| {
         os.0.for_each_process(&mut |proc| Ok(procs.push(proc.into())))
     })
 }
@@ -236,7 +226,7 @@ pub extern "C" fn process_id(
     os: &Os,
     proc: Process,
     pid: Option<&mut mem::MaybeUninit<u64>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(pid, os.0.process_id(proc.into()))
 }
 
@@ -246,10 +236,9 @@ pub unsafe extern "C" fn process_name(
     proc: Process,
     name: *mut c_char,
     max_len: usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
+) -> isize {
+    cstring::with_formatter(name, max_len, |fmt| {
         let n = os.0.process_name(proc.into())?;
-        let mut fmt = cstring::Formatter::new(name, max_len);
         let _ = fmt.write_str(&n);
         Ok(())
     })
@@ -260,7 +249,7 @@ pub extern "C" fn process_pgd(
     os: &Os,
     proc: Process,
     pgd: Option<&mut mem::MaybeUninit<PhysicalAddress>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(pgd, os.0.process_pgd(proc.into()))
 }
 
@@ -270,10 +259,9 @@ pub unsafe extern "C" fn process_path(
     proc: Process,
     name: *mut c_char,
     max_len: usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
+) -> isize {
+    cstring::with_formatter(name, max_len, |fmt| {
         let path = os.0.process_path(proc.into())?;
-        let mut fmt = cstring::Formatter::new(name, max_len);
         if let Some(path) = path {
             let _ = fmt.write_str(&path);
         }
@@ -286,7 +274,7 @@ pub extern "C" fn process_parent(
     os: &Os,
     proc: Process,
     parent: Option<&mut mem::MaybeUninit<Process>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(parent, os.0.process_parent(proc.into()))
 }
 
@@ -295,10 +283,9 @@ pub unsafe extern "C" fn process_vmas(
     os: &Os,
     proc: Process,
     vmas: *mut Vma,
-    n_vmas: *mut usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
-        let mut vmas = crate::array::Array::new(vmas, n_vmas);
+    n_vmas: usize,
+) -> isize {
+    array::fill(vmas, n_vmas, |vmas| {
         os.0.process_for_each_vma(proc.into(), &mut |vma| Ok(vmas.push(vma.into())))
     })
 }
@@ -308,10 +295,9 @@ pub unsafe extern "C" fn process_threads(
     os: &Os,
     proc: Process,
     threads: *mut Thread,
-    n_threads: *mut usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
-        let mut threads = crate::array::Array::new(threads, n_threads);
+    n_threads: usize,
+) -> isize {
+    array::fill(threads, n_threads, |threads| {
         os.0.process_for_each_thread(proc.into(), &mut |thread| Ok(threads.push(thread.into())))
     })
 }
@@ -321,10 +307,9 @@ pub unsafe extern "C" fn process_children(
     os: &Os,
     proc: Process,
     children: *mut Process,
-    n_children: *mut usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
-        let mut children = crate::array::Array::new(children, n_children);
+    n_children: usize,
+) -> isize {
+    array::fill(children, n_children, |children| {
         os.0.process_for_each_child(proc.into(), &mut |child| Ok(children.push(child.into())))
     })
 }
@@ -334,10 +319,9 @@ pub unsafe extern "C" fn process_modules(
     os: &Os,
     proc: Process,
     modules: *mut Module,
-    n_modules: *mut usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
-        let mut modules = crate::array::Array::new(modules, n_modules);
+    n_modules: usize,
+) -> isize {
+    array::fill(modules, n_modules, |modules| {
         os.0.process_for_each_module(proc.into(), &mut |module| Ok(modules.push(module.into())))
     })
 }
@@ -347,10 +331,9 @@ pub unsafe extern "C" fn process_callstack(
     os: &Os,
     proc: Process,
     frames: *mut StackFrame,
-    n_frames: *mut usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
-        let mut frames = crate::array::Array::new(frames, n_frames);
+    n_frames: usize,
+) -> isize {
+    array::fill(frames, n_frames, |frames| {
         os.0.process_callstack(proc.into(), &mut |frame| Ok(frames.push(frame.into())))
     })
 }
@@ -360,7 +343,7 @@ pub extern "C" fn thread_id(
     os: &Os,
     thread: Thread,
     tid: Option<&mut mem::MaybeUninit<u64>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(tid, os.0.thread_id(thread.into()))
 }
 
@@ -370,10 +353,9 @@ pub unsafe extern "C" fn thread_name(
     thread: Thread,
     name: *mut c_char,
     max_len: usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
+) -> isize {
+    cstring::with_formatter(name, max_len, |fmt| {
         let n = os.0.thread_name(thread.into())?;
-        let mut fmt = cstring::Formatter::new(name, max_len);
         if let Some(name) = n {
             let _ = fmt.write_str(&name);
         }
@@ -386,7 +368,7 @@ pub extern "C" fn thread_process(
     os: &Os,
     thread: Thread,
     proc: Option<&mut mem::MaybeUninit<Process>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(proc, os.0.thread_process(thread.into()))
 }
 
@@ -395,7 +377,7 @@ pub extern "C" fn vma_start(
     os: &Os,
     vma: Vma,
     proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(proc, os.0.vma_start(vma.into()))
 }
 
@@ -404,20 +386,14 @@ pub extern "C" fn vma_end(
     os: &Os,
     vma: Vma,
     proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap_result(proc, os.0.vma_end(vma.into()))
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn vma_path(
-    os: &Os,
-    vma: Vma,
-    path: *mut c_char,
-    max_len: usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
+pub unsafe extern "C" fn vma_path(os: &Os, vma: Vma, path: *mut c_char, max_len: usize) -> isize {
+    cstring::with_formatter(path, max_len, |fmt| {
         let p = os.0.vma_path(vma.into())?;
-        let mut fmt = cstring::Formatter::new(path, max_len);
         if let Some(path) = p {
             let _ = fmt.write_str(&path);
         }
@@ -431,7 +407,7 @@ pub extern "C" fn module_start(
     module: Module,
     proc: Process,
     start: Option<&mut mem::MaybeUninit<VirtualAddress>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap(start, || {
         let (start, _) = os.0.module_span(module.into(), proc.into())?;
         Ok(start.into())
@@ -444,7 +420,7 @@ pub extern "C" fn module_end(
     module: Module,
     proc: Process,
     end: Option<&mut mem::MaybeUninit<VirtualAddress>>,
-) -> *mut Error {
+) -> c_int {
     error::wrap(end, || {
         let (_, end) = os.0.module_span(module.into(), proc.into())?;
         Ok(end.into())
@@ -458,10 +434,9 @@ pub unsafe extern "C" fn module_name(
     proc: Process,
     name: *mut c_char,
     max_len: usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
+) -> isize {
+    cstring::with_formatter(name, max_len, |fmt| {
         let n = os.0.module_name(module.into(), proc.into())?;
-        let mut fmt = cstring::Formatter::new(name, max_len);
         let _ = fmt.write_str(&n);
         Ok(())
     })
@@ -474,10 +449,9 @@ pub unsafe extern "C" fn module_path(
     proc: Process,
     path: *mut c_char,
     max_len: usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
+) -> isize {
+    cstring::with_formatter(path, max_len, |fmt| {
         let p = os.0.module_path(module.into(), proc.into())?;
-        let mut fmt = cstring::Formatter::new(path, max_len);
         let _ = fmt.write_str(&p);
         Ok(())
     })
@@ -490,10 +464,9 @@ pub unsafe extern "C" fn resolve_symbol(
     addr: VirtualAddress,
     symbol: *mut c_char,
     max_len: usize,
-) -> *mut Error {
-    error::wrap_unit(|| {
+) -> isize {
+    cstring::with_formatter(symbol, max_len, |fmt| {
         let sym = os.0.resolve_symbol(addr.into(), proc.into())?;
-        let mut fmt = cstring::Formatter::new(symbol, max_len);
         if let Some((sym, _)) = sym {
             let _ = fmt.write_str(sym);
         }

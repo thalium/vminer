@@ -1,11 +1,11 @@
 use alloc::{borrow::Cow, string::String};
 use core::{
-    cmp, fmt,
+    cmp,
+    ffi::c_char,
+    fmt,
     ptr::{self, NonNull},
     slice, str,
 };
-
-use crate::c_char;
 
 pub unsafe fn strlen(str: *const c_char) -> usize {
     let mut len = 0;
@@ -19,14 +19,14 @@ pub unsafe fn strlen(str: *const c_char) -> usize {
 
 pub unsafe fn from_ut8_lossy<'a>(str: *const c_char) -> Cow<'a, str> {
     let len = strlen(str);
-    let bytes = slice::from_raw_parts(str, len);
+    let bytes = slice::from_raw_parts(str.cast(), len);
     String::from_utf8_lossy(bytes)
 }
 
 #[inline]
 pub unsafe fn from_ut8<'a>(str: *const c_char) -> Result<&'a str, str::Utf8Error> {
     let len = strlen(str);
-    let bytes = slice::from_raw_parts(str, len);
+    let bytes = slice::from_raw_parts(str.cast(), len);
     str::from_utf8(bytes)
 }
 
@@ -87,7 +87,7 @@ impl fmt::Write for Formatter {
         let n = cmp::min(bytes.len(), self.len);
 
         unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, n);
+            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr.cast(), n);
         }
 
         self.ptr = unsafe { NonNull::new(ptr.add(n)) };
@@ -100,4 +100,20 @@ impl fmt::Write for Formatter {
             Ok(())
         }
     }
+
+    fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        fmt::write(self, args)
+    }
+}
+
+pub unsafe fn with_formatter(
+    ptr: *mut c_char,
+    len: usize,
+    f: impl FnOnce(&mut Formatter) -> ibc::IceResult<()>,
+) -> isize {
+    crate::error::wrap_usize(|| {
+        let mut fmt = Formatter::new(ptr, len);
+        f(&mut fmt)?;
+        Ok(fmt.finish())
+    })
 }
