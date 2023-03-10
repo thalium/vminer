@@ -161,54 +161,40 @@ error0:
 }
 
 int main() {
-	Error *err = NULL;
-	Os *os = NULL;
 	Process *procs = NULL;
 	char name[30];
 	uint64_t pid;
-	size_t n_procs;
+	ssize_t n_procs;
 
 	set_logger(&LOGGER);
 
 	Backend *dump = make_dump("../data/linux-5.10-x86_64-dump");
-	if(dump == NULL) {
-		puts("Error");
-		return 1;
-	}
+	if(dump == NULL) goto error;
 
 	Symbols *symbols = symbols_new();
-	CHECK(symbols_load_dir(symbols, "../data/linux-5.10-x86_64"));
+	symbols_load_dir(symbols, "../data/linux-5.10-x86_64");
 
-	err = os_new_linux(dump, symbols, &os);
-	symbols = NULL;
-	CHECK(err);
-	CHECK(os_processes(os, NULL, &n_procs));
+	Os *os = os_new_linux(dump, symbols);
+	if(os == NULL) goto error;
+
+	n_procs = os_processes(os, NULL, 0);
+	if(n_procs < 0) goto error;
+
 	procs = malloc(n_procs * sizeof *procs);
-	CHECK(os_processes(os, procs, &n_procs));
+	n_procs = os_processes(os, procs, n_procs);
+	if(n_procs < 0) goto error;
 
 	for(size_t i = 0; i < n_procs; ++i) {
-		CHECK(process_name(os, procs[i], name, sizeof name));
-		CHECK(process_id(os, procs[i], &pid));
+		if(process_name(os, procs[i], name, sizeof name) < 0) goto error;
+		if(process_id(os, procs[i], &pid) < 0) goto error;
 
 		printf("%ld: %s\n", pid, name);
 	}
+	return 0;
 
 error:
-	free(procs);
-
-	if(os != NULL) {
-		os_free(os);
-	} else {
-		symbols_free(symbols);
-	}
-
-	if(err) {
-		char error[200];
-		error_print(err, error, 200);
-		puts(error);
-		error_free(err);
-		return 1;
-	} else {
-		return 0;
-	}
+	char buf[200];
+	print_last_error(buf, 200);
+	printf("Error: %s", buf);
+	return 1;
 }
