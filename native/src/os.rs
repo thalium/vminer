@@ -120,7 +120,7 @@ impl Os {
 
 #[no_mangle]
 pub extern "C" fn os_new(backend: Box<Backend>) -> Option<Box<Os>> {
-    error::wrap_box_result(Os::new(*backend))
+    error::wrap_box(|| Os::new(*backend))
 }
 
 #[no_mangle]
@@ -145,7 +145,7 @@ pub unsafe extern "C" fn read_virtual_memory(
     buf_size: usize,
 ) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
-    error::wrap_unit_result(os.0.read_virtual_memory(mmu_addr.into(), addr.into(), buf))
+    error::wrap_unit(|| os.0.read_virtual_memory(mmu_addr.into(), addr.into(), buf))
 }
 
 #[no_mangle]
@@ -157,7 +157,9 @@ pub unsafe extern "C" fn try_read_virtual_memory(
     buf_size: usize,
 ) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
-    error::wrap_unit_result(os.0.try_read_virtual_memory(mmu_addr.into(), addr.into(), buf))
+    error::wrap_unit(|| {
+        os.0.try_read_virtual_memory(mmu_addr.into(), addr.into(), buf)
+    })
 }
 
 #[no_mangle]
@@ -170,12 +172,9 @@ pub unsafe extern "C" fn read_process_memory(
     buf_size: usize,
 ) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
-    error::wrap_unit_result(os.0.read_process_memory(
-        proc.into(),
-        mmu_addr.into(),
-        addr.into(),
-        buf,
-    ))
+    error::wrap_unit(|| {
+        os.0.read_process_memory(proc.into(), mmu_addr.into(), addr.into(), buf)
+    })
 }
 
 #[no_mangle]
@@ -188,12 +187,9 @@ pub unsafe extern "C" fn try_read_process_memory(
     buf_size: usize,
 ) -> c_int {
     let buf = core::slice::from_raw_parts_mut(buf, buf_size);
-    error::wrap_unit_result(os.0.try_read_process_memory(
-        proc.into(),
-        mmu_addr.into(),
-        addr.into(),
-        buf,
-    ))
+    error::wrap_unit(|| {
+        os.0.try_read_process_memory(proc.into(), mmu_addr.into(), addr.into(), buf)
+    })
 }
 
 #[no_mangle]
@@ -202,7 +198,7 @@ pub extern "C" fn os_current_process(
     vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Process>>,
 ) -> c_int {
-    error::wrap_result(proc, os.0.current_process(ibc::VcpuId(vcpu)))
+    error::wrap(proc, || os.0.current_process(ibc::VcpuId(vcpu)))
 }
 
 #[no_mangle]
@@ -211,7 +207,7 @@ pub extern "C" fn os_current_thread(
     vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Thread>>,
 ) -> c_int {
-    error::wrap_result(proc, os.0.current_thread(ibc::VcpuId(vcpu)))
+    error::wrap(proc, || os.0.current_thread(ibc::VcpuId(vcpu)))
 }
 
 #[no_mangle]
@@ -227,7 +223,7 @@ pub extern "C" fn process_id(
     proc: Process,
     pid: Option<&mut mem::MaybeUninit<u64>>,
 ) -> c_int {
-    error::wrap_result(pid, os.0.process_id(proc.into()))
+    error::wrap(pid, || os.0.process_id(proc.into()))
 }
 
 #[no_mangle]
@@ -250,7 +246,7 @@ pub extern "C" fn process_pgd(
     proc: Process,
     pgd: Option<&mut mem::MaybeUninit<PhysicalAddress>>,
 ) -> c_int {
-    error::wrap_result(pgd, os.0.process_pgd(proc.into()))
+    error::wrap(pgd, || os.0.process_pgd(proc.into()))
 }
 
 #[no_mangle]
@@ -275,7 +271,7 @@ pub extern "C" fn process_parent(
     proc: Process,
     parent: Option<&mut mem::MaybeUninit<Process>>,
 ) -> c_int {
-    error::wrap_result(parent, os.0.process_parent(proc.into()))
+    error::wrap(parent, || os.0.process_parent(proc.into()))
 }
 
 #[no_mangle]
@@ -344,7 +340,7 @@ pub extern "C" fn thread_id(
     thread: Thread,
     tid: Option<&mut mem::MaybeUninit<u64>>,
 ) -> c_int {
-    error::wrap_result(tid, os.0.thread_id(thread.into()))
+    error::wrap(tid, || os.0.thread_id(thread.into()))
 }
 
 #[no_mangle]
@@ -369,7 +365,7 @@ pub extern "C" fn thread_process(
     thread: Thread,
     proc: Option<&mut mem::MaybeUninit<Process>>,
 ) -> c_int {
-    error::wrap_result(proc, os.0.thread_process(thread.into()))
+    error::wrap(proc, || os.0.thread_process(thread.into()))
 }
 
 #[no_mangle]
@@ -378,7 +374,7 @@ pub extern "C" fn vma_start(
     vma: Vma,
     proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
 ) -> c_int {
-    error::wrap_result(proc, os.0.vma_start(vma.into()))
+    error::wrap(proc, || os.0.vma_start(vma.into()))
 }
 
 #[no_mangle]
@@ -387,7 +383,7 @@ pub extern "C" fn vma_end(
     vma: Vma,
     proc: Option<&mut mem::MaybeUninit<VirtualAddress>>,
 ) -> c_int {
-    error::wrap_result(proc, os.0.vma_end(vma.into()))
+    error::wrap(proc, || os.0.vma_end(vma.into()))
 }
 
 #[no_mangle]
@@ -410,7 +406,7 @@ pub extern "C" fn module_start(
 ) -> c_int {
     error::wrap(start, || {
         let (start, _) = os.0.module_span(module.into(), proc.into())?;
-        Ok(start.into())
+        Ok(start)
     })
 }
 
@@ -423,7 +419,7 @@ pub extern "C" fn module_end(
 ) -> c_int {
     error::wrap(end, || {
         let (_, end) = os.0.module_span(module.into(), proc.into())?;
-        Ok(end.into())
+        Ok(end)
     })
 }
 

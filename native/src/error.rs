@@ -5,7 +5,7 @@ use core::{
     fmt::{self, Write},
     mem,
 };
-use ibc::IceError;
+use ibc::{IceError, IceResult};
 
 thread_local! {
     static ERROR: Cell<Option<IceError>> = const { Cell::new(None) };
@@ -40,12 +40,39 @@ fn error_into(err: IceError) -> *mut Error {
 
 pub struct Error;
 
+#[cfg(feature = "std")]
 #[inline]
-pub fn wrap_result<T, U>(res: Option<&mut mem::MaybeUninit<T>>, result: ibc::IceResult<U>) -> c_int
+fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> IceResult<T> {
+    #[cold]
+    fn convert_panic_payload(payload: Box<dyn std::any::Any + Send>) -> IceError {
+        if let Some(string) = payload.downcast_ref::<String>() {
+            IceError::new(format!("panic at: {string}"))
+        } else if let Some(s) = payload.downcast_ref::<&str>() {
+            IceError::new(format!("panic at: {s}"))
+        } else {
+            IceError::new("panic")
+        }
+    }
+
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(res) => res,
+        Err(payload) => Err(convert_panic_payload(payload)),
+    }
+}
+
+#[cfg(not(feature = "std"))]
+#[inline]
+fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> IceResult<T> {
+    f()
+}
+
+#[inline]
+pub fn wrap<F, T, U>(res: Option<&mut mem::MaybeUninit<T>>, f: F) -> c_int
 where
+    F: FnOnce() -> IceResult<U>,
     U: Into<T>,
 {
-    match result {
+    match catch_unwind(f) {
         Ok(val) => {
             if let Some(res) = res {
                 res.write(val.into());
@@ -60,16 +87,8 @@ where
 }
 
 #[inline]
-pub fn wrap<F, T>(res: Option<&mut mem::MaybeUninit<T>>, f: F) -> c_int
-where
-    F: FnOnce() -> ibc::IceResult<T>,
-{
-    wrap_result(res, f())
-}
-
-#[inline]
-pub fn wrap_unit_result(result: ibc::IceResult<()>) -> c_int {
-    match result {
+pub fn wrap_unit(f: impl FnOnce() -> IceResult<()>) -> c_int {
+    match catch_unwind(f) {
         Ok(()) => {
             clear_error();
             0
@@ -82,13 +101,8 @@ pub fn wrap_unit_result(result: ibc::IceResult<()>) -> c_int {
 }
 
 #[inline]
-pub fn wrap_unit(f: impl FnOnce() -> ibc::IceResult<()>) -> c_int {
-    wrap_unit_result(f())
-}
-
-#[inline]
-pub fn wrap_box_result<T>(result: ibc::IceResult<Box<T>>) -> Option<Box<T>> {
-    match result {
+pub fn wrap_box<T>(f: impl FnOnce() -> IceResult<Box<T>>) -> Option<Box<T>> {
+    match catch_unwind(f) {
         Ok(res) => {
             clear_error();
             Some(res)
@@ -101,12 +115,7 @@ pub fn wrap_box_result<T>(result: ibc::IceResult<Box<T>>) -> Option<Box<T>> {
 }
 
 #[inline]
-pub fn wrap_box<T>(f: impl FnOnce() -> ibc::IceResult<Box<T>>) -> Option<Box<T>> {
-    wrap_box_result(f())
-}
-
-#[inline]
-pub fn wrap_usize(f: impl FnOnce() -> ibc::IceResult<usize>) -> isize {
+pub fn wrap_usize(f: impl FnOnce() -> IceResult<usize>) -> isize {
     match f() {
         Ok(n) => {
             clear_error();
