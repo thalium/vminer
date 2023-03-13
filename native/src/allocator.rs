@@ -1,6 +1,5 @@
 use alloc::alloc;
-
-use crate::c_void;
+use core::ffi::{c_int, c_void};
 
 #[global_allocator]
 static ALLOCATOR: GlobalAllocator = GlobalAllocator::new();
@@ -24,7 +23,7 @@ impl Allocator {
 
         unsafe extern "C" fn alloc(_data: *mut c_void, size: usize, align: usize) -> *mut c_void {
             let layout = alloc::Layout::from_size_align_unchecked(size, align);
-            System.alloc(layout)
+            System.alloc(layout).cast()
         }
 
         unsafe extern "C" fn dealloc(
@@ -34,7 +33,7 @@ impl Allocator {
             align: usize,
         ) {
             let layout = alloc::Layout::from_size_align_unchecked(size, align);
-            System.dealloc(ptr, layout)
+            System.dealloc(ptr.cast(), layout)
         }
 
         unsafe extern "C" fn realloc(
@@ -45,7 +44,7 @@ impl Allocator {
             new_size: usize,
         ) -> *mut c_void {
             let layout = alloc::Layout::from_size_align_unchecked(size, align);
-            System.realloc(ptr, layout, new_size)
+            System.realloc(ptr.cast(), layout, new_size).cast()
         }
 
         Self {
@@ -79,36 +78,36 @@ impl GlobalAllocator {
 }
 
 unsafe impl alloc::GlobalAlloc for GlobalAllocator {
-    unsafe fn alloc(&self, layout: alloc::Layout) -> *mut c_void {
+    unsafe fn alloc(&self, layout: alloc::Layout) -> *mut u8 {
         match self.get() {
-            Some(alloc) => (alloc.alloc)(alloc.data, layout.size(), layout.align()),
+            Some(alloc) => (alloc.alloc)(alloc.data, layout.size(), layout.align()).cast(),
             None => core::ptr::null_mut(),
         }
     }
 
-    unsafe fn dealloc(&self, ptr: *mut c_void, layout: alloc::Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: alloc::Layout) {
         if let Some(alloc) = self.get() {
-            (alloc.dealloc)(alloc.data, ptr, layout.size(), layout.align());
+            (alloc.dealloc)(alloc.data, ptr.cast(), layout.size(), layout.align());
         }
     }
 
-    unsafe fn realloc(
-        &self,
-        ptr: *mut c_void,
-        layout: alloc::Layout,
-        new_size: usize,
-    ) -> *mut c_void {
+    unsafe fn realloc(&self, ptr: *mut u8, layout: alloc::Layout, new_size: usize) -> *mut u8 {
         match self.get() {
-            Some(alloc) => {
-                (alloc.realloc)(alloc.data, ptr, layout.size(), layout.align(), new_size)
-            }
+            Some(alloc) => (alloc.realloc)(
+                alloc.data,
+                ptr.cast(),
+                layout.size(),
+                layout.align(),
+                new_size,
+            )
+            .cast(),
             None => core::ptr::null_mut(),
         }
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn set_allocator(allocator: Allocator) -> cty::c_int {
+pub unsafe extern "C" fn set_allocator(allocator: Allocator) -> c_int {
     let mut set = 0;
     ALLOCATOR.0.call_once(|| {
         set = 1;
@@ -126,7 +125,7 @@ pub unsafe extern "C" fn allocate(size: usize, align: usize) -> *mut c_void {
 #[no_mangle]
 pub unsafe extern "C" fn deallocate(ptr: *mut c_void, size: usize, align: usize) {
     let layout = alloc::Layout::from_size_align_unchecked(size, align);
-    alloc::dealloc(ptr, layout)
+    alloc::dealloc(ptr.cast(), layout)
 }
 
 #[no_mangle]
@@ -137,5 +136,5 @@ pub unsafe extern "C" fn reallocate(
     new_size: usize,
 ) -> *mut c_void {
     let layout = alloc::Layout::from_size_align_unchecked(size, align);
-    alloc::realloc(ptr, layout, new_size).cast()
+    alloc::realloc(ptr.cast(), layout, new_size).cast()
 }
