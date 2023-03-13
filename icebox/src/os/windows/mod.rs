@@ -384,7 +384,11 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
 
         let bits = base_addr + profile.fast_syms.KiImplementedPhysicalBits;
         let bits: u64 = backend.read_value_virtual(kpgd, bits)?;
-        let unswizzle_mask = !(1 << (bits - 1));
+        let unswizzle_mask = if bits == 0 {
+            u64::MAX
+        } else {
+            !(1 << (bits - 1))
+        };
 
         Ok(Windows {
             backend,
