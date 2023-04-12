@@ -329,6 +329,7 @@ dependencies = [
  "memchr",
  "msvc-demangler",
  "object",
+ "once_cell",
  "once_map",
  "pdb",
  "rustc-demangle",

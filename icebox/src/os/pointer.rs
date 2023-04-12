@@ -31,7 +31,7 @@ impl<T> Copy for StructOffset<T> {}
 
 impl<T> StructOffset<T> {
     #[inline]
-    pub fn new(layout: ibc::symbols::Struct, field_name: &str) -> IceResult<Self> {
+    pub fn new(layout: ibc::symbols::StructRef, field_name: &str) -> IceResult<Self> {
         let offset = layout.find_offset(field_name)?;
         Ok(Self::from_offset(offset))
     }

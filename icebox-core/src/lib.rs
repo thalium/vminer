@@ -30,6 +30,8 @@ pub use os::{Module, Os, Process, StackFrame, Thread, Vma, VmaFlags};
 pub mod symbols;
 pub use symbols::{ModuleSymbols, SymbolsIndexer};
 
+mod utils;
+
 #[inline]
 pub const fn mask(size: u32) -> u64 {
     !(!0 << size)

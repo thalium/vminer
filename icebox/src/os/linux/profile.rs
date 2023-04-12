@@ -47,7 +47,7 @@ macro_rules! define_kernel_structs {
 
             // Make a constructor
             impl $(<$gen>)? $struct_name $(<$gen>)? {
-                fn new(layout: ibc::symbols::Struct) -> IceResult<Self> {
+                fn new(layout: ibc::symbols::StructRef) -> IceResult<Self> {
                     Ok(Self {
                         $(
                             $field: StructOffset::new(layout, stringify!($field))?,

@@ -1,35 +1,31 @@
-use ibc::IceResult;
+use crate::IceResult;
 
 #[cfg(feature = "std")]
 type OnceCellImp<T> = once_cell::sync::OnceCell<T>;
 
-#[cfg(all(not(feature = "std"), feature = "no_std_sync"))]
-struct OnceCellImp<T>(spin::Once<T>);
+#[cfg(not(feature = "std"))]
+struct OnceCellImp<T>(once_cell::race::OnceBox<T>);
 
-#[cfg(all(not(feature = "std"), feature = "no_std_sync"))]
+#[cfg(not(feature = "std"))]
 impl<T> OnceCellImp<T> {
     pub const fn new() -> Self {
-        Self(spin::Once::new())
+        Self(once_cell::race::OnceBox::new())
     }
 
     pub fn get_or_init<F>(&self, f: F) -> &T
     where
         F: FnOnce() -> T,
     {
-        self.0.call_once(f)
+        self.0.get_or_init(|| alloc::boxed::Box::new(f()))
     }
 
     pub fn get_or_try_init<F>(&self, f: F) -> IceResult<&T>
     where
         F: FnOnce() -> IceResult<T>,
     {
-        // TODO: fix this when https://github.com/mvdnes/spin-rs/pull/116 is merged
-        Ok(self.0.call_once(|| f().unwrap()))
+        self.0.get_or_try_init(|| Ok(alloc::boxed::Box::new(f()?)))
     }
 }
-
-#[cfg(all(not(feature = "std"), not(feature = "no_std_sync")))]
-type OnceCellImp<T> = once_cell::unsync::OnceCell<T>;
 
 pub struct OnceCell<T>(OnceCellImp<T>);
 

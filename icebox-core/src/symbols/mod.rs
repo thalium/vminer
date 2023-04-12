@@ -4,7 +4,7 @@ pub mod pdb;
 pub mod symbols_file;
 
 use super::VirtualAddress;
-use crate::{IceError, IceResult, ResultExt};
+use crate::{utils::OnceCell, IceError, IceResult, ResultExt};
 use alloc::{
     borrow::{Cow, ToOwned},
     boxed::Box,
@@ -70,22 +70,85 @@ pub fn demangle_to<W: fmt::Write>(sym: &str, mut writer: W) -> fmt::Result {
     writer.write_str(sym)
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Primitive {
+    Void,
+
+    I8,
+    U8,
+    I16,
+    U16,
+    I32,
+    U32,
+    I64,
+    U64,
+}
+
+pub type Type = Arc<TypeKind>;
+
+macro_rules! lazy_types {
+    ( $( $name:ident: $init:expr; )*) => {
+        impl TypeKind {
+            $(
+                pub fn $name() -> Type {
+                    static TYPE: OnceCell<Type> = OnceCell::new();
+                    TYPE.get_or_init(|| Arc::new($init)).clone()
+                }
+            )*
+        }
+    };
+}
+#[derive(Debug, Clone)]
+pub enum TypeKind {
+    Primitive(Primitive),
+    Bitfield,
+    Array(Type, u32),
+    Function,
+    Pointer(Type),
+    Struct(String),
+    Union(String),
+    Unknown,
+}
+
+lazy_types! {
+    unknown: TypeKind::Unknown;
+    void: TypeKind::Primitive(Primitive::Void);
+    void_ptr: TypeKind::Pointer(TypeKind::void());
+    i8: TypeKind::Primitive(Primitive::I8);
+    i8_ptr: TypeKind::Pointer(TypeKind::i8());
+    u8: TypeKind::Primitive(Primitive::U8);
+    u8_ptr: TypeKind::Pointer(TypeKind::u8());
+    i16: TypeKind::Primitive(Primitive::I16);
+    i16_ptr: TypeKind::Pointer(TypeKind::i16());
+    u16: TypeKind::Primitive(Primitive::U16);
+    u16_ptr: TypeKind::Pointer(TypeKind::u16());
+    i32: TypeKind::Primitive(Primitive::I32);
+    i32_ptr: TypeKind::Pointer(TypeKind::i32());
+    u32: TypeKind::Primitive(Primitive::U32);
+    u32_ptr: TypeKind::Pointer(TypeKind::u32());
+    i64: TypeKind::Primitive(Primitive::I64);
+    i64_ptr: TypeKind::Pointer(TypeKind::i64());
+    u64: TypeKind::Primitive(Primitive::U64);
+    u64_ptr: TypeKind::Pointer(TypeKind::u64());
+}
+
 #[derive(Debug, Clone)]
 pub struct StructField {
     pub name: String,
     pub offset: u64,
+    pub typ: Type,
 }
 
 #[derive(Debug)]
-pub struct OwnedStruct {
+pub struct Struct {
     pub size: u64,
     pub name: String,
     pub fields: Vec<StructField>,
 }
 
-impl OwnedStruct {
-    fn borrow(&self) -> Struct {
-        Struct {
+impl Struct {
+    fn borrow(&self) -> StructRef {
+        StructRef {
             size: self.size,
             name: &self.name,
             fields: &self.fields,
@@ -94,13 +157,13 @@ impl OwnedStruct {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Struct<'a> {
+pub struct StructRef<'a> {
     pub size: u64,
     pub name: &'a str,
     pub fields: &'a [StructField],
 }
 
-impl<'a> Struct<'a> {
+impl<'a> StructRef<'a> {
     pub fn find_offset(&self, field_name: &str) -> IceResult<u64> {
         match self.fields.iter().find(|field| field.name == field_name) {
             Some(field) => Ok(field.offset),
@@ -119,8 +182,8 @@ impl<'a> Struct<'a> {
         Ok((field.offset, size))
     }
 
-    pub fn into_owned(&self) -> OwnedStruct {
-        OwnedStruct {
+    pub fn into_owned(&self) -> Struct {
+        Struct {
             size: self.size,
             name: self.name.to_owned(),
             fields: self.fields.to_owned(),
@@ -132,7 +195,7 @@ impl<'a> Struct<'a> {
 pub struct ModuleSymbolsBuilder {
     buffer: String,
     symbols: Vec<(VirtualAddress, Range<usize>)>,
-    types: HashMap<String, OwnedStruct>,
+    types: HashMap<String, Struct>,
 }
 
 impl ModuleSymbolsBuilder {
@@ -164,7 +227,7 @@ impl ModuleSymbolsBuilder {
         self.symbols.push((addr, start..end))
     }
 
-    pub fn insert_struct(&mut self, structure: OwnedStruct) {
+    pub fn insert_struct(&mut self, structure: Struct) {
         self.types.insert(structure.name.clone(), structure);
     }
 
@@ -215,8 +278,8 @@ impl<S: AsRef<str>> Extend<(VirtualAddress, S)> for ModuleSymbolsBuilder {
     }
 }
 
-impl Extend<OwnedStruct> for ModuleSymbolsBuilder {
-    fn extend<I: IntoIterator<Item = OwnedStruct>>(&mut self, iter: I) {
+impl Extend<Struct> for ModuleSymbolsBuilder {
+    fn extend<I: IntoIterator<Item = Struct>>(&mut self, iter: I) {
         self.types
             .extend(iter.into_iter().map(|s| (s.name.clone(), s)))
     }
@@ -232,7 +295,7 @@ pub struct ModuleSymbols {
     /// Sorted by name to find addresses
     addresses: Box<[(VirtualAddress, Range<usize>)]>,
 
-    types: HashMap<String, OwnedStruct>,
+    types: HashMap<String, Struct>,
 }
 
 impl ModuleSymbols {
@@ -284,7 +347,7 @@ impl ModuleSymbols {
             .map(|(addr, range)| (*addr, self.symbol(range.clone())))
     }
 
-    pub fn get_struct(&self, name: &str) -> IceResult<Struct> {
+    pub fn get_struct(&self, name: &str) -> IceResult<StructRef> {
         match self.types.get(name) {
             Some(s) => Ok(s.borrow()),
             None => Err(IceError::missing_symbol(name)),

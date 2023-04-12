@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate as ibc;
-use alloc::{collections::VecDeque, rc::Rc, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use core::{cell::Cell, fmt};
 use gimli::{DebugStr, UnitOffset};
 
@@ -93,6 +93,16 @@ impl DwarfAttribute for DwAtDataMemberLocation {
     }
 }
 
+struct DwAtDataBitOffset;
+impl DwarfAttribute for DwAtDataBitOffset {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_data_bit_offset;
+    type Target = u64;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        value.udata_value()
+    }
+}
+
 struct DwAtEncoding;
 impl DwarfAttribute for DwAtEncoding {
     const DW_AT: gimli::DwAt = gimli::DW_AT_encoding;
@@ -119,6 +129,26 @@ impl DwarfAttribute for DwAtDeclaration {
     }
 }
 
+struct DwAtUpperBound;
+impl DwarfAttribute for DwAtUpperBound {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_upper_bound;
+    type Target = u64;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        value.udata_value()
+    }
+}
+
+struct DwAtCount;
+impl DwarfAttribute for DwAtCount {
+    const DW_AT: gimli::DwAt = gimli::DW_AT_count;
+    type Target = u64;
+
+    fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
+        value.udata_value()
+    }
+}
+
 /// A DWARF node has an entry and children
 struct DwarfNode<'a, 'u, 't, R: GimliReader>(gimli::EntriesTreeNode<'a, 'u, 't, R>);
 
@@ -128,10 +158,10 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
     }
 
     /// Reads the node as a struct
-    fn read_struct(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<Option<LazyStruct>> {
+    fn read_struct(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<Option<DwarfStruct>> {
         let entry = self.entry();
 
-        // Ignore anonymous types
+        // This is a declaration only
         if entry.try_read::<DwAtDeclaration>()? == Some(true) {
             return Ok(None);
         }
@@ -148,14 +178,11 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
             fields.push(node.entry().read_struct_member(debug_str)?);
         }
 
-        Ok(Some(LazyStruct {
-            size,
-            fields: fields.into(),
-        }))
+        Ok(Some(DwarfStruct { size, fields }))
     }
 
     /// Reads the node as an union
-    fn read_union(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<LazyStruct> {
+    fn read_union(self, debug_str: &DebugStr<R>) -> ResolveTypeResult<DwarfStruct> {
         let entry = self.entry();
 
         // Zero-sized types may not have their size declared
@@ -168,42 +195,65 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
         while let Some(node) = children.next()? {
             let node = DwarfNode(node);
             let (name, ty) = node.entry().read_union_member(debug_str)?;
-            fields.push((0, name, ty));
+            fields.push((FieldOffset::Bytes(0), name, ty));
         }
 
-        Ok(LazyStruct {
-            size,
-            fields: fields.into(),
-        })
+        Ok(DwarfStruct { size, fields })
+    }
+
+    fn read_array(self) -> ResolveTypeResult<(UnitOffset, u32)> {
+        let entry = self.entry();
+        let typ = entry.read::<DwAtType>()?;
+
+        let mut children = self.0.children();
+        let mut dim = 1;
+
+        while let Some(node) = children.next()? {
+            let node = DwarfNode(node);
+
+            let child_entry = node.entry();
+            if child_entry.0.tag() != gimli::DW_TAG_subrange_type {
+                return Err(ResolveTypeError::WrongAttrType);
+            }
+
+            let size = match child_entry.try_read::<DwAtUpperBound>()? {
+                Some(bound) => bound + 1,
+                None => child_entry.read::<DwAtCount>()?,
+            };
+
+            dim *= size as u32;
+        }
+
+        Ok((typ, dim))
     }
 
     fn read_type(
         self,
         debug_str: &DebugStr<R>,
-    ) -> ResolveTypeResult<Option<(Option<String>, LazyType)>> {
+    ) -> ResolveTypeResult<Option<(Option<String>, DwarfType)>> {
         let entry = self.entry();
         let name = entry.try_read_name(debug_str)?;
 
         let typ = match entry.0.tag() {
-            gimli::DW_TAG_typedef => {
-                let offset = entry.read::<DwAtType>()?;
-                return Ok(Some((name, LazyType::unresolved(offset))));
-            }
-            gimli::DW_TAG_base_type => DwarfType::Base(entry.read_base_type()?),
-            gimli::DW_TAG_pointer_type => {
-                let offset = entry.try_read::<DwAtType>()?;
-                let typ = offset.map(|o| Rc::new(LazyType::unresolved(o)));
-                DwarfType::Ptr(typ)
-            }
+            gimli::DW_TAG_typedef => DwarfType::Typedef(entry.read::<DwAtType>()?),
+            gimli::DW_TAG_base_type => DwarfType::Primitive(entry.read_base_type()?),
+            gimli::DW_TAG_pointer_type => DwarfType::Ptr(entry.try_read::<DwAtType>()?),
             gimli::DW_TAG_structure_type => match self.read_struct(debug_str)? {
                 Some(struct_) => DwarfType::Struct(struct_),
-                None => return Ok(None),
+                None => DwarfType::StructDeclaration,
             },
             gimli::DW_TAG_union_type => DwarfType::Union(self.read_union(debug_str)?),
-            _ => return Ok(None),
+            gimli::DW_TAG_array_type => {
+                let (typ, size) = self.read_array()?;
+                DwarfType::Array(typ, size)
+            }
+            tag => {
+                log::debug!("Unsupported tag: {tag}");
+                return Ok(None);
+            }
         };
 
-        Ok(Some((name, LazyType::resolved(typ))))
+        Ok(Some((name, typ)))
     }
 }
 
@@ -281,22 +331,27 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
     fn read_struct_member(
         self,
         debug_str: &gimli::DebugStr<R>,
-    ) -> ResolveTypeResult<(u64, Option<String>, LazyType)> {
-        let offset = self.read::<DwAtDataMemberLocation>()?;
-        let name = self.try_read_name(debug_str)?;
-        let typ = LazyType::unresolved(self.read::<DwAtType>()?);
+    ) -> ResolveTypeResult<(FieldOffset, Option<String>, UnitOffset)> {
+        // Bitfields use `DW_AT_data_bit_offset` instead of `DW_AT_data_member_location`
+        let field_offset = match self.try_read::<DwAtDataMemberLocation>()? {
+            Some(offset) => FieldOffset::Bytes(offset),
+            None => FieldOffset::Bits(self.read::<DwAtDataBitOffset>()?),
+        };
 
-        Ok((offset, name, typ))
+        let name = self.try_read_name(debug_str)?;
+        let typ_offset = self.read::<DwAtType>()?;
+
+        Ok((field_offset, name, typ_offset))
     }
 
     fn read_union_member(
         self,
         debug_str: &gimli::DebugStr<R>,
-    ) -> ResolveTypeResult<(Option<String>, LazyType)> {
+    ) -> ResolveTypeResult<(Option<String>, UnitOffset)> {
         let name = self.try_read_name(debug_str)?;
-        let typ = LazyType::unresolved(self.read::<DwAtType>()?);
+        let typ_offset = self.read::<DwAtType>()?;
 
-        Ok((name, typ))
+        Ok((name, typ_offset))
     }
 }
 
@@ -306,143 +361,66 @@ struct BaseType {
     signed: bool,
 }
 
-/// A
-#[derive(Debug, Clone)]
-struct LazyStruct {
-    size: u64,
-    fields: Rc<[(u64, Option<String>, LazyType)]>,
-}
-
-#[derive(Debug, Clone)]
-enum DwarfType {
-    Base(BaseType),
-    Ptr(Option<Rc<LazyType>>),
-    Struct(LazyStruct),
-    Union(LazyStruct),
-}
-
-impl DwarfType {
-    fn is_fully_resolved(&self) -> bool {
-        match self {
-            DwarfType::Base(_) => true,
-            DwarfType::Ptr(ty) => ty.as_ref().map_or(true, |ty| ty.is_resolved()),
-            DwarfType::Struct(ty) | DwarfType::Union(ty) => {
-                ty.fields.iter().all(|(_, _, ty)| ty.is_resolved())
-            }
+impl BaseType {
+    fn to_primitive(self) -> super::Type {
+        match (self.len, self.signed) {
+            (1, true) => super::TypeKind::i8(),
+            (1, false) => super::TypeKind::u8(),
+            (2, true) => super::TypeKind::i16(),
+            (2, false) => super::TypeKind::u16(),
+            (4, true) => super::TypeKind::i32(),
+            (4, false) => super::TypeKind::u32(),
+            (8, true) => super::TypeKind::i64(),
+            (8, false) => super::TypeKind::u64(),
+            _ => super::TypeKind::unknown(),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-enum LazyTypeInner {
-    Unresolved(UnitOffset),
-    Resolved(DwarfType),
-}
-
-impl Default for LazyTypeInner {
-    fn default() -> Self {
-        Self::Unresolved(UnitOffset(0))
-    }
-}
-
-///  A DWARF type that is either resolved (we know its name, its fields, etc) or
-/// not. In the latter case we only know its offset within the DWARF unit.
-struct LazyType(Cell<LazyTypeInner>);
-
-impl LazyType {
-    const fn unresolved(offset: UnitOffset) -> Self {
-        Self(Cell::new(LazyTypeInner::Unresolved(offset)))
-    }
-
-    fn resolved(typ: DwarfType) -> Self {
-        Self(Cell::new(LazyTypeInner::Resolved(typ)))
-    }
-
-    fn with_inner<T>(&self, f: impl FnOnce(&LazyTypeInner) -> T) -> T {
-        let old = self.0.take();
-        let res = f(&old);
-        self.0.set(old);
-        res
-    }
-
-    fn with_inner_mut<T>(&self, f: impl FnOnce(&mut LazyTypeInner) -> T) -> T {
-        let mut old = self.0.take();
-        let res = f(&mut old);
-        self.0.set(old);
-        res
-    }
-
-    fn with_inner_resolved_mut<T>(&self, f: impl FnOnce(&mut DwarfType) -> T) -> Option<T> {
-        self.with_inner_mut(|inner| match inner {
-            LazyTypeInner::Resolved(ty) => Some(f(ty)),
-            LazyTypeInner::Unresolved(_) => None,
-        })
-    }
-
-    fn is_resolved(&self) -> bool {
-        self.with_inner(|ty| matches!(ty, LazyTypeInner::Resolved(_)))
-    }
-
-    fn into_resolved(self) -> Option<DwarfType> {
-        match self.0.into_inner() {
-            LazyTypeInner::Unresolved(_) => None,
-            LazyTypeInner::Resolved(ty) => Some(ty),
-        }
-    }
-
-    /// Try to resolve the current type or visit it
-    fn try_resolve(&self, types: &[MidDataEntry]) {
-        let res = self.with_inner(|ty| match ty {
-            LazyTypeInner::Unresolved(offset) => {
-                let index = types
-                    .binary_search_by_key(offset, |entry| entry.offset)
-                    .ok()?;
-                let inner_typ = types.get(index)?;
-                inner_typ.typ.clone().into_resolved()
-            }
-            LazyTypeInner::Resolved(_) => None,
-        });
-
-        if let Some(ty) = res {
-            self.0.set(LazyTypeInner::Resolved(ty));
-        }
-    }
-}
-
-impl Clone for LazyType {
-    fn clone(&self) -> Self {
-        let inner = self.with_inner(|inner| inner.clone());
-        Self(Cell::new(inner))
-    }
-}
-
-impl fmt::Debug for LazyType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.with_inner(|l| l.fmt(f))
-    }
+#[derive(Debug, Clone, Copy)]
+enum FieldOffset {
+    Bytes(u64),
+    Bits(u64),
 }
 
 #[derive(Debug)]
-struct MidDataEntry {
+struct DwarfStruct {
+    size: u64,
+    fields: Vec<(FieldOffset, Option<String>, UnitOffset)>,
+}
+
+#[derive(Debug)]
+enum DwarfType {
+    Primitive(BaseType),
+    Struct(DwarfStruct),
+    StructDeclaration,
+    Union(DwarfStruct),
+    Ptr(Option<UnitOffset>),
+    Typedef(UnitOffset),
+    Array(UnitOffset, u32),
+}
+
+struct TypeEntry {
     offset: UnitOffset,
     name: Option<String>,
-    typ: LazyType,
+    dwarf_type: DwarfType,
+    typ: Cell<Option<super::Type>>,
 }
 
-struct MidData {
-    types: Vec<MidDataEntry>,
-    unresolved: VecDeque<usize>,
+struct TypeList {
+    types: Vec<TypeEntry>,
 }
 
-impl MidData {
-    fn new() -> MidData {
-        MidData {
-            types: Vec::new(),
-            unresolved: VecDeque::new(),
-        }
+impl TypeList {
+    fn new() -> TypeList {
+        TypeList { types: Vec::new() }
     }
 
-    fn find_by_offset(&self, offset: UnitOffset) -> Option<&MidDataEntry> {
+    fn push(&mut self, entry: TypeEntry) {
+        self.types.push(entry)
+    }
+
+    fn find_by_offset(&self, offset: UnitOffset) -> Option<&TypeEntry> {
         match self
             .types
             .binary_search_by_key(&offset, |entry| entry.offset)
@@ -452,7 +430,7 @@ impl MidData {
         }
     }
 
-    fn find_by_offset_mut(&mut self, offset: UnitOffset) -> Option<&mut MidDataEntry> {
+    fn find_by_offset_mut(&mut self, offset: UnitOffset) -> Option<&mut TypeEntry> {
         match self
             .types
             .binary_search_by_key(&offset, |entry| entry.offset)
@@ -461,52 +439,82 @@ impl MidData {
             Err(_) => None,
         }
     }
-}
 
-/// Flatten anonymous types
-///
-/// struct int_or_float {
-///     int kind;
-///     union { int x; float f; };
-/// };
-fn flatten_anon_fields(
-    types: &[MidDataEntry],
-    fields: &[(u64, Option<String>, LazyType)],
-    struct_name: Option<&str>,
-) -> Vec<(u64, Option<String>, LazyType)> {
-    let mut new_fields = Vec::with_capacity(fields.len());
-    for (offset, name, ty) in fields.iter() {
-        match name {
-            // Named fields are easy
-            Some(_) => new_fields.push((*offset, name.clone(), ty.clone())),
-            None => {
-                // First, resolve inner types. This is necessary
-                // because types are lazily constructed
-                ty.try_resolve(types);
+    fn classify_type(&self, typ: &TypeEntry) -> Option<super::Type> {
+        use alloc::sync::Arc;
 
-                // Then add the (hopefully) resolved type to our list of fields
-                ty.with_inner(|inner| match inner {
-                    LazyTypeInner::Unresolved(_) => {
-                        log::warn!(
-                            "Could not resolve anonymous field of struct {}",
-                            struct_name.unwrap_or("<anonymous>")
-                        );
-                    }
-                    LazyTypeInner::Resolved(ty) => match ty {
-                        DwarfType::Struct(LazyStruct { fields, .. }) => new_fields.extend(
-                            fields
-                                .iter()
-                                .map(|(o, name, ty)| (offset + o, name.clone(), ty.clone())),
-                        ),
-                        DwarfType::Union(_) => (), // TODO
-                        _ => log::warn!("Anymous field is not a struct nor an union"),
-                    },
-                });
+        let name = typ.name.as_ref();
+
+        Some(match typ.dwarf_type {
+            DwarfType::Primitive(p) => p.to_primitive(),
+            DwarfType::Struct(_) => Arc::new(super::TypeKind::Struct(name?.clone())),
+            DwarfType::StructDeclaration => Arc::new(super::TypeKind::Struct(name?.clone())),
+            DwarfType::Union(_) => Arc::new(super::TypeKind::Union(name?.clone())),
+            DwarfType::Ptr(offset) => {
+                let inner = match offset.and_then(|o| self.get_type(o)) {
+                    Some(ty) => ty,
+                    None => super::TypeKind::unknown(),
+                };
+                Arc::new(super::TypeKind::Pointer(inner))
             }
-        }
+            DwarfType::Typedef(offset) => return self.get_type(offset),
+            DwarfType::Array(offset, size) => {
+                let inner = self.get_type(offset)?;
+                Arc::new(super::TypeKind::Array(inner, size))
+            }
+        })
     }
 
-    new_fields
+    fn get_type(&self, offset: UnitOffset) -> Option<super::Type> {
+        let typ = self.find_by_offset(offset)?;
+
+        let ty = typ.typ.take().or_else(|| self.classify_type(typ))?;
+        typ.typ.set(Some(ty.clone()));
+        Some(ty)
+    }
+}
+
+fn collect_fields_into(
+    fields: &mut Vec<super::StructField>,
+    base_offset: u64,
+    types: &TypeList,
+    s: &DwarfStruct,
+) {
+    fields.reserve(s.fields.len());
+
+    for &(offset, ref name, typ_offset) in &s.fields {
+        let offset = match offset {
+            FieldOffset::Bytes(offset) => base_offset + offset,
+            // We don't really support bitfields at the moment, ignore them
+            FieldOffset::Bits(_) => continue,
+        };
+
+        match name {
+            Some(name) => fields.push(super::StructField {
+                name: name.clone(),
+                offset,
+                typ: types
+                    .get_type(typ_offset)
+                    .unwrap_or_else(super::TypeKind::unknown),
+            }),
+            None => match types.find_by_offset(typ_offset) {
+                Some(ty) => match &ty.dwarf_type {
+                    DwarfType::Struct(s) | DwarfType::Union(s) => {
+                        collect_fields_into(fields, offset, types, s)
+                    }
+                    _ => log::warn!("Anymous field is not a struct nor an union"),
+                },
+
+                None => log::warn!("Unknown anonymous field"),
+            },
+        }
+    }
+}
+
+fn collect_fields(types: &TypeList, s: &DwarfStruct) -> Vec<super::StructField> {
+    let mut fields = Vec::new();
+    collect_fields_into(&mut fields, 0, types, s);
+    fields
 }
 
 /// Fills `symbols` with types found in the given DWARF unit
@@ -517,7 +525,7 @@ fn fill<R: GimliReader>(
     symbols: &mut super::ModuleSymbolsBuilder,
 ) -> gimli::Result<()> {
     // First pass: iterate all DWARF entries and store all types
-    let mut types = Vec::new();
+    let mut types = TypeList::new();
 
     let mut tree = unit.entries_tree(abbrs, None)?;
     let root = tree.root()?;
@@ -530,8 +538,13 @@ fn fill<R: GimliReader>(
         let offset = entry.0.offset();
 
         match node.read_type(debug_str) {
-            Ok(Some((name, typ))) => {
-                types.push(MidDataEntry { offset, name, typ });
+            Ok(Some((name, dwarf_type))) => {
+                types.push(TypeEntry {
+                    offset,
+                    name,
+                    dwarf_type,
+                    typ: Cell::new(None),
+                });
             }
             Ok(None) => (),
             Err(ResolveTypeError::Gimli(err)) => return Err(err),
@@ -539,53 +552,18 @@ fn fill<R: GimliReader>(
         }
     }
 
-    /*
-    TODO: Resolve types ?
-    let mut types = MidData {
-        unresolved: (0..types.len()).collect(),
-        types,
-    };
-
-    while let Some(index) = types.unresolved.pop_front() {
-
-    }
-    */
-
-    for entry in &types {
-        entry.typ.with_inner_resolved_mut(|typ| {
-            if let DwarfType::Struct(LazyStruct { fields, .. }) = typ {
-                // Quick case: there is no anynomous field
-                if fields.iter().all(|(_, name, _)| name.is_some()) {
-                    return;
-                }
-
-                *fields = flatten_anon_fields(&types, fields, entry.name.as_deref()).into();
-            }
-        });
-    }
-
     // Finally we can add resolved types to debug infos
-    symbols.extend(
-        types
-            .into_iter()
-            .filter_map(|typ| typ.name.zip(typ.typ.into_resolved()))
-            .filter_map(|(name, ty)| match ty {
-                DwarfType::Struct(LazyStruct { size, fields }) => Some(ibc::symbols::OwnedStruct {
-                    size,
-                    name,
-                    fields: fields
-                        .iter()
-                        .filter_map(|&(offset, ref name, _)| {
-                            name.as_ref().map(|name| ibc::symbols::StructField {
-                                name: name.clone(),
-                                offset,
-                            })
-                        })
-                        .collect(),
-                }),
-                _ => None,
-            }),
-    );
+    symbols.extend(types.types.iter().filter_map(|typ| {
+        let name = typ.name.as_ref()?.clone();
+
+        match &typ.dwarf_type {
+            &DwarfType::Struct(ref s @ DwarfStruct { size, .. }) => {
+                let fields = collect_fields(&types, s);
+                Some(ibc::symbols::Struct { size, name, fields })
+            }
+            _ => None,
+        }
+    }));
 
     Ok(())
 }
