@@ -112,15 +112,14 @@ fn attach(pid: libc::pid_t, fds: &[i32]) -> IceResult<()> {
     // Find remote function addresses so we can call them.
     // Use our own functions to get the offset within the lib, and read /proc
     // to bypass the ASLR.
-    let our_libdl = find_lib(std::process::id() as _, "libdl-2")?;
-    let their_libdl = find_lib(pid, "libdl-2")?;
-    let their_dlopen = their_libdl + (libc::dlopen as u64 - our_libdl);
-    let their_dlclose = their_libdl + (libc::dlclose as u64 - our_libdl);
-    let their_dlsym = their_libdl + (libc::dlsym as u64 - our_libdl);
-    let their_dlerror = their_libdl + (libc::dlerror as u64 - our_libdl);
+    let our_libc = find_lib(std::process::id() as _, "libc.so")?;
+    let their_libc = find_lib(pid, "libc.so")?;
 
-    let our_libc = find_lib(std::process::id() as _, "libc-2")?;
-    let their_libc = find_lib(pid, "libc-2")?;
+    let their_dlopen = their_libc + (libc::dlopen as u64 - our_libc);
+    let their_dlclose = their_libc + (libc::dlclose as u64 - our_libc);
+    let their_dlsym = their_libc + (libc::dlsym as u64 - our_libc);
+    let their_dlerror = their_libc + (libc::dlerror as u64 - our_libc);
+
     let their_mmap = their_libc + (libc::mmap as u64 - our_libc);
     let their_errno = their_libc + (libc::__errno_location as u64 - our_libc);
 
@@ -336,7 +335,7 @@ impl Kvm {
     pub fn with_default_qemu_mappings(pid: libc::pid_t) -> IceResult<Kvm> {
         let default_qemu_mappings = |size| {
             if cfg!(target_arch = "x86_64") {
-                if size <= 3 << 30 {
+                if size <= 2 << 30 {
                     (
                         vec![ibc::mem::MemoryMap {
                             start: ibc::PhysicalAddress(0),
@@ -349,14 +348,14 @@ impl Kvm {
                         vec![
                             ibc::mem::MemoryMap {
                                 start: ibc::PhysicalAddress(0),
-                                end: ibc::PhysicalAddress(3 << 30),
+                                end: ibc::PhysicalAddress(2 << 30),
                             },
                             ibc::mem::MemoryMap {
                                 start: ibc::PhysicalAddress(4 << 30),
-                                end: ibc::PhysicalAddress(size + (1 << 30)),
+                                end: ibc::PhysicalAddress(size + (2 << 30)),
                             },
                         ],
-                        vec![ibc::PhysicalAddress(0), ibc::PhysicalAddress(3 << 30)],
+                        vec![ibc::PhysicalAddress(0), ibc::PhysicalAddress(2 << 30)],
                     )
                 }
             } else if cfg!(target_arch = "aarch64") {
