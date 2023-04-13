@@ -74,6 +74,7 @@ impl super::super::SymbolLoader for SymbolLoader {
         let path: PathBuf = components.iter().collect();
 
         if path.exists() {
+            log::debug!("Using {}", path.display());
             ibc::ModuleSymbols::from_file(path).map(Some)
         } else {
             #[cfg(feature = "download_pdb")]

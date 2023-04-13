@@ -4,60 +4,37 @@ use core::{fmt, marker::PhantomData};
 use ibc::{IceResult, VirtualAddress};
 
 pub trait HasLayout<L, Ctx = KernelSpace>: ibc::Os {
-    fn get_layout(&self) -> &L;
+    fn get_layout(&self) -> IceResult<&L>;
 }
 
-pub struct StructOffset<T> {
-    pub offset: u64,
-    _typ: core::marker::PhantomData<T>,
+pub trait HasOffset: Copy {
+    type Target;
+
+    fn from_layout(layout: ibc::symbols::StructRef) -> Self;
+
+    fn offset(self) -> IceResult<u64>;
 }
 
-impl<T> fmt::Debug for StructOffset<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StructOffset")
-            .field("offset", &self.offset)
-            .finish()
-    }
+pub trait Context: Copy {
+    fn read_memory<Os: ibc::Os>(
+        self,
+        os: &Os,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()>;
 }
-
-impl<T> Clone for StructOffset<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for StructOffset<T> {}
-
-impl<T> StructOffset<T> {
-    #[inline]
-    pub fn new(layout: ibc::symbols::StructRef, field_name: &str) -> IceResult<Self> {
-        let offset = layout.find_offset(field_name)?;
-        Ok(Self::from_offset(offset))
-    }
-
-    #[inline]
-    pub const fn from_offset(offset: u64) -> Self {
-        Self {
-            offset,
-            _typ: PhantomData,
-        }
-    }
-}
-
-pub trait Context<Os: ibc::Os>: Copy {
-    fn read_memory(self, os: &Os, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()>;
-}
-
-#[derive(Clone, Copy)]
-pub struct NoContext;
 
 #[derive(Clone, Copy)]
 pub struct KernelSpace;
 
-impl<Os: ibc::Os> Context<Os> for KernelSpace {
+impl Context for KernelSpace {
     #[inline]
-    fn read_memory(self, os: &Os, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+    fn read_memory<Os: ibc::Os>(
+        self,
+        os: &Os,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
         os.read_kernel_memory(addr, buf)
     }
 }
@@ -68,9 +45,14 @@ pub struct ProcSpace {
     pgd: ibc::PhysicalAddress,
 }
 
-impl<Os: ibc::Os> Context<Os> for ProcSpace {
+impl Context for ProcSpace {
     #[inline]
-    fn read_memory(self, os: &Os, addr: VirtualAddress, buf: &mut [u8]) -> IceResult<()> {
+    fn read_memory<Os: ibc::Os>(
+        self,
+        os: &Os,
+        addr: VirtualAddress,
+        buf: &mut [u8],
+    ) -> IceResult<()> {
         if addr.is_kernel() {
             os.read_kernel_memory(addr, buf)
         } else {
@@ -79,13 +61,13 @@ impl<Os: ibc::Os> Context<Os> for ProcSpace {
     }
 }
 
-pub trait Readable<Os: ibc::Os>: Sized {
-    fn read<Ctx: Context<Os>>(os: &Os, ctx: Ctx, addr: VirtualAddress) -> IceResult<Self>;
+pub trait Readable: Sized {
+    fn read<Os: ibc::Os, Ctx: Context>(os: &Os, ctx: Ctx, addr: VirtualAddress) -> IceResult<Self>;
 }
 
-impl<T: bytemuck::Pod, Os: ibc::Os> Readable<Os> for T {
+impl<T: bytemuck::Pod> Readable for T {
     #[inline]
-    fn read<Ctx: Context<Os>>(os: &Os, ctx: Ctx, addr: VirtualAddress) -> IceResult<Self> {
+    fn read<Os: ibc::Os, Ctx: Context>(os: &Os, ctx: Ctx, addr: VirtualAddress) -> IceResult<Self> {
         let mut value = bytemuck::Zeroable::zeroed();
         ctx.read_memory(os, addr, bytemuck::bytes_of_mut(&mut value))?;
         Ok(value)
@@ -167,56 +149,59 @@ impl<'a, T, Os, Ctx> Pointer<'a, T, Os, Ctx> {
     }
 }
 
-impl<'a, T, Os: ibc::Os, Ctx: Context<Os>> Pointer<'a, T, Os, Ctx> {
+impl<'a, T, Os: ibc::Os, Ctx: Context> Pointer<'a, T, Os, Ctx> {
     #[inline]
     #[allow(dead_code)]
     pub fn read(self) -> IceResult<T>
     where
-        T: Readable<Os>,
+        T: Readable,
     {
         T::read(self.os, self.ctx, self.addr)
     }
 
     #[inline]
-    pub fn field<U, F>(self, get_offset: F) -> IceResult<Pointer<'a, U, Os, Ctx>>
+    pub fn field<U, F, P>(self, get_offset: F) -> IceResult<Pointer<'a, U, Os, Ctx>>
     where
-        F: FnOnce(&T) -> StructOffset<U>,
+        F: FnOnce(&T) -> P,
+        P: HasOffset<Target = U>,
         Os: HasLayout<T, Ctx>,
     {
         if self.addr.is_null() {
             return Err(ibc::IceError::deref_null_ptr());
         }
 
-        let offset = get_offset(self.os.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()?).offset()?;
         Ok(Pointer::new(self.addr + offset, self.os, self.ctx))
     }
 
     #[inline]
-    pub fn read_field<U, F>(self, get_offset: F) -> IceResult<U>
+    pub fn read_field<U, F, P>(self, get_offset: F) -> IceResult<U>
     where
-        F: FnOnce(&T) -> StructOffset<U>,
-        U: Readable<Os>,
+        F: FnOnce(&T) -> P,
+        P: HasOffset<Target = U>,
+        U: Readable,
         Os: HasLayout<T, Ctx>,
     {
         if self.addr.is_null() {
             return Err(ibc::IceError::deref_null_ptr());
         }
 
-        let offset = get_offset(self.os.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()?).offset()?;
         U::read(self.os, self.ctx, self.addr + offset)
     }
 
     #[inline]
-    pub fn read_pointer_field<U, F>(self, get_offset: F) -> IceResult<Pointer<'a, U, Os, Ctx>>
+    pub fn read_pointer_field<U, F, P>(self, get_offset: F) -> IceResult<Pointer<'a, U, Os, Ctx>>
     where
-        F: FnOnce(&T) -> StructOffset<RawPointer<U>>,
+        F: FnOnce(&T) -> P,
+        P: HasOffset<Target = RawPointer<U>>,
         Os: HasLayout<T, Ctx>,
     {
         if self.addr.is_null() {
             return Err(ibc::IceError::deref_null_ptr());
         }
 
-        let offset = get_offset(self.os.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()?).offset()?;
         let addr = VirtualAddress::read(self.os, self.ctx, self.addr + offset)?;
         Ok(Pointer::new(addr, self.os, self.ctx))
     }

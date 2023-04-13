@@ -1,38 +1,48 @@
 #![allow(non_snake_case)]
 
-use crate::os::pointer::{self, HasLayout, StructOffset};
+use super::Windows;
+use crate::os::pointer::{self, HasLayout, HasOffset};
 use core::marker::PhantomData;
 use ibc::{IceResult, PhysicalAddress, VirtualAddress};
 
 type Pointer<T> = pointer::RawPointer<T>;
 
 pub(crate) struct FastSymbols {
-    pub KiImplementedPhysicalBits: u64,
+    pub KiImplementedPhysicalBits: Option<u64>,
     pub PsActiveProcessHead: u64,
     pub PsLoadedModuleList: u64,
 }
 
 macro_rules! impl_has_layout {
     (impl HasLayout<$struct_name:ident, kernel> = $kname:ident) => {
-        impl<B: ibc::Backend> HasLayout<$struct_name, pointer::KernelSpace> for super::Windows<B> {
-            fn get_layout(&self) -> &$struct_name {
-                &self.profile().layouts.$kname
+        impl<B: ibc::Backend> HasLayout<$struct_name, pointer::KernelSpace> for Windows<B> {
+            fn get_layout(&self) -> IceResult<&$struct_name> {
+                match &self.profile().layouts.$kname {
+                    Some(l) => Ok(l),
+                    None => Err(ibc::IceError::missing_symbol(stringify!($struct_name))),
+                }
             }
         }
     };
 
     (impl HasLayout<$struct_name:ident, user> = $kname:ident) => {
-        impl<B: ibc::Backend> HasLayout<$struct_name, pointer::ProcSpace> for super::Windows<B> {
-            fn get_layout(&self) -> &$struct_name {
-                &self.profile().layouts.$kname
+        impl<B: ibc::Backend> HasLayout<$struct_name, pointer::ProcSpace> for Windows<B> {
+            fn get_layout(&self) -> IceResult<&$struct_name> {
+                match &self.profile().layouts.$kname {
+                    Some(l) => Ok(l),
+                    None => Err(ibc::IceError::missing_symbol(stringify!($struct_name))),
+                }
             }
         }
     };
 
     (impl HasLayout<$struct_name:ident, all> = $kname:ident) => {
-        impl<B: ibc::Backend, Ctx> HasLayout<$struct_name, Ctx> for super::Windows<B> {
-            fn get_layout(&self) -> &$struct_name {
-                &self.profile().layouts.$kname
+        impl<B: ibc::Backend, Ctx> HasLayout<$struct_name, Ctx> for Windows<B> {
+            fn get_layout(&self) -> IceResult<&$struct_name> {
+                match &self.profile().layouts.$kname {
+                    Some(l) => Ok(l),
+                    None => Err(ibc::IceError::missing_symbol(stringify!($struct_name))),
+                }
             }
         }
     };
@@ -59,47 +69,81 @@ macro_rules! define_structs {
         )*
     ) => {
         $(
-            // First, redefine all fields within `StructOffset`s
-            #[non_exhaustive]
-            #[allow(non_snake_case)]
-            $( #[ $attr ] )*
-            pub(crate) struct $struct_name $(<$gen = ()>)? {
+            mod $kname {
+                use super::*;
+
+                pub const KERNEL_NAME: &str = stringify!($kname);
+
+                // First, redefine all fields within `StructOffset`s
+                #[non_exhaustive]
+                #[allow(non_snake_case)]
+                $( #[ $attr ] )*
+                pub(crate) struct $struct_name $(<$gen = ()>)? {
+                    $(
+                        $( #[ $field_attr ] )*
+                        pub $field: $field,
+                    )*
+                    $(
+                        _typ: PhantomData<$gen>,
+                    )?
+                }
+
+                // For each field, define a struct that knows how to get its offset
                 $(
-                    $( #[ $field_attr ] )*
-                    pub $field: StructOffset<$typ>,
+                    #[derive(Clone, Copy)]
+                    pub(crate) struct $field(Option<u64>);
+
+                    impl $field {
+                        const NAME: &str = stringify!($field);
+                    }
+
+                    impl HasOffset for $field {
+                        type Target = $typ;
+
+                        fn from_layout(layout: ibc::symbols::StructRef) -> Self {
+                            Self(layout.find_offset(Self::NAME))
+                        }
+
+                        fn offset(self) -> IceResult<u64> {
+                            match self.0 {
+                                Some(o) => Ok(o),
+                                None => Err(ibc::IceError::missing_field(Self::NAME, KERNEL_NAME)),
+                            }
+                        }
+                    }
                 )*
+
+                // Make a constructor
+                impl $(<$gen>)? $struct_name $(<$gen>)? {
+                    pub fn new(layout: ibc::symbols::StructRef) -> Self {
+                        Self {
+                            $(
+                                $field: <$field>::from_layout(layout),
+                            )*
+                            $(
+                                _typ: PhantomData::<$gen>,
+                            )?
+                        }
+                    }
+                }
+
                 $(
-                    _typ: PhantomData<$gen>,
+                    impl<$gen> crate::os::pointer::Monomorphize for $struct_name<$gen> {
+                        type Mono = $struct_name;
+                    }
                 )?
+
+                impl_has_layout!(impl HasLayout<$struct_name, $space> = $kname);
             }
 
-            // Make a constructor
-            impl $(<$gen>)? $struct_name $(<$gen>)? {
-                fn new(layout: ibc::symbols::StructRef) -> IceResult<Self> {
-                    Ok(Self {
-                        $(
-                            $field: StructOffset::new(layout, stringify!($field))?,
-                        )*
-                        $(
-                            _typ: PhantomData::<$gen>,
-                        )?
-                    })
-                }
-            }
-
-            $(
-                impl<$gen> crate::os::pointer::Monomorphize for $struct_name<$gen> {
-                    type Mono = $struct_name;
-                }
-            )?
-
-            impl_has_layout!(impl HasLayout<$struct_name, $space> = $kname);
+            #[allow(unused)]
+            pub(super) use $kname::$struct_name;
         )*
 
         // Then put all layouts in a single structure
         pub(super) struct $layouts {
             $(
-                $kname: $struct_name,
+                $kname: Option<$kname::$struct_name>,
             )*
         }
 
@@ -107,7 +151,7 @@ macro_rules! define_structs {
             fn new(syms: &ibc::ModuleSymbols) -> IceResult<Self> {
                 Ok(Self {
                     $(
-                        $kname: $struct_name::new(syms.get_struct(stringify!($kname))?)?,
+                        $kname: syms.get_struct($kname::KERNEL_NAME).map(|layout| $kname::$struct_name::new(layout)),
                     )*
                 })
             }
@@ -133,7 +177,7 @@ define_structs! {
         ImageFilePointer: Pointer<FileObject>,
         InheritedFromUniqueProcessId: u64,
         Pcb: Kprocess,
-        Peb: Pointer<Peb>,
+        Peb: Pointer<_Peb>,
         ThreadListHead: ListEntry<Ethread>,
         UniqueProcessId: u64,
         VadRoot: RtlAvlTree<MmvadShort>,
@@ -202,22 +246,29 @@ define_structs! {
     #[actual_name(_MMVAD_SHORT)]
     #[define_for(kernel)]
     struct MmvadShort {
-        EndingVpn: u32,
+        // For new Windows versions, the low part is actually 32 bits
+        // For old Windows versions, the high part field doesn't exist
+        EndingVpn: u64,
         EndingVpnHigh: u8,
-        StartingVpn: u32,
+        StartingVpn: u64,
         StartingVpnHigh: u8,
+
+        #[allow(dead_code)]
+        LeftChild: Pointer<MmvadShort>,
+        #[allow(dead_code)]
+        RightChild: Pointer<MmvadShort>,
         VadNode: RtlBalancedNode<MmvadShort>,
     }
 
     #[actual_name(_MMVAD)]
     #[define_for(kernel)]
     struct Mmvad {
-        FirstPrototypePte: Pointer<super::memory::MmPte>,
+        FirstPrototypePte: Pointer<crate::os::windows::memory::MmPte>,
     }
 
     #[actual_name(_PEB)]
     #[define_for(user)]
-    struct Peb {
+    struct _Peb {
         Ldr: Pointer<PebLdrData>,
     }
 
@@ -230,7 +281,7 @@ define_structs! {
     #[actual_name(_RTL_AVL_TREE)]
     #[define_for(kernel)]
     struct RtlAvlTree<T> {
-        Root: Pointer<RtlBalancedNode<T>>,
+        Root: Pointer<RtlBalancedNode>,
     }
 
     #[actual_name(_RTL_BALANCED_NODE)]
@@ -259,9 +310,10 @@ impl Profile {
     pub fn new(syms: ibc::SymbolsIndexer) -> IceResult<Self> {
         let kernel = syms.require_module("ntoskrnl.exe")?;
         let layouts = Layouts::new(kernel)?;
-        let KiImplementedPhysicalBits = kernel.get_address("KiImplementedPhysicalBits")?.0;
-        let PsActiveProcessHead = kernel.get_address("PsActiveProcessHead")?.0;
-        let PsLoadedModuleList = kernel.get_address("PsLoadedModuleList")?.0;
+        let KiImplementedPhysicalBits =
+            kernel.get_address("KiImplementedPhysicalBits").map(|s| s.0);
+        let PsActiveProcessHead = kernel.require_address("PsActiveProcessHead")?.0;
+        let PsLoadedModuleList = kernel.require_address("PsLoadedModuleList")?.0;
 
         Ok(Self {
             syms,

@@ -164,11 +164,17 @@ pub struct StructRef<'a> {
 }
 
 impl<'a> StructRef<'a> {
-    pub fn find_offset(&self, field_name: &str) -> IceResult<u64> {
-        match self.fields.iter().find(|field| field.name == field_name) {
-            Some(field) => Ok(field.offset),
-            None => Err(IceError::missing_field(field_name, self.name)),
-        }
+    pub fn find_offset(&self, field_name: &str) -> Option<u64> {
+        self.find_field(field_name).map(|f| f.offset)
+    }
+
+    pub fn require_offset(&self, field_name: &str) -> IceResult<u64> {
+        self.find_offset(field_name)
+            .ok_or_else(|| IceError::missing_field(field_name, self.name))
+    }
+
+    pub fn find_field(&self, field_name: &str) -> Option<&StructField> {
+        self.fields.iter().find(|field| field.name == field_name)
     }
 
     pub fn find_offset_and_size(&self, field_name: &str) -> IceResult<(u64, u64)> {
@@ -333,12 +339,17 @@ impl ModuleSymbols {
         Some((self.symbol(range.clone()), offset))
     }
 
-    pub fn get_address(&self, name: &str) -> IceResult<VirtualAddress> {
+    pub fn get_address(&self, name: &str) -> Option<VirtualAddress> {
         let index = self
             .addresses
             .binary_search_by_key(&name, |(_, range)| self.symbol(range.clone()))
-            .map_err(|_| IceError::missing_symbol(name))?;
-        Ok(self.addresses[index].0)
+            .ok()?;
+        Some(self.addresses[index].0)
+    }
+
+    pub fn require_address(&self, name: &str) -> IceResult<VirtualAddress> {
+        self.get_address(name)
+            .ok_or_else(|| IceError::missing_symbol(name))
     }
 
     pub fn iter_symbols(&self) -> impl ExactSizeIterator<Item = (VirtualAddress, &str)> {
@@ -347,11 +358,13 @@ impl ModuleSymbols {
             .map(|(addr, range)| (*addr, self.symbol(range.clone())))
     }
 
-    pub fn get_struct(&self, name: &str) -> IceResult<StructRef> {
-        match self.types.get(name) {
-            Some(s) => Ok(s.borrow()),
-            None => Err(IceError::missing_symbol(name)),
-        }
+    pub fn get_struct(&self, name: &str) -> Option<StructRef> {
+        self.types.get(name).map(|s| s.borrow())
+    }
+
+    pub fn require_struct(&self, name: &str) -> IceResult<StructRef> {
+        self.get_struct(name)
+            .ok_or_else(|| IceError::missing_symbol(name))
     }
 }
 
@@ -374,7 +387,7 @@ impl SymbolsIndexer {
     }
 
     pub fn get_addr(&self, lib: &str, name: &str) -> IceResult<VirtualAddress> {
-        self.require_module(lib)?.get_address(name)
+        self.require_module(lib)?.require_address(name)
     }
 
     pub fn get_module(&self, name: &str) -> Option<&ModuleSymbols> {

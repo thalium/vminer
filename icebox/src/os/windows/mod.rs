@@ -1,4 +1,4 @@
-use super::pointer::{self, Context, HasLayout, KernelSpace, Pointer, StructOffset};
+use super::pointer::{self, Context, HasLayout, KernelSpace, Pointer};
 use core::{fmt, mem, ops::ControlFlow, str};
 use ibc::{IceError, IceResult, PhysicalAddress, ResultExt, VirtualAddress};
 
@@ -20,7 +20,7 @@ pointer_defs! {
 
 impl<B: ibc::Backend, Ctx> Pointer<'_, profile::UnicodeString, Windows<B>, Ctx>
 where
-    Ctx: Context<Windows<B>>,
+    Ctx: Context,
 {
     fn read_unicode_string(self) -> IceResult<String> {
         let buffer = self.read_field(|str| str.Buffer)?;
@@ -35,17 +35,18 @@ where
 
 impl<T, B: ibc::Backend, Ctx> Pointer<'_, profile::ListEntry<T>, Windows<B>, Ctx>
 where
-    Ctx: Context<Windows<B>>,
+    Ctx: Context,
     Windows<B>: HasLayout<T, Ctx>,
 {
     /// Iterate a linked list, yielding elements of type `T`
-    fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    fn iterate_list<O, F, P>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
-        O: FnOnce(&T) -> StructOffset<profile::ListEntry<T>>,
+        O: FnOnce(&T) -> P,
+        P: super::pointer::HasOffset<Target = profile::ListEntry<T>>,
         F: FnMut(Pointer<T, Windows<B>, Ctx>) -> IceResult<ControlFlow<()>>,
     {
         let mut pos: Pointer<profile::ListEntry, _, _> = self.monomorphize();
-        let offset = get_offset(self.os.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()?).offset()?;
 
         loop {
             pos = pos.read_pointer_field(|list| list.Flink)?;
@@ -118,13 +119,14 @@ where
     Windows<B>: HasLayout<T>,
 {
     /// Iterate a kernel AVL tree, yielding elements of type `T`
-    fn iterate_tree<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    fn iterate_tree<O, F, P>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
-        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode<T>>,
+        O: FnOnce(&T) -> P,
+        P: super::pointer::HasOffset<Target = profile::RtlBalancedNode<T>>,
         F: FnMut(Pointer<T, Windows<B>>) -> IceResult<ControlFlow<()>>,
     {
         let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
-        let offset = get_offset(self.os.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()?).offset()?;
 
         if offset != 0 {
             return Err(IceError::new("Unsupported structure layout"));
@@ -134,17 +136,18 @@ where
         Ok(())
     }
 
-    fn find_in_tree<O, F>(
+    fn find_in_tree<O, F, P>(
         self,
         get_offset: O,
         mut f: F,
     ) -> IceResult<Option<Pointer<'a, T, Windows<B>>>>
     where
-        O: FnOnce(&T) -> StructOffset<profile::RtlBalancedNode<T>>,
+        O: FnOnce(&T) -> P,
+        P: super::pointer::HasOffset<Target = profile::RtlBalancedNode<T>>,
         F: FnMut(Pointer<T, Windows<B>>) -> IceResult<core::cmp::Ordering>,
     {
         let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
-        let offset = get_offset(self.os.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()?).offset()?;
 
         if offset != 0 {
             return Err(IceError::new("Unsupported structure layout"));
@@ -304,6 +307,14 @@ impl<B: ibc::Backend> Windows<B> {
         &self.profile
     }
 
+    fn has_field<L, P>(&self, field: impl FnOnce(&L) -> P) -> bool
+    where
+        Self: HasLayout<L>,
+        P: super::pointer::HasOffset,
+    {
+        self.get_layout().and_then(|l| field(l).offset()).is_ok()
+    }
+
     #[inline]
     fn pointer_of<T: ToPointer<U>, U>(&self, ptr: T) -> Pointer<U, Self> {
         ptr.to_pointer(self, KernelSpace)
@@ -382,8 +393,10 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
         })?;
         let profile = profile::Profile::new(symbols)?;
 
-        let bits = base_addr + profile.fast_syms.KiImplementedPhysicalBits;
-        let bits: u64 = backend.read_value_virtual(kpgd, bits)?;
+        let bits = match profile.fast_syms.KiImplementedPhysicalBits {
+            Some(bits) => backend.read_value_virtual(kpgd, base_addr + bits)?,
+            None => 0u64,
+        };
         let unswizzle_mask = if bits == 0 {
             u64::MAX
         } else {
@@ -562,15 +575,21 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
 
         let kproc = self.pointer_of(proc).field(|eproc| eproc.Pcb)?;
 
-        let dtb = kproc.read_field(|kproc| kproc.UserDirectoryTableBase)?;
-        if dtb.0 != 0 && dtb.0 != 1 {
-            return Ok(dtb);
+        if self.has_field::<profile::Kprocess, _>(|k| k.UserDirectoryTableBase) {
+            let dtb = kproc.read_field(|kproc| kproc.UserDirectoryTableBase)?;
+            if dtb.0 != 0 && dtb.0 != 1 {
+                return Ok(dtb);
+            }
         }
 
         kproc.read_field(|kproc| kproc.DirectoryTableBase)
     }
 
     fn process_path(&self, proc: ibc::Process) -> IceResult<Option<String>> {
+        if !self.has_field::<profile::Eprocess, _>(|e| e.ImageFilePointer) {
+            return Ok(None);
+        }
+
         self.pointer_of(proc)
             .read_pointer_field(|e| e.ImageFilePointer)?
             .map_non_null(|path| {
@@ -702,6 +721,10 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
     }
 
     fn thread_name(&self, thread: ibc::Thread) -> IceResult<Option<String>> {
+        if !self.has_field::<profile::Ethread, _>(|e| e.ThreadName) {
+            return Ok(None);
+        }
+
         self.pointer_of(thread)
             .read_pointer_field(|ethread| ethread.ThreadName)?
             .map_non_null(|name| name.read_unicode_string())
@@ -713,16 +736,32 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
 
     fn vma_start(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
         let vma = self.pointer_of(vma);
-        let low = vma.read_field(|mmvad| mmvad.StartingVpn)? as u64;
-        let high = vma.read_field(|mmvad| mmvad.StartingVpnHigh)? as u64;
-        Ok(VirtualAddress(((high << 32) + low) << 12))
+        let low = vma.read_field(|mmvad| mmvad.StartingVpn)?;
+
+        let addr = if self.has_field::<profile::MmvadShort, _>(|mm| mm.StartingVpnHigh) {
+            // This is actually a 32 bits field, truncate it.
+            let low = (low as u32) as u64;
+            let high = vma.read_field(|mmvad| mmvad.StartingVpnHigh)? as u64;
+            ((high << 32) + low) << 12
+        } else {
+            low
+        };
+        Ok(VirtualAddress(addr))
     }
 
     fn vma_end(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
         let vma = self.pointer_of(vma);
-        let low = vma.read_field(|mmvad| mmvad.EndingVpn)? as u64;
-        let high = vma.read_field(|mmvad| mmvad.EndingVpnHigh)? as u64;
-        Ok(VirtualAddress(((high << 32) + low + 1) << 12))
+        let low = vma.read_field(|mmvad| mmvad.EndingVpn)?;
+
+        let addr = if self.has_field::<profile::MmvadShort, _>(|mm| mm.EndingVpnHigh) {
+            // This is actually a 32 bits field, truncate it.
+            let low = (low as u32) as u64;
+            let high = vma.read_field(|mmvad| mmvad.EndingVpnHigh)? as u64;
+            ((high << 32) + low) << 12
+        } else {
+            low
+        };
+        Ok(VirtualAddress(addr))
     }
 
     fn vma_flags(&self, _vma: ibc::Vma) -> IceResult<ibc::VmaFlags> {

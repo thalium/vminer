@@ -1,7 +1,7 @@
 pub mod callstack;
 mod profile;
 
-use super::pointer::{Context, HasLayout, KernelSpace, Pointer, StructOffset};
+use super::pointer::{Context, HasLayout, KernelSpace, Pointer};
 use alloc::{string::String, vec::Vec};
 use core::{fmt, ops::ControlFlow};
 use ibc::{IceError, IceResult, Os, PhysicalAddress, ResultExt, VirtualAddress};
@@ -20,13 +20,14 @@ where
     Linux<B>: HasLayout<T>,
 {
     /// Iterate a linked list, yielding elements of type `T`
-    fn iterate_list<O, F>(self, get_offset: O, mut f: F) -> IceResult<()>
+    fn iterate_list<O, F, P>(self, get_offset: O, mut f: F) -> IceResult<()>
     where
-        O: FnOnce(&T) -> StructOffset<profile::ListHead<T>>,
+        O: FnOnce(&T) -> P,
+        P: super::pointer::HasOffset<Target = profile::ListHead<T>>,
         F: FnMut(Pointer<T, Linux<B>>) -> IceResult<ControlFlow<()>>,
     {
         let mut pos = self.monomorphize();
-        let offset = get_offset(self.os.get_layout()).offset;
+        let offset = get_offset(self.os.get_layout()?).offset()?;
 
         loop {
             pos = pos.read_pointer_field(|list| list.next)?;

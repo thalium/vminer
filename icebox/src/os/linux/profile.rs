@@ -1,4 +1,5 @@
-use crate::os::pointer::{self, HasLayout, StructOffset};
+use super::Linux;
+use crate::os::pointer::{self, HasLayout, HasOffset};
 use core::marker::PhantomData;
 use ibc::{IceResult, VirtualAddress};
 
@@ -32,51 +33,90 @@ macro_rules! define_kernel_structs {
         )*
     ) => {
         $(
-            // First, redefine all fields within `StructOffset`s
-            #[non_exhaustive]
-            $( #[ $attr ] )*
-            pub(crate) struct $struct_name $(<$gen = ()>)? {
+            mod $kname {
+                use super::*;
+
+                pub const KERNEL_NAME: &str = stringify!($kname);
+
+                // First, redefine all fields within `StructOffset`s
+                #[non_exhaustive]
+                #[allow(non_snake_case)]
+                $( #[ $attr ] )*
+                pub(crate) struct $struct_name $(<$gen = ()>)? {
+                    $(
+                        $( #[ $field_attr ] )*
+                        pub $field: $field,
+                    )*
+                    $(
+                        _typ: PhantomData<$gen>,
+                    )?
+                }
+
+                // For each field, define a struct that knows how to get its offset
                 $(
-                    $( #[ $field_attr ] )*
-                    pub $field: StructOffset<$typ>,
+                    #[derive(Clone, Copy)]
+                    #[allow(non_camel_case_types)]
+                    pub(crate) struct $field(Option<u64>);
+
+                    impl $field {
+                        const NAME: &str = stringify!($field);
+                    }
+
+                    impl HasOffset for $field {
+                        type Target = $typ;
+
+                        fn from_layout(layout: ibc::symbols::StructRef) -> Self {
+                            Self(layout.find_offset(Self::NAME))
+                        }
+
+                        fn offset(self) -> IceResult<u64> {
+                            match self.0 {
+                                Some(o) => Ok(o),
+                                None => Err(ibc::IceError::missing_field(Self::NAME, KERNEL_NAME)),
+                            }
+                        }
+                    }
                 )*
+
+                // Make a constructor
+                impl $(<$gen>)? $struct_name $(<$gen>)? {
+                    pub fn new(layout: ibc::symbols::StructRef) -> Self {
+                        Self {
+                            $(
+                                $field: <$field>::from_layout(layout),
+                            )*
+                            $(
+                                _typ: PhantomData::<$gen>,
+                            )?
+                        }
+                    }
+                }
+
                 $(
-                    _typ: PhantomData<$gen>,
+                    impl<$gen> crate::os::pointer::Monomorphize for $struct_name<$gen> {
+                        type Mono = $struct_name;
+                    }
                 )?
-            }
 
-            // Make a constructor
-            impl $(<$gen>)? $struct_name $(<$gen>)? {
-                fn new(layout: ibc::symbols::StructRef) -> IceResult<Self> {
-                    Ok(Self {
-                        $(
-                            $field: StructOffset::new(layout, stringify!($field))?,
-                        )*
-                        $(
-                            _typ: PhantomData::<$gen>,
-                        )?
-                    })
+                // Make the struct easily available
+                impl<B: ibc::Backend> HasLayout<$struct_name, pointer::KernelSpace> for Linux<B> {
+                    fn get_layout(&self) -> IceResult<&$struct_name> {
+                        match &self.profile.layouts.$kname {
+                            Some(l) => Ok(l),
+                            None => Err(ibc::IceError::missing_symbol(stringify!($struct_name))),
+                        }
+                    }
                 }
             }
 
-            $(
-                impl<$gen> crate::os::pointer::Monomorphize for $struct_name<$gen> {
-                    type Mono = $struct_name;
-                }
-            )?
-
-            // Make the struct easily available
-            impl<B: ibc::Backend> HasLayout<$struct_name, pointer::KernelSpace> for super::Linux<B> {
-                fn get_layout(&self) -> &$struct_name {
-                    &self.profile.layouts.$kname
-                }
-            }
+            #[allow(unused)]
+            pub(super) use $kname::$struct_name;
         )*
 
         // Then put all layouts in a single structure
         pub(super) struct $layouts {
             $(
-                $kname: $struct_name,
+                $kname: Option<$struct_name>,
             )*
         }
 
@@ -84,7 +124,7 @@ macro_rules! define_kernel_structs {
             fn new(syms: &ibc::ModuleSymbols) -> IceResult<Self> {
                 Ok(Self {
                     $(
-                        $kname: $struct_name::new(syms.get_struct(stringify!($kname))?)?,
+                        $kname: syms.get_struct($kname::KERNEL_NAME).map(|layout| $kname::$struct_name::new(layout)),
                     )*
                 })
             }
@@ -169,10 +209,10 @@ pub struct Profile {
 impl Profile {
     pub fn new(syms: ibc::SymbolsIndexer) -> IceResult<Self> {
         let symbols = syms.require_module("System.map")?;
-        let per_cpu_offset = symbols.get_address("__per_cpu_offset")?;
-        let current_task = symbols.get_address("current_task").ok().map(|sym| sym.0);
-        let init_task = symbols.get_address("init_task")?;
-        let linux_banner = symbols.get_address("linux_banner")?;
+        let per_cpu_offset = symbols.require_address("__per_cpu_offset")?;
+        let current_task = symbols.get_address("current_task").map(|sym| sym.0);
+        let init_task = symbols.require_address("init_task")?;
+        let linux_banner = symbols.require_address("linux_banner")?;
 
         let types = syms.require_module("module.ko")?;
         let layouts = Layouts::new(types)?;
