@@ -180,7 +180,9 @@ define_structs! {
         Peb: Pointer<_Peb>,
         ThreadListHead: ListEntry<Ethread>,
         UniqueProcessId: u64,
-        VadRoot: RtlAvlTree<MmvadShort>,
+        // Actual type depends on Windows version
+        // May be Pointer<RtlAvlTree> or Pointer<MmvadShort>
+        VadRoot: (),
     }
 
     #[actual_name(_ETHREAD)]

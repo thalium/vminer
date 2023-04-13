@@ -147,6 +147,11 @@ impl<'a, T, Os, Ctx> Pointer<'a, T, Os, Ctx> {
     {
         Pointer::new(self.addr, self.os, self.ctx)
     }
+
+    #[inline]
+    pub fn cast<U>(self) -> Pointer<'a, U, Os, Ctx> {
+        Pointer::new(self.addr, self.os, self.ctx)
+    }
 }
 
 impl<'a, T, Os: ibc::Os, Ctx: Context> Pointer<'a, T, Os, Ctx> {

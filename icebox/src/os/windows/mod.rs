@@ -64,13 +64,46 @@ where
     }
 }
 
-impl<'a, B: ibc::Backend> Pointer<'a, profile::RtlBalancedNode, Windows<B>> {
-    fn _iterate_tree<T, F>(self, f: &mut F) -> IceResult<ControlFlow<()>>
+impl<'a, B: ibc::Backend> Pointer<'a, profile::MmvadShort, Windows<B>> {
+    fn left_child(self) -> IceResult<Self> {
+        let has_node = self
+            .os
+            .has_field::<profile::MmvadShort, _>(|node| node.VadNode);
+
+        if has_node {
+            let node = self
+                .field(|mm| mm.VadNode)?
+                .monomorphize()
+                .read_pointer_field(|node| node.Left)?;
+            Ok(node.cast())
+        } else {
+            self.read_pointer_field(|node| node.LeftChild)
+        }
+    }
+
+    fn right_child(self) -> IceResult<Self> {
+        let has_node = self
+            .os
+            .has_field::<profile::MmvadShort, _>(|node| node.VadNode);
+
+        if has_node {
+            let node = self
+                .field(|mm| mm.VadNode)?
+                .monomorphize()
+                .read_pointer_field(|node| node.Right)?;
+            Ok(node.cast())
+        } else {
+            self.read_pointer_field(|node| node.RightChild)
+        }
+    }
+
+    /// Iterate a kernel MMVAD tree, yielding elements of type `T`
+    fn iterate_tree<F>(self, f: &mut F) -> IceResult<ControlFlow<()>>
     where
-        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<ControlFlow<()>>,
+        F: FnMut(Self) -> IceResult<ControlFlow<()>>,
     {
-        let left = self.read_pointer_field(|node| node.Left)?;
-        if !left.is_null() && left._iterate_tree(f)?.is_break() {
+        let left = self.left_child()?;
+        if !left.is_null() && left.iterate_tree(f)?.is_break() {
             return Ok(ControlFlow::Break(()));
         }
 
@@ -78,82 +111,42 @@ impl<'a, B: ibc::Backend> Pointer<'a, profile::RtlBalancedNode, Windows<B>> {
             return Ok(ControlFlow::Break(()));
         }
 
-        let right = self.read_pointer_field(|node| node.Right)?;
-        if !right.is_null() && right._iterate_tree(f)?.is_break() {
+        let right = self.right_child()?;
+        if !right.is_null() && right.iterate_tree(f)?.is_break() {
             return Ok(ControlFlow::Break(()));
         }
 
         Ok(ControlFlow::Continue(()))
     }
 
-    fn _find_in_tree<T, F>(self, f: &mut F) -> IceResult<Option<Pointer<'a, T, Windows<B>>>>
+    fn find_in_tree<F>(
+        self,
+        f: &mut F,
+    ) -> IceResult<Option<Pointer<'a, profile::MmvadShort, Windows<B>>>>
     where
-        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<core::cmp::Ordering>,
+        F: FnMut(Self) -> IceResult<core::cmp::Ordering>,
     {
         let ptr = Pointer::new(self.addr, self.os, self.ctx);
 
         match f(ptr)? {
             core::cmp::Ordering::Less => {
-                let right = self.read_pointer_field(|node| node.Right)?;
+                let right = self.right_child()?;
                 if right.is_null() {
                     Ok(None)
                 } else {
-                    right._find_in_tree(f)
+                    right.find_in_tree(f)
                 }
             }
             core::cmp::Ordering::Equal => Ok(Some(ptr)),
             core::cmp::Ordering::Greater => {
-                let left = self.read_pointer_field(|node| node.Left)?;
+                let left = self.left_child()?;
                 if left.is_null() {
                     Ok(None)
                 } else {
-                    left._find_in_tree(f)
+                    left.find_in_tree(f)
                 }
             }
         }
-    }
-}
-
-impl<'a, T, B: ibc::Backend> Pointer<'a, profile::RtlAvlTree<T>, Windows<B>>
-where
-    Windows<B>: HasLayout<T>,
-{
-    /// Iterate a kernel AVL tree, yielding elements of type `T`
-    fn iterate_tree<O, F, P>(self, get_offset: O, mut f: F) -> IceResult<()>
-    where
-        O: FnOnce(&T) -> P,
-        P: super::pointer::HasOffset<Target = profile::RtlBalancedNode<T>>,
-        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<ControlFlow<()>>,
-    {
-        let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
-        let offset = get_offset(self.os.get_layout()?).offset()?;
-
-        if offset != 0 {
-            return Err(IceError::new("Unsupported structure layout"));
-        }
-
-        node._iterate_tree(&mut f)?;
-        Ok(())
-    }
-
-    fn find_in_tree<O, F, P>(
-        self,
-        get_offset: O,
-        mut f: F,
-    ) -> IceResult<Option<Pointer<'a, T, Windows<B>>>>
-    where
-        O: FnOnce(&T) -> P,
-        P: super::pointer::HasOffset<Target = profile::RtlBalancedNode<T>>,
-        F: FnMut(Pointer<T, Windows<B>>) -> IceResult<core::cmp::Ordering>,
-    {
-        let node = self.monomorphize().read_pointer_field(|tree| tree.Root)?;
-        let offset = get_offset(self.os.get_layout()?).offset()?;
-
-        if offset != 0 {
-            return Err(IceError::new("Unsupported structure layout"));
-        }
-
-        node._find_in_tree(&mut f)
     }
 }
 
@@ -343,6 +336,20 @@ impl<B: ibc::Backend> Windows<B> {
         pe_get_pdb_guid(mod_start, Some(mod_size), |addr, buf| {
             self.try_read_process_memory(proc, pgd, addr, buf)
         })
+    }
+
+    fn vad_root(&self, proc: ibc::Process) -> IceResult<Pointer<profile::MmvadShort, Self>> {
+        let root = self.pointer_of(proc).field(|proc| proc.VadRoot)?;
+
+        Ok(
+            if self.has_field::<profile::RtlAvlTree, _>(|tree| tree.Root) {
+                root.cast::<profile::RtlAvlTree>()
+                    .read_pointer_field(|tree| tree.Root)?
+                    .cast()
+            } else {
+                root.cast()
+            },
+        )
     }
 }
 
@@ -649,9 +656,9 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         f: &mut dyn FnMut(ibc::Vma) -> IceResult<ControlFlow<()>>,
     ) -> IceResult<()> {
-        self.pointer_of(proc)
-            .field(|eproc| eproc.VadRoot)?
-            .iterate_tree(|vad| vad.VadNode, |mmvad| f(mmvad.into()))
+        self.vad_root(proc)?
+            .iterate_tree(&mut |mmvad| f(mmvad.into()))?;
+        Ok(())
     }
 
     fn process_find_vma_by_address(
@@ -659,23 +666,17 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
         proc: ibc::Process,
         addr: VirtualAddress,
     ) -> IceResult<Option<ibc::Vma>> {
-        let mmvad = self
-            .pointer_of(proc)
-            .field(|eproc| eproc.VadRoot)?
-            .find_in_tree(
-                |vad| vad.VadNode,
-                |mmvad| {
-                    let vma = mmvad.into();
+        let mmvad = self.vad_root(proc)?.find_in_tree(&mut |mmvad| {
+            let vma = mmvad.into();
 
-                    Ok(if addr < self.vma_start(vma)? {
-                        std::cmp::Ordering::Greater
-                    } else if addr < self.vma_end(vma)? {
-                        std::cmp::Ordering::Equal
-                    } else {
-                        std::cmp::Ordering::Less
-                    })
-                },
-            )?;
+            Ok(if addr < self.vma_start(vma)? {
+                std::cmp::Ordering::Greater
+            } else if addr < self.vma_end(vma)? {
+                std::cmp::Ordering::Equal
+            } else {
+                std::cmp::Ordering::Less
+            })
+        })?;
         Ok(mmvad.map(|m| m.into()))
     }
 
@@ -742,11 +743,11 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
             // This is actually a 32 bits field, truncate it.
             let low = (low as u32) as u64;
             let high = vma.read_field(|mmvad| mmvad.StartingVpnHigh)? as u64;
-            ((high << 32) + low) << 12
+            (high << 32) + low
         } else {
             low
         };
-        Ok(VirtualAddress(addr))
+        Ok(VirtualAddress(addr << 12))
     }
 
     fn vma_end(&self, vma: ibc::Vma) -> IceResult<VirtualAddress> {
@@ -757,11 +758,11 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
             // This is actually a 32 bits field, truncate it.
             let low = (low as u32) as u64;
             let high = vma.read_field(|mmvad| mmvad.EndingVpnHigh)? as u64;
-            ((high << 32) + low) << 12
+            (high << 32) + low + 1
         } else {
-            low
+            low + 1
         };
-        Ok(VirtualAddress(addr))
+        Ok(VirtualAddress(addr << 12))
     }
 
     fn vma_flags(&self, _vma: ibc::Vma) -> IceResult<ibc::VmaFlags> {
