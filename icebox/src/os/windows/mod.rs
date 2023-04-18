@@ -765,8 +765,19 @@ impl<B: ibc::Backend> ibc::Os for Windows<B> {
         Ok(VirtualAddress(addr << 12))
     }
 
-    fn vma_flags(&self, _vma: ibc::Vma) -> IceResult<ibc::VmaFlags> {
-        Err(ibc::IceError::unimplemented())
+    fn vma_flags(&self, vma: ibc::Vma) -> IceResult<ibc::VmaFlags> {
+        let vad_type = self.pointer_of(vma).read_field(|vad| vad.u)?;
+
+        // let typ = (vad_type >> 4) & ibc::mask(3) as u32;
+        let protection = (vad_type >> 7) & ibc::mask(5) as u32;
+
+        Ok(match protection {
+            0b00001 => ibc::VmaFlags::READ,
+            0b11000 | 0b00100 | 0b00101 => ibc::VmaFlags::READ | ibc::VmaFlags::WRITE,
+            0b00110 => ibc::VmaFlags::READ | ibc::VmaFlags::EXEC,
+            0b00111 => ibc::VmaFlags::READ | ibc::VmaFlags::WRITE | ibc::VmaFlags::EXEC,
+            _ => return Err(ibc::IceError::unimplemented()),
+        })
     }
 
     fn module_span(

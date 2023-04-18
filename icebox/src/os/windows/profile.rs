@@ -90,6 +90,7 @@ macro_rules! define_structs {
 
                 // For each field, define a struct that knows how to get its offset
                 $(
+                    #[allow(non_camel_case_types)]
                     #[derive(Clone, Copy)]
                     pub(crate) struct $field(Option<u64>);
 
@@ -181,7 +182,7 @@ define_structs! {
         ThreadListHead: ListEntry<Ethread>,
         UniqueProcessId: u64,
         // Actual type depends on Windows version
-        // May be Pointer<RtlAvlTree> or Pointer<MmvadShort>
+        // May be RtlAvlTree or Pointer<MmvadShort>
         VadRoot: (),
     }
 
@@ -254,6 +255,8 @@ define_structs! {
         EndingVpnHigh: u8,
         StartingVpn: u64,
         StartingVpnHigh: u8,
+
+        u: u32,
 
         #[allow(dead_code)]
         LeftChild: Pointer<MmvadShort>,
