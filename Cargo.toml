@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    # "bin/check",
     "bin/force_mmap",
     "bin/kvm_dump_live",
     "icebox",
@@ -12,3 +13,7 @@ members = [
 
 [profile.dev]
 opt-level = 1
+
+[profile.release]
+debug = 1
+# lto = "thin"

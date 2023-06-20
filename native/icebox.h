@@ -1,4 +1,4 @@
-/* Generated with cbindgen:0.24.3 */
+/* Generated with cbindgen:0.24.5 */
 
 #include <stdarg.h>
 #include <stdbool.h>
