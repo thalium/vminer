@@ -218,7 +218,7 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
 
             let size = match child_entry.try_read::<DwAtUpperBound>()? {
                 Some(bound) => bound + 1,
-                None => child_entry.read::<DwAtCount>()?,
+                None => child_entry.try_read::<DwAtCount>()?.unwrap_or(0),
             };
 
             dim *= size as u32;
@@ -247,6 +247,8 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
                 let (typ, size) = self.read_array()?;
                 DwarfType::Array(typ, size)
             }
+            gimli::DW_TAG_subroutine_type => DwarfType::Function,
+            gimli::DW_TAG_subprogram | gimli::DW_TAG_variable => return Ok(None),
             tag => {
                 log::debug!("Unsupported tag: {tag}");
                 return Ok(None);
@@ -398,6 +400,7 @@ enum DwarfType {
     Ptr(Option<UnitOffset>),
     Typedef(UnitOffset),
     Array(UnitOffset, u32),
+    Function,
 }
 
 struct TypeEntry {
@@ -462,6 +465,7 @@ impl TypeList {
                 let inner = self.get_type(offset)?;
                 Arc::new(super::TypeKind::Array(inner, size))
             }
+            DwarfType::Function => Arc::new(super::TypeKind::Function),
         })
     }
 

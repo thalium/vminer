@@ -183,6 +183,7 @@ fn add_relocations(
                     );
                 }
             }
+            object::RelocationKind::Elf(0) => (),
             _ => {
                 log::warn!(
                     "Unsupported relocation for section {} at offset 0x{:08x}",
