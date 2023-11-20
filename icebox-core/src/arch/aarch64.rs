@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use super::runtime;
-use crate::{LittleEndian, PhysicalAddress, VcpuResult, VirtualAddress};
+use crate::{endian::LittleEndian, PhysicalAddress, VcpuResult, VirtualAddress};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Aarch64;

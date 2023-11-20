@@ -120,8 +120,8 @@ impl<'a, B: ibc::Backend> Context<'a, B> {
         }
 
         let endian = match self.linux.backend.arch().endianness().as_runtime_endian() {
-            ibc::RuntimeEndian::Little => gimli::RunTimeEndian::Little,
-            ibc::RuntimeEndian::Big => gimli::RunTimeEndian::Big,
+            ibc::endian::RuntimeEndian::Little => gimli::RunTimeEndian::Little,
+            ibc::endian::RuntimeEndian::Big => gimli::RunTimeEndian::Big,
         };
 
         let mut vma_data = alloc::vec![0; (module.end - module.start) as usize];

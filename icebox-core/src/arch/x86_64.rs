@@ -1,5 +1,5 @@
 use super::runtime;
-use crate::{LittleEndian, PhysicalAddress, VirtualAddress};
+use crate::{endian::LittleEndian, PhysicalAddress, VirtualAddress};
 use bytemuck::{Pod, Zeroable};
 
 #[derive(Debug, Clone, Copy)]
