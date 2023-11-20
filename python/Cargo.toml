@@ -8,9 +8,9 @@ name = "iceboxa"
 crate-type = ["cdylib"]
 
 [dependencies]
-icebox = {path = "../icebox", features = ["all_backends"]}
-icebox-core = {path = "../icebox-core"}
+icebox = { path = "../icebox", features = ["all_backends"] }
+icebox-core = { path = "../icebox-core" }
 
-pyo3 = "0.19"
-pyo3-log = "0.8"
+pyo3 = "0.20"
+pyo3-log = "0.9"
 log = "0.4"

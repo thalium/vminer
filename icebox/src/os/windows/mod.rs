@@ -393,7 +393,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Windows<B> {
             None => Box::new(super::EmptyLoader),
         };
 
-        let symbols = builder.symbols.unwrap_or_else(ibc::SymbolsIndexer::new);
+        let symbols = builder.symbols.unwrap_or_default();
         symbols.load_module("ntoskrnl.exe".into(), &mut |_| {
             let module = symbols_loader.load(KERNEL_PDB_STR, &pdb_id)?;
             Ok(alloc::sync::Arc::new(module))

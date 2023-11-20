@@ -95,7 +95,7 @@ macro_rules! define_structs {
                     pub(crate) struct $field(Option<u64>);
 
                     impl $field {
-                        const NAME: &str = stringify!($field);
+                        const NAME: &'static str = stringify!($field);
                     }
 
                     impl HasOffset for $field {

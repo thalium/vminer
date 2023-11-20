@@ -215,7 +215,7 @@ impl<B: ibc::Backend> super::Buildable<B> for Linux<B> {
             None => Box::new(super::EmptyLoader),
         };
 
-        let symbols = builder.symbols.unwrap_or_else(ibc::SymbolsIndexer::new);
+        let symbols = builder.symbols.unwrap_or_default();
         let profile = Profile::new(symbols)?;
 
         let base_banner_addr = profile.fast_syms.linux_banner;

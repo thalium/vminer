@@ -578,15 +578,17 @@ impl StackFrame {
     }
 
     #[getter]
-    fn module(&self, py: Python) -> PyResult<&Option<Py<Module>>> {
-        self.module.get_or_try_init(py, || match self.frame.module {
-            Some(module) => {
-                let os = &self.os.borrow(py)?;
-                let module = Module::new(py, module, self.proc, os).convert_err()?;
-                Ok(Some(Py::new(py, module)?))
-            }
-            None => Ok(None),
-        })
+    fn module(&self, py: Python) -> PyResult<Option<&Py<Module>>> {
+        self.module
+            .get_or_try_init(py, || match self.frame.module {
+                Some(module) => {
+                    let os = &self.os.borrow(py)?;
+                    let module = Module::new(py, module, self.proc, os).convert_err()?;
+                    Ok(Some(Py::new(py, module)?))
+                }
+                None => Ok(None),
+            })
+            .map(|m| m.as_ref())
     }
 }
 
