@@ -13,14 +13,14 @@ std = ["icebox/std", "icebox/all_backends", "icebox/windows", "dep:env_logger"]
 custom_allocator = ["dep:spin"]
 
 [dependencies]
-icebox = {path = "../icebox", default-features = false, features = ["linux"]}
-ibc = {package = "icebox-core", path = "../icebox-core"}
+icebox = { path = "../icebox", default-features = false, features = ["linux"] }
+ibc = { package = "icebox-core", path = "../icebox-core" }
 
 bytemuck = "1.9"
-spin = {version = "0.9", default-features = false, features = ["once"], optional = true}
+spin = { version = "0.9", default-features = false, features = ["once"], optional = true }
 
 log = "0.4"
-env_logger = {version = "0.10", optional = true}
+env_logger = { version = "0.10", optional = true }
 
 [build-dependencies]
-cbindgen = {version = "0.26", default-features = false}
+cbindgen = { version = "0.26", default-features = false }

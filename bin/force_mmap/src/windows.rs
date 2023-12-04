@@ -48,7 +48,7 @@ pub fn force_mmap(pid: u32) -> std::io::Result<()> {
             )
         };
 
-        if let Err(err) = res.ok() {
+        if let Err(err) = res {
             println!("Error: {err}");
         } else if bytes_read != region.RegionSize {
             println!(

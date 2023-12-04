@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-clap = {version = "4.0.0", features = ["derive"]}
+clap = { version = "4.0.0", features = ["derive"] }
 env_logger = "0.10"
 
 
