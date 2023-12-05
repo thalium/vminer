@@ -1,6 +1,3 @@
-// FIXME: Remove this when upgrading pyo3 to 0.17
-#![allow(clippy::borrow_deref_ref)]
-
 use icebox_core::{self as ibc, Backend as _, IceError, IceResult};
 use pyo3::{
     exceptions,
