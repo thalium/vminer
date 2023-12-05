@@ -1,3 +1,4 @@
+use ibc::ResultExt;
 use icebox_core::{self as ibc, Backend as _, IceError, IceResult};
 use pyo3::{
     exceptions,
@@ -160,23 +161,54 @@ impl Dump {
     }
 }
 
+#[derive(Clone, Copy)]
+enum RequestedOs {
+    Linux,
+    Windows,
+}
+
 #[pyclass]
 struct RawOs(Box<dyn ibc::Os<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl RawOs {
-    fn new(backend: Backend, path: &str) -> IceResult<Self> {
-        use icebox::os::Buildable;
+    fn new(backend: Backend, path: Option<&str>, os: Option<RequestedOs>) -> IceResult<Self> {
+        let (mut builder, os) = Self::detect(&backend.0, os).context("failed to guess guest OS")?;
 
-        if let Some(builder) = icebox::os::Linux::quick_check(&backend.0) {
+        if let Some(path) = path {
             let mut symbols = ibc::SymbolsIndexer::new();
             symbols.load_dir(path)?;
-            let linux = builder
-                .with_symbols(symbols)
-                .build::<_, icebox::os::Linux<_>>(backend.0)?;
-            return Ok(RawOs(Box::new(linux)));
+            builder = builder.with_symbols(symbols);
         }
 
-        Err(IceError::from("Failed to guess host OS"))
+        match os {
+            RequestedOs::Linux => Ok(RawOs(Box::new(
+                builder.build::<_, icebox::os::Linux<_>>(backend.0)?,
+            ))),
+            RequestedOs::Windows => Ok(RawOs(Box::new(
+                builder.build::<_, icebox::os::Windows<_>>(backend.0)?,
+            ))),
+        }
+    }
+
+    fn detect(
+        backend: &impl ibc::Backend,
+        os: Option<RequestedOs>,
+    ) -> Option<(icebox::os::OsBuilder, RequestedOs)> {
+        use icebox::os::Buildable;
+
+        if let Some(RequestedOs::Linux) | None = os {
+            if let Some(builder) = icebox::os::Linux::quick_check(backend) {
+                return Some((builder, RequestedOs::Linux));
+            }
+        }
+
+        if let Some(RequestedOs::Windows) | None = os {
+            if let Some(builder) = icebox::os::Windows::quick_check(backend) {
+                return Some((builder, RequestedOs::Windows));
+            }
+        }
+
+        None
     }
 }
 
@@ -200,8 +232,14 @@ impl Os {
     }
 
     #[new]
-    fn new(py: Python, backend: Backend, path: &str) -> PyResult<Self> {
-        let raw = RawOs::new(backend, path).convert_err()?;
+    fn new(py: Python, backend: Backend, path: Option<&str>, kind: Option<&str>) -> PyResult<Self> {
+        let request = match kind {
+            Some("linux") => Some(RequestedOs::Linux),
+            Some("windows") => Some(RequestedOs::Windows),
+            Some(_) => Err(IceError::new("Unknown OS")).convert_err()?,
+            None => None,
+        };
+        let raw = RawOs::new(backend, path, request).convert_err()?;
         Ok(Os(PyOwned::new(py, raw)?))
     }
 
@@ -616,14 +654,13 @@ impl ModuleIter {
         this
     }
 
-    fn __next__(mut this: PyRefMut<Self>, py: Python) -> PyResult<Option<Module>> {
-        Ok(match this.modules.next() {
-            Some(module) => {
-                let os = &this.os.borrow(py)?;
-                Some(Module::new(py, module, this.proc, os).convert_err()?)
-            }
-            None => None,
-        })
+    fn __next__(&mut self, py: Python) -> PyResult<Option<Module>> {
+        let os = &self.os.borrow(py)?;
+        self.modules
+            .next()
+            .map(|module| Module::new(py, module, self.proc, os))
+            .transpose()
+            .convert_err()
     }
 }
 
@@ -661,11 +698,11 @@ impl CallStackIter {
         this
     }
 
-    fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<StackFrame>> {
-        Ok(match this.frames.next() {
+    fn __next__(&mut self) -> PyResult<Option<StackFrame>> {
+        Ok(match self.frames.next() {
             Some(frame) => Some(frame),
             None => {
-                std::mem::replace(&mut this.error, Ok(())).convert_err()?;
+                std::mem::replace(&mut self.error, Ok(())).convert_err()?;
                 None
             }
         })
