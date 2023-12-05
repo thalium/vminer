@@ -49,28 +49,6 @@ impl From<PhysicalAddress> for ibc::PhysicalAddress {
     }
 }
 
-// TODO: Remove this once https://github.com/PyO3/pyo3/pull/2398 is merged
-trait GILOnceCellExt<T> {
-    fn get_or_try_init<F, E>(&self, py: Python, f: F) -> Result<&T, E>
-    where
-        F: FnOnce() -> Result<T, E>;
-}
-
-impl<T> GILOnceCellExt<T> for GILOnceCell<T> {
-    fn get_or_try_init<F, E>(&self, py: Python, f: F) -> Result<&T, E>
-    where
-        F: FnOnce() -> Result<T, E>,
-    {
-        if let Some(value) = self.get(py) {
-            return Ok(value);
-        }
-
-        let value = f()?;
-        let _ = self.set(py, value);
-        Ok(self.get(py).unwrap())
-    }
-}
-
 struct PyOwned<T>(Option<Py<T>>);
 
 impl<T: pyo3::PyClass> PyOwned<T> {
