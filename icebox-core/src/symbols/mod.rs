@@ -434,6 +434,7 @@ impl SymbolsIndexer {
         &mut self,
         path: &std::path::Path,
     ) -> IceResult<Option<&ModuleSymbols>> {
+        log::debug!("Loading {}", path.display());
         let name = path
             .file_name()
             .context("no file name")?

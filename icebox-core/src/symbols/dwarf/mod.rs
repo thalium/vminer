@@ -132,10 +132,10 @@ impl DwarfAttribute for DwAtDeclaration {
 struct DwAtUpperBound;
 impl DwarfAttribute for DwAtUpperBound {
     const DW_AT: gimli::DwAt = gimli::DW_AT_upper_bound;
-    type Target = u64;
+    type Target = i64;
 
     fn convert<R: GimliReader>(value: gimli::AttributeValue<R>) -> Option<Self::Target> {
-        value.udata_value()
+        value.sdata_value()
     }
 }
 
@@ -217,7 +217,8 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
             }
 
             let size = match child_entry.try_read::<DwAtUpperBound>()? {
-                Some(bound) => bound + 1,
+                Some(bound) if bound < 0 => 0, // I don't known what this means
+                Some(bound) => bound as u64 + 1,
                 None => child_entry.try_read::<DwAtCount>()?.unwrap_or(0),
             };
 
@@ -250,7 +251,7 @@ impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
             gimli::DW_TAG_subroutine_type => DwarfType::Function,
             gimli::DW_TAG_subprogram | gimli::DW_TAG_variable => return Ok(None),
             tag => {
-                log::debug!("Unsupported tag: {tag}");
+                log::trace!("Unsupported tag: {tag}");
                 return Ok(None);
             }
         };
@@ -509,7 +510,7 @@ fn collect_fields_into(
                     _ => log::warn!("Anymous field is not a struct nor an union"),
                 },
 
-                None => log::warn!("Unknown anonymous field"),
+                None => log::trace!("Unknown anonymous field"),
             },
         }
     }

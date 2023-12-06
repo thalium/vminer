@@ -214,7 +214,10 @@ impl Profile {
         let init_task = symbols.require_address("init_task")?;
         let linux_banner = symbols.require_address("linux_banner")?;
 
-        let types = syms.require_module("module.ko")?;
+        let types = syms
+            .require_module("vmlinux")
+            .or_else(|_| syms.require_module("module.ko"))?;
+
         let layouts = Layouts::new(types)?;
 
         Ok(Self {
