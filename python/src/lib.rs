@@ -1,5 +1,4 @@
-use ibc::ResultExt;
-use icebox_core::{self as ibc, Backend as _, IceError, IceResult};
+use ibc::{Backend as _, IceError, IceResult, ResultExt};
 use pyo3::{
     exceptions,
     once_cell::GILOnceCell,

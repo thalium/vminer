@@ -1,7 +1,8 @@
 [package]
 name = "kvm_dump_live"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 clap = { version = "4.0.0", features = ["derive"] }
@@ -9,5 +10,5 @@ env_logger = "0.10"
 
 
 [target.'cfg(target_os = "linux")'.dependencies.icebox]
-path = "../../icebox"
+workspace = true
 features = ["kvm", "dump"]

@@ -1,24 +1,25 @@
 [package]
 name = "icebox-core"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
 
 [features]
 std = ["gimli/std", "object/std", "once_cell/std", "once_map/std", "dep:sync_file", "dep:cpp_demangle", "dep:msvc-demangler", "dep:pdb"]
 
 [dependencies]
-bytemuck = { version = "1.7", features = ["derive"] }
-hashbrown = "0.14"
-memchr = { version = "2.4", default-features = false }
-log = "0.4"
-once_cell = { version = "1.9", default-features = false }
-once_map = { version = "0.4", default-features = false, features = ["ahash"] }
+bytemuck = { workspace = true, features = ["derive"] }
+hashbrown = { workspace = true }
+memchr = { workspace = true, default-features = false }
+log = { workspace = true }
+once_cell = { workspace = true, default-features = false }
+once_map = { workspace = true, default-features = false, features = ["ahash"] }
 
-serde = { version = "1.0", features = ["derive"], optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
 
-object = { version = "0.32", default-features = false, features = ["read_core", "elf"] }
-gimli = { version = "0.28", default-features = false, features = ["read"] }
-pdb = { version = "0.8", optional = true }
+object = { workspace = true, default-features = false, features = ["read_core", "elf"] }
+gimli = { workspace = true, default-features = false, features = ["read"] }
+pdb = { workspace = true, optional = true }
 
 sync_file = { version = "0.2", optional = true }
 

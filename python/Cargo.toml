@@ -1,15 +1,16 @@
 [package]
 name = "icebox-python"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+license.workspace = true
 
 [lib]
 name = "iceboxa"
 crate-type = ["cdylib"]
 
 [dependencies]
-icebox = { path = "../icebox", features = ["all_backends"] }
-icebox-core = { path = "../icebox-core" }
+ibc = { workspace = true }
+icebox = { workspace = true, features = ["all_backends"] }
 
 pyo3 = "0.20"
 pyo3-log = "0.9"
