@@ -15,37 +15,31 @@ jobs:
     name: Clippy
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install toolchain
         run: rustup toolchain install stable && rustup default stable
 
-      - name: cargo clippy
-        run: cargo clippy -- -D warnings
+      - run: cargo clippy -- -D warnings
 
   check-no_std:
     name: Check no_std
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install toolchain
         run: rustup toolchain install stable && rustup default stable && rustup target add aarch64-unknown-none
 
-      - name: cargo check
-        run: cargo check -p icebox --target aarch64-unknown-none --no-default-features
+      - run: cargo check -p icebox --target aarch64-unknown-none --no-default-features
 
   fmt:
     name: Check formatting
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: cargo fmt -- --check
-        run: cargo fmt -- --check
+      - run: cargo fmt -- --check
 
   # TODO: Re-enable this when the issue with git LFS is fixed
   test:
@@ -58,11 +52,10 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Get test data
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: thalium/icebox2_data
           lfs: true
@@ -78,5 +71,4 @@ jobs:
       - name: Install toolchain
         run: rustup toolchain install stable && rustup default stable
 
-      - name: cargo test
-        run: cargo test -p icebox --all-features
+      - run: cargo test -p icebox --all-features
