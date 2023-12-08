@@ -12,12 +12,8 @@ mod ptrace;
 
 // Architecture-dependant code goes in these module
 
-#[cfg(target_arch = "x86_64")]
-#[path = "x86_64.rs"]
-mod arch;
-
-#[cfg(target_arch = "aarch64")]
-#[path = "aarch64.rs"]
+#[cfg_attr(target_arch = "x86_64", path = "x86_64.rs")]
+#[cfg_attr(target_arch = "aarch64", path = "aarch64.rs")]
 mod arch;
 
 const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";

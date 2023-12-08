@@ -272,7 +272,7 @@ impl UnwindData {
         let version_flags = read_u8(unwind_data)?;
         let version = version_flags & 0x7;
         if !(1..=2).contains(&version) {
-            log::error!("Unsupported unwind code version: {version}");
+            log::warn!("Unsupported unwind code version: {version}");
             return None;
         }
 
@@ -557,6 +557,7 @@ fn unwind_with_infos(
 
     let frame_pointer = match function.frame_register_offset {
         None => frame.stack_pointer,
+        _ if ip_offset == Some(0) => frame.stack_pointer,
         Some(offset) => base_pointer.context("missing required frame pointer")? - offset as u64,
     };
 

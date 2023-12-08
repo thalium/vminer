@@ -47,10 +47,11 @@ impl Add<i64> for PhysicalAddress {
     type Output = Self;
 
     #[inline]
+    #[track_caller]
     fn add(self, rhs: i64) -> Self {
-        let (res, o) = self.0.overflowing_add(rhs as u64);
+        let (res, o) = self.0.overflowing_add_signed(rhs);
 
-        if cfg!(debug_assertions) && (o ^ (rhs < 0)) {
+        if cfg!(debug_assertions) && o {
             panic!("attempt to add with overflow");
         }
 
@@ -188,10 +189,11 @@ impl Add<i64> for VirtualAddress {
     type Output = VirtualAddress;
 
     #[inline]
+    #[track_caller]
     fn add(self, rhs: i64) -> Self::Output {
-        let (res, o) = self.0.overflowing_add(rhs as u64);
+        let (res, o) = self.0.overflowing_add_signed(rhs);
 
-        if cfg!(debug_assertions) && (o ^ (rhs < 0)) {
+        if cfg!(debug_assertions) && o {
             panic!("attempt to add with overflow");
         }
 
@@ -212,6 +214,7 @@ impl Sub<u64> for VirtualAddress {
     type Output = Self;
 
     #[inline]
+    #[track_caller]
     fn sub(self, rhs: u64) -> Self {
         Self(self.0 - rhs)
     }
@@ -219,6 +222,7 @@ impl Sub<u64> for VirtualAddress {
 
 impl SubAssign<u64> for VirtualAddress {
     #[inline]
+    #[track_caller]
     fn sub_assign(&mut self, rhs: u64) {
         self.0 -= rhs;
     }
