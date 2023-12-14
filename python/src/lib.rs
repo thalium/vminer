@@ -7,7 +7,7 @@ use pyo3::{
     types::{PyBytes, PyInt, PyString},
 };
 use std::{convert::Infallible, ops::ControlFlow, sync::Arc};
-use vmc::{Backend as _, ResultExt, VmError, VmResult};
+use vmc::{ResultExt, VmError, VmResult};
 
 pyo3::create_exception!(vminer, VminerError, pyo3::exceptions::PyException);
 
@@ -121,49 +121,182 @@ impl<T: pyo3::PyClass> PyOwned<T> {
     }
 }
 
-#[pyclass(subclass)]
-#[derive(Clone)]
-struct Backend(Arc<dyn vmc::Backend<Arch = vmc::arch::RuntimeArchitecture> + Send + Sync>);
+enum BackendImpl {
+    Rust(Arc<dyn vmc::Backend<Arch = vmc::arch::RuntimeArchitecture> + Send + Sync>),
+    Python,
+}
+
+#[pyclass(subclass, frozen)]
+struct Backend(BackendImpl);
+
+impl Backend {
+    fn with_backend<R>(
+        this: PyRef<Self>,
+        f: impl FnOnce(&dyn vmc::Backend<Arch = vmc::arch::RuntimeArchitecture>) -> R,
+    ) -> R {
+        match &this.0 {
+            BackendImpl::Rust(b) => f(&**b),
+            BackendImpl::Python => f(&PyBackend(this.into())),
+        }
+    }
+}
 
 #[pymethods]
 impl Backend {
+    #[new]
+    fn new() -> Self {
+        Self(BackendImpl::Python)
+    }
+
+    //     fn vcpu_count(&self) -> PyResult<u64> {
+    //         Ok(self.0.vcpus_count() as u64)
+    //     }
+
+    //     fn instruction_pointer(&self, vcpu: usize) -> PyResult<VirtualAddress> {
+    //         let ip = self
+    //             .0
+    //             .instruction_pointer(vmc::VcpuId(vcpu))
+    //             .convert_err()?;
+    //         Ok(ip.into())
+    //     }
+
+    //     fn mmu_addr(&self, vcpu: usize) -> PyResult<PhysicalAddress> {
+    //         let ip = self.0.pgd(vmc::VcpuId(vcpu)).convert_err()?;
+    //         Ok(ip.into())
+    //     }
+
+    fn arch<'py>(&self, py: Python<'py>) -> PyResult<&'py Bound<'py, PyString>> {
+        let BackendImpl::Rust(b) = &self.0 else {
+            return Err(VminerError::new_err("Missing \"arch\" implementation"));
+        };
+
+        Ok(match b.arch() {
+            vmc::arch::RuntimeArchitecture::X86_64(_) => pyo3::intern!(py, "x86_64"),
+            vmc::arch::RuntimeArchitecture::Aarch64(_) => pyo3::intern!(py, "aarch64"),
+        })
+    }
+
     fn virtual_to_physical(
-        &self,
+        this: PyRef<'_, Self>,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
     ) -> PyResult<u64> {
-        let addr = self
-            .0
-            .virtual_to_physical(mmu_addr.into(), addr.into())
-            .convert_err()?;
-        Ok(addr.0)
+        Self::with_backend(this, |b| {
+            let addr = b
+                .virtual_to_physical(mmu_addr.into(), addr.into())
+                .convert_err()?;
+            Ok(addr.0)
+        })
     }
 
     fn read_memory<'py>(
-        &self,
+        this: PyRef<'py, Self>,
         py: Python<'py>,
         addr: PhysicalAddress,
         len: usize,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        PyBytes::new_with(py, len, |buf| {
-            self.0.read_physical(addr.into(), buf).convert_err()
+        Self::with_backend(this, |b| {
+            PyBytes::new_with(py, len, |buf| {
+                b.read_physical(addr.into(), buf).convert_err()
+            })
         })
     }
 
     fn read_virtual_memory<'py>(
-        &self,
+        this: PyRef<'py, Self>,
         py: Python<'py>,
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         len: usize,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        PyBytes::new_with(py, len, |buf| {
-            self.0
-                .read_virtual_memory(mmu_addr.into(), addr.into(), buf)
-                .convert_err()
+        Self::with_backend(this, |b| {
+            PyBytes::new_with(py, len, |buf| {
+                b.read_virtual_memory(mmu_addr.into(), addr.into(), buf)
+                    .convert_err()
+            })
         })
     }
 }
+
+struct PyBackend(Py<Backend>);
+
+impl vmc::HasVcpus for PyBackend {
+    type Arch = vmc::arch::RuntimeArchitecture;
+
+    fn arch(&self) -> Self::Arch {
+        pyo3::Python::with_gil(|py| {
+            let res = self.0.call_method0(py, pyo3::intern!(py, "arch")).unwrap();
+            let name = res.extract(py).unwrap();
+
+            match name {
+                "x86_64" => vmc::arch::RuntimeArchitecture::X86_64(vmc::arch::X86_64),
+                "aarch64" => vmc::arch::RuntimeArchitecture::Aarch64(vmc::arch::Aarch64),
+                _ => todo!(),
+            }
+        })
+    }
+
+    fn vcpus_count(&self) -> usize {
+        pyo3::Python::with_gil(|py| {
+            let res = self
+                .0
+                .call_method0(py, pyo3::intern!(py, "vcpus_count"))
+                .unwrap();
+            res.extract(py).unwrap()
+        })
+    }
+
+    fn registers(
+        &self,
+        vcpu: vmc::VcpuId,
+    ) -> vmc::VcpuResult<<Self::Arch as vmc::Architecture>::Registers> {
+        todo!()
+    }
+
+    fn special_registers(
+        &self,
+        vcpu: vmc::VcpuId,
+    ) -> vmc::VcpuResult<<Self::Arch as vmc::Architecture>::SpecialRegisters> {
+        todo!()
+    }
+
+    fn other_registers(
+        &self,
+        vcpu: vmc::VcpuId,
+    ) -> vmc::VcpuResult<<Self::Arch as vmc::Architecture>::OtherRegisters> {
+        todo!()
+    }
+}
+
+impl vmc::Memory for PyBackend {
+    fn memory_mappings(&self) -> &[vmc::mem::MemoryMap] {
+        todo!()
+    }
+
+    fn read_physical(
+        &self,
+        addr: vmc::PhysicalAddress,
+        buf: &mut [u8],
+    ) -> vmc::MemoryAccessResult<()> {
+        pyo3::Python::with_gil(|py| {
+            let res = self
+                .0
+                .call_method1(
+                    py,
+                    pyo3::intern!(py, "read_physical_memory"),
+                    (PhysicalAddress::from(addr), buf.len()),
+                )
+                .unwrap();
+
+            let bytes = res.extract(py).unwrap();
+            buf.copy_from_slice(bytes);
+
+            Ok(())
+        })
+    }
+}
+
+impl vmc::Backend for PyBackend {}
 
 #[pyclass(extends=Backend)]
 struct Kvm;
@@ -175,7 +308,10 @@ impl Kvm {
         #[cfg(target_os = "linux")]
         {
             let kvm = vminer::backends::kvm::Kvm::connect(_pid).convert_err()?;
-            Ok((Kvm, Backend(Arc::new(vmc::RuntimeBackend(kvm)))))
+            Ok((
+                Kvm,
+                Backend(BackendImpl::Rust(Arc::new(vmc::RuntimeBackend(kvm)))),
+            ))
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -227,7 +363,7 @@ impl Vcpu {
     }
 }
 
-#[pyclass(extends=Backend)]
+#[pyclass(extends = Backend)]
 struct Dump;
 
 #[pymethods]
@@ -235,7 +371,7 @@ impl Dump {
     #[new]
     fn new(path: &str) -> PyResult<(Self, Backend)> {
         let dump = vminer::backends::kvm_dump::DumbDump::read(path).convert_err()?;
-        Ok((Dump, Backend(Arc::new(dump))))
+        Ok((Dump, Backend(BackendImpl::Rust(Arc::new(dump)))))
     }
 }
 
@@ -249,8 +385,13 @@ enum RequestedOs {
 struct RawOs(Box<dyn vmc::Os<Arch = vmc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl RawOs {
-    fn new(backend: Backend, path: Option<&str>, os: Option<RequestedOs>) -> VmResult<Self> {
-        let (mut builder, os) = Self::detect(&backend.0, os).context("failed to guess guest OS")?;
+    fn new(backend: Py<Backend>, path: Option<&str>, os: Option<RequestedOs>) -> VmResult<Self> {
+        let backend = match &backend.get().0 {
+            BackendImpl::Rust(b) => b.clone(),
+            BackendImpl::Python => Arc::new(PyBackend(backend)),
+        };
+
+        let (mut builder, os) = Self::detect(&backend, os).context("failed to guess guest OS")?;
 
         if let Some(path) = path {
             let mut symbols = vmc::SymbolsIndexer::new();
@@ -260,10 +401,10 @@ impl RawOs {
 
         match os {
             RequestedOs::Linux => Ok(RawOs(Box::new(
-                builder.build::<_, vminer::os::Linux<_>>(backend.0)?,
+                builder.build::<_, vminer::os::Linux<_>>(backend)?,
             ))),
             RequestedOs::Windows => Ok(RawOs(Box::new(
-                builder.build::<_, vminer::os::Windows<_>>(backend.0)?,
+                builder.build::<_, vminer::os::Windows<_>>(backend)?,
             ))),
         }
     }
@@ -311,7 +452,12 @@ impl Os {
 
     #[new]
     #[pyo3(signature = (backend, path=None, kind=None))]
-    fn new(py: Python, backend: Backend, path: Option<&str>, kind: Option<&str>) -> PyResult<Self> {
+    fn new(
+        py: Python,
+        backend: Py<Backend>,
+        path: Option<&str>,
+        kind: Option<&str>,
+    ) -> PyResult<Self> {
         let request = match kind {
             Some("linux") => Some(RequestedOs::Linux),
             Some("windows") => Some(RequestedOs::Windows),
@@ -838,6 +984,9 @@ fn vminer_module(py: Python, m: Bound<'_, PyModule>) -> PyResult<()> {
     if let Err(err) = logger.install() {
         log::error!("{}", err);
     }
+    // if let Err(err) = env_logger::try_init() {
+    //     log::error!("{}", err);
+    // }
 
     m.add_class::<Backend>()?;
     m.add_class::<Dump>()?;
