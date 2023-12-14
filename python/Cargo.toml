@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ibc = { workspace = true }
-icebox = { workspace = true, features = ["all_backends"] }
+icebox = { workspace = true, default-features = true, features = ["all_backends"] }
 
 pyo3 = "0.20"
 pyo3-log = "0.9"

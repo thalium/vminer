@@ -364,9 +364,14 @@ pub trait Os: crate::HasVcpus {
         }
     }
 
-    fn format_symbol(&self, proc: Process, addr: VirtualAddress) -> IceResult<String> {
+    fn format_symbol(
+        &self,
+        proc: Process,
+        addr: VirtualAddress,
+        demangle: bool,
+    ) -> IceResult<String> {
         match self.find_module_by_address(proc, addr)? {
-            Some(module) => self.format_symbol_with_module(proc, module, addr, None),
+            Some(module) => self.format_symbol_with_module(proc, module, addr, None, demangle),
             None => format_symbol_without_module(self, proc, addr, None),
         }
     }
@@ -377,6 +382,7 @@ pub trait Os: crate::HasVcpus {
         module: Module,
         addr: VirtualAddress,
         fun_start: Option<VirtualAddress>,
+        demangle: bool,
     ) -> IceResult<String> {
         let (mod_start, _) = self.module_span(module, proc)?;
         let mod_name = self.module_name(module, proc)?;
@@ -392,24 +398,52 @@ pub trait Os: crate::HasVcpus {
             None
         });
 
-        Ok(match symbol {
-            Some((symbol, 0)) => format!("{mod_name}!{symbol}"),
-            Some((symbol, offset)) => format!("{mod_name}!{symbol}+{offset:#x}"),
-            None => match fun_start {
-                Some(fun_start) => format!(
-                    "{mod_name}!{:#x}+{:#x}",
-                    fun_start - mod_start,
-                    addr - fun_start
-                ),
-                None => format!("{mod_name}!{:#x}", addr - mod_start),
-            },
-        })
+        fn do_format(
+            addr: VirtualAddress,
+            fun_start: Option<VirtualAddress>,
+            symbol: Option<(&str, u64)>,
+            mod_name: String,
+            mod_start: VirtualAddress,
+            demangle: bool,
+        ) -> String {
+            let symbol = symbol.map(|(s, o)| {
+                (
+                    if demangle {
+                        crate::symbols::demangle(s)
+                    } else {
+                        alloc::borrow::Cow::Borrowed(s)
+                    },
+                    o,
+                )
+            });
+
+            match (symbol, fun_start) {
+                (Some((symbol, 0)), _) => format!("{mod_name}!{symbol}"),
+                (Some((symbol, offset)), _) => format!("{mod_name}!{symbol}+{offset:#x}"),
+                (None, Some(fun_start)) => match addr - fun_start {
+                    0 => format!("{mod_name}!{:#x}", fun_start - mod_start),
+                    offset => format!("{mod_name}!{:#x}+{offset:#x}", fun_start - mod_start),
+                },
+                (None, None) => format!("{mod_name}!{:#x}", addr - mod_start),
+            }
+        }
+
+        Ok(do_format(
+            addr, fun_start, symbol, mod_name, mod_start, demangle,
+        ))
     }
 
-    fn format_stackframe_symbol(&self, proc: Process, frame: &StackFrame) -> IceResult<String> {
+    fn format_stackframe_symbol(
+        &self,
+        proc: Process,
+        frame: &StackFrame,
+        demangle: bool,
+    ) -> IceResult<String> {
         let addr = frame.instruction_pointer;
         match frame.module {
-            Some(module) => self.format_symbol_with_module(proc, module, addr, frame.start),
+            Some(module) => {
+                self.format_symbol_with_module(proc, module, addr, frame.start, demangle)
+            }
             None => format_symbol_without_module(self, proc, addr, frame.start),
         }
     }
@@ -426,14 +460,28 @@ fn format_symbol_without_module<O: Os + ?Sized>(
         None => None,
     };
 
-    Ok(match (vma_start, fun_start) {
-        (Some(vma_start), Some(fun_start)) => format!(
-            "{vma_start:#x}!{:#x}+{:#x}",
-            vma_start - fun_start,
-            addr - fun_start
-        ),
-        (Some(vma_start), None) => format!("{vma_start:#x}!{:#x}", addr - vma_start),
-        (None, Some(fun_start)) => format!("{fun_start:#x}+{:#x}", addr - fun_start),
-        (None, None) => format!("{addr:#x}"),
-    })
+    fn do_format(
+        addr: VirtualAddress,
+        fun_start: Option<VirtualAddress>,
+        vma_start: Option<VirtualAddress>,
+    ) -> String {
+        let fun_start = fun_start.map(|start| (start, addr - start));
+
+        match (vma_start, fun_start) {
+            (Some(vma_start), Some((fun_start, 0))) => {
+                let fun_offset = vma_start - fun_start;
+                format!("{vma_start:#x}!{fun_offset:#x}")
+            }
+            (Some(vma_start), Some((fun_start, offset))) => {
+                let fun_offset = vma_start - fun_start;
+                format!("{vma_start:#x}!{fun_offset:#x}+{offset:#x}")
+            }
+            (Some(vma_start), None) => format!("{vma_start:#x}!{:#x}", addr - vma_start),
+            (None, Some((fun_start, 0))) => format!("{fun_start:#x}"),
+            (None, Some((fun_start, offset))) => format!("{fun_start:#x}+{offset:#x}"),
+            (None, None) => format!("{addr:#x}"),
+        }
+    }
+
+    Ok(do_format(addr, fun_start, vma_start))
 }

@@ -414,7 +414,6 @@ impl Process {
                 os: self.os.clone_ref(py),
                 proc: self.proc,
                 module: GILOnceCell::new(),
-                symbol: GILOnceCell::new(),
             });
             Ok(ControlFlow::Continue(()))
         });
@@ -566,8 +565,6 @@ struct StackFrame {
     os: PyOwned<RawOs>,
     proc: ibc::Process,
     module: GILOnceCell<Option<Py<Module>>>,
-
-    symbol: GILOnceCell<Py<PyString>>,
 }
 
 #[pymethods]
@@ -606,15 +603,20 @@ impl StackFrame {
             .map(|m| m.as_ref())
     }
 
-    #[getter]
-    fn symbol(&self, py: Python) -> PyResult<&Py<PyString>> {
-        self.symbol.get_or_try_init(py, || {
-            let os = &self.os.borrow(py)?;
-            let s =
-                os.0.format_stackframe_symbol(self.proc, &self.frame)
-                    .convert_err()?;
-            Ok(PyString::new(py, &s).into())
-        })
+    #[pyo3(signature = (*, demangle=true))]
+    fn symbol<'py>(&self, py: Python<'py>, demangle: bool) -> PyResult<&'py PyString> {
+        let os = &self.os.borrow(py)?;
+        let mut s =
+            os.0.format_stackframe_symbol(self.proc, &self.frame, demangle)
+                .convert_err()?;
+
+        if demangle {
+            if let std::borrow::Cow::Owned(sym) = ibc::symbols::demangle(&s) {
+                s = sym;
+            }
+        }
+
+        Ok(PyString::new(py, &s))
     }
 }
 
