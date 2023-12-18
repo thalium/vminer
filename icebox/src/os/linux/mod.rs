@@ -333,7 +333,7 @@ impl<B: ibc::Backend> ibc::Os for Linux<B> {
                 Ok(ibc::Thread(addr))
             }
             None => {
-                // The symbol `current_task` may not exist (eg on Aach64, where
+                // The symbol `current_task` may not exist (eg on Aarch64, where
                 // Linux gets it from register `sp_el0`, which is not valid for
                 // this if the current process is a userspace one.
                 // In this case we find it the poor man's way: we iterate the

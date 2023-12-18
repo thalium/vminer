@@ -90,7 +90,7 @@ impl super::super::SymbolLoader for SymbolLoader {
             match self.download_pdb(&path, name, id) {
                 Ok(module) => Ok(Some(module)),
                 Err(err) => {
-                    log::error!("Failed to dowload PDB: {err}");
+                    log::error!("Failed to download PDB: {err}");
                     Ok(None)
                 }
             }

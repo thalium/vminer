@@ -43,10 +43,10 @@ pub trait Backend: Memory + arch::HasVcpus {
     fn find_kernel_pgd(
         &self,
         use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
+        additional: &[VirtualAddress],
     ) -> IceResult<PhysicalAddress> {
         self.arch()
-            .find_kernel_pgd(self, self, use_per_cpu, additionnal)?
+            .find_kernel_pgd(self, self, use_per_cpu, additional)?
             .ok_or_else(|| "could not find kernel page directory".into())
     }
 
@@ -102,9 +102,9 @@ impl<B: Backend + ?Sized> Backend for alloc::sync::Arc<B> {
     fn find_kernel_pgd(
         &self,
         use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
+        additional: &[VirtualAddress],
     ) -> IceResult<PhysicalAddress> {
-        (**self).find_kernel_pgd(use_per_cpu, additionnal)
+        (**self).find_kernel_pgd(use_per_cpu, additional)
     }
 
     #[inline]
@@ -234,9 +234,9 @@ impl<B: Backend> Backend for RuntimeBackend<B> {
     fn find_kernel_pgd(
         &self,
         use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
+        additional: &[VirtualAddress],
     ) -> IceResult<PhysicalAddress> {
-        self.0.find_kernel_pgd(use_per_cpu, additionnal)
+        self.0.find_kernel_pgd(use_per_cpu, additional)
     }
 
     #[inline]

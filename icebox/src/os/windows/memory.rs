@@ -76,7 +76,7 @@ impl<B: ibc::Backend> super::Windows<B> {
         let result = (|| {
             let vma = self
                 .process_find_vma_by_address(proc, addr)?
-                .ok_or("encoutered unmapped page")?;
+                .ok_or("encountered unmapped page")?;
 
             let vma_start = self.vma_start(vma)?;
 

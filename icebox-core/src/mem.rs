@@ -12,7 +12,7 @@ pub struct MemoryMap {
 
 /// A trait to specify how to read physical memory from a guest
 ///
-/// This trait defines additional optional methods for specialisation
+/// This trait defines additional optional methods for specialization
 pub trait Memory {
     fn memory_mappings(&self) -> &[MemoryMap];
 

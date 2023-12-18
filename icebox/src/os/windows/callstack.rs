@@ -255,7 +255,7 @@ impl UnwindData {
                 None => Err("unmapped unwind data".into()),
             }
         } else {
-            // The binary search succeded, so we known we're good.
+            // The binary search succeeded, so we known we're good.
             Ok(match pos {
                 Ok(i) => Some(functions[i]),
                 Err(i) => i.checked_sub(1).and_then(|i| {

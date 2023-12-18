@@ -40,7 +40,7 @@ impl fmt::Display for ResolveTypeError {
         match self {
             Self::Gimli(_) => f.write_str("error parsing DWARF"),
             Self::MissingAttr(attr) => f.write_fmt(format_args!(
-                "missing required attibute: {}",
+                "missing required attribute: {}",
                 DisplayDwAt(*attr)
             )),
             Self::WrongAttrType => f.write_str("unexpected attribute type"),
@@ -286,7 +286,7 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
         Ok(self.0.attr_value(name)?)
     }
 
-    /// Reads an attribute of the entry according to the type paramater
+    /// Reads an attribute of the entry according to the type parameter
     ///
     /// Returns an error if the type is missing
     fn read<A: DwarfAttribute>(self) -> ResolveTypeResult<A::Target> {
@@ -294,7 +294,7 @@ impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
         A::convert(value).ok_or(ResolveTypeError::WrongAttrType)
     }
 
-    /// Reads an attribute of the entry according to the type paramater
+    /// Reads an attribute of the entry according to the type parameter
     ///
     /// Returns an `Ok(None)` if the type is missing
     fn try_read<A: DwarfAttribute>(self) -> ResolveTypeResult<Option<A::Target>> {
@@ -507,7 +507,7 @@ fn collect_fields_into(
                     DwarfType::Struct(s) | DwarfType::Union(s) => {
                         collect_fields_into(fields, offset, types, s)
                     }
-                    _ => log::warn!("Anymous field is not a struct nor an union"),
+                    _ => log::warn!("Anonymous field is not a struct nor an union"),
                 },
 
                 None => log::trace!("Unknown anonymous field"),

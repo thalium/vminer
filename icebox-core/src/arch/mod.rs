@@ -29,9 +29,9 @@ fn make_address_test<'a>(
     vcpus: &'a (impl HasVcpus + ?Sized),
     memory: &'a (impl crate::Memory + ?Sized),
     use_per_cpu: bool,
-    additionnal: &'a [&[VirtualAddress]],
+    additional: &'a [&[VirtualAddress]],
 ) -> impl Fn(PhysicalAddress) -> bool + 'a {
-    let mut addresses = additionnal.concat();
+    let mut addresses = additional.concat();
 
     if use_per_cpu {
         addresses.reserve(vcpus.vcpus_count());
@@ -316,7 +316,7 @@ pub trait Architecture {
         memory: &M,
         vcpus: &(impl HasVcpus<Arch = Self> + ?Sized),
         use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
+        additional: &[VirtualAddress],
     ) -> crate::IceResult<Option<PhysicalAddress>>;
 
     fn find_in_kernel_memory_raw<M: crate::Memory + ?Sized>(

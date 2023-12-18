@@ -59,7 +59,7 @@ impl super::Architecture for Aarch64 {
         memory: &M,
         vcpus: &(impl super::HasVcpus<Arch = Self> + ?Sized),
         use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
+        additional: &[VirtualAddress],
     ) -> crate::IceResult<Option<PhysicalAddress>> {
         for vcpu in vcpus.iter_vcpus() {
             if vcpus.instruction_pointer(vcpu)?.is_kernel() {
@@ -68,7 +68,7 @@ impl super::Architecture for Aarch64 {
         }
 
         // To check if a TTBR is valid, try to translate valid kernel addresses with it
-        let addresses = &[additionnal];
+        let addresses = &[additional];
         let test = super::make_address_test(vcpus, memory, use_per_cpu, addresses);
 
         // // Try pages near a "wrong" TTBR1
@@ -184,7 +184,7 @@ pub struct Registers {
     pub pstate: u64,
 }
 
-/// A curated list of additionnal useful registers
+/// A curated list of additional useful registers
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct SpecialRegisters {

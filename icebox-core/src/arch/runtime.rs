@@ -79,9 +79,9 @@ impl arch::Architecture for Architecture {
         memory: &M,
         vcpus: &(impl HasVcpus<Arch = Self> + ?Sized),
         use_per_cpu: bool,
-        additionnal: &[VirtualAddress],
+        additional: &[VirtualAddress],
     ) -> crate::IceResult<Option<PhysicalAddress>> {
-        dispatch!(self, vcpus => |arch| arch.find_kernel_pgd(memory, vcpus, use_per_cpu, additionnal))
+        dispatch!(self, vcpus => |arch| arch.find_kernel_pgd(memory, vcpus, use_per_cpu, additional))
     }
 
     #[inline]
