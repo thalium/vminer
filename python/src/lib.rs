@@ -31,6 +31,12 @@ impl<T> ToPyResult<T> for ibc::TranslationResult<T> {
     }
 }
 
+impl<T> ToPyResult<T> for ibc::VcpuResult<T> {
+    fn convert_err(self) -> PyResult<T> {
+        self.map_err(|err| IceboxError::new_err(err.to_string()))
+    }
+}
+
 #[derive(pyo3::FromPyObject)]
 struct VirtualAddress(u64);
 
@@ -40,12 +46,36 @@ impl From<VirtualAddress> for ibc::VirtualAddress {
     }
 }
 
+impl From<ibc::VirtualAddress> for VirtualAddress {
+    fn from(addr: ibc::VirtualAddress) -> Self {
+        Self(addr.0)
+    }
+}
+
+impl pyo3::IntoPy<Py<PyAny>> for VirtualAddress {
+    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
+        self.0.into_py(py)
+    }
+}
+
 #[derive(pyo3::FromPyObject)]
 struct PhysicalAddress(u64);
 
 impl From<PhysicalAddress> for ibc::PhysicalAddress {
     fn from(addr: PhysicalAddress) -> Self {
         Self(addr.0)
+    }
+}
+
+impl From<ibc::PhysicalAddress> for PhysicalAddress {
+    fn from(addr: ibc::PhysicalAddress) -> Self {
+        Self(addr.0)
+    }
+}
+
+impl pyo3::IntoPy<Py<PyAny>> for PhysicalAddress {
+    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
+        self.0.into_py(py)
     }
 }
 
@@ -148,6 +178,86 @@ impl Kvm {
     }
 }
 
+#[pyclass]
+struct Vcpu {
+    os: PyOwned<RawOs>,
+    id: ibc::VcpuId,
+}
+
+impl Vcpu {
+    fn new(py: Python, id: usize, os: &PyOwned<RawOs>) -> Self {
+        Self {
+            os: os.clone_ref(py),
+            id: ibc::VcpuId(id),
+        }
+    }
+}
+
+#[pymethods]
+impl Vcpu {
+    #[getter]
+    fn instruction_pointer(&self, py: Python) -> PyResult<VirtualAddress> {
+        let os = self.os.borrow(py)?;
+        let addr = os.0.instruction_pointer(self.id).convert_err()?;
+        Ok(addr.into())
+    }
+
+    #[getter]
+    fn stack_pointer(&self, py: Python) -> PyResult<VirtualAddress> {
+        let os = self.os.borrow(py)?;
+        let addr = os.0.stack_pointer(self.id).convert_err()?;
+        Ok(addr.into())
+    }
+
+    fn __getattr__(&self, py: Python, name: &PyString) -> PyResult<u64> {
+        let os = self.os.borrow(py)?;
+        let error =
+            || pyo3::exceptions::PyAttributeError::new_err::<Py<PyString>>(name.into_py(py));
+        let name = name.to_str()?;
+
+        Ok(match os.0.registers(self.id).convert_err()? {
+            ibc::arch::runtime::Registers::X86_64(regs) => match name {
+                "rax" => regs.rax,
+                "rbx" => regs.rbx,
+                "rcx" => regs.rcx,
+                "rdx" => regs.rdx,
+                "rsi" => regs.rsi,
+                "rdi" => regs.rdi,
+                "rsp" => regs.rsp,
+                "rbp" => regs.rbp,
+                "r8" => regs.r8,
+                "r9" => regs.r9,
+                "r10" => regs.r10,
+                "r11" => regs.r11,
+                "r12" => regs.r12,
+                "r13" => regs.r13,
+                "r14" => regs.r14,
+                "r15" => regs.r15,
+                "rip" => regs.rip,
+                "rflags" => regs.rflags,
+                _ => return Err(error()),
+            },
+            ibc::arch::runtime::Registers::Aarch64(regs) => {
+                if let Some(n) = name.strip_prefix('x') {
+                    let n: usize = n.parse().map_err(|_| error())?;
+                    if n == 0 {
+                        0
+                    } else {
+                        *regs.regs.get(n - 1).ok_or_else(error)?
+                    }
+                } else {
+                    match name {
+                        "pc" => regs.pc,
+                        "sp" => regs.sp,
+                        "pstate" => regs.pstate,
+                        _ => return Err(error()),
+                    }
+                }
+            }
+        })
+    }
+}
+
 #[pyclass(extends=Backend)]
 struct Dump;
 
@@ -242,20 +352,28 @@ impl Os {
         Ok(Os(PyOwned::new(py, raw)?))
     }
 
+    fn vcpus(&self, py: Python) -> PyResult<VcpuIter> {
+        let n = self.0.borrow(py)?.0.vcpus_count();
+        Ok(VcpuIter {
+            os: self.0.clone_ref(py),
+            range: 0..n,
+        })
+    }
+
     fn init_process(&self, py: Python) -> PyResult<Process> {
         let init = self.0.borrow(py)?.0.init_process().convert_err()?;
         Ok(self.make_proc(py, init))
     }
 
-    fn current_thread(&self, py: Python, vcpu: usize) -> PyResult<Thread> {
+    fn current_thread(&self, py: Python, vcpu: &Vcpu) -> PyResult<Thread> {
         let os = self.0.borrow(py)?;
-        let thread = os.0.current_thread(ibc::VcpuId(vcpu)).convert_err()?;
+        let thread = os.0.current_thread(vcpu.id).convert_err()?;
         Ok(Thread::new(py, thread, &self.0))
     }
 
-    fn current_process(&self, py: Python, vcpu: usize) -> PyResult<Process> {
+    fn current_process(&self, py: Python, vcpu: &Vcpu) -> PyResult<Process> {
         let os = self.0.borrow(py)?;
-        let proc = os.0.current_process(ibc::VcpuId(vcpu)).convert_err()?;
+        let proc = os.0.current_process(vcpu.id).convert_err()?;
         Ok(self.make_proc(py, proc))
     }
 
@@ -555,6 +673,24 @@ impl Module {
 
     fn __contains__(&self, addr: u64) -> bool {
         (self.start.0..self.end.0).contains(&addr)
+    }
+}
+
+#[pyclass]
+struct VcpuIter {
+    os: PyOwned<RawOs>,
+    range: std::ops::Range<usize>,
+}
+
+#[pymethods]
+impl VcpuIter {
+    fn __iter__(this: PyRef<Self>) -> PyRef<Self> {
+        this
+    }
+
+    fn __next__(mut this: PyRefMut<Self>) -> PyResult<Option<Vcpu>> {
+        let proc = this.range.next();
+        Ok(proc.map(|id| Vcpu::new(this.py(), id, &this.os)))
     }
 }
 
