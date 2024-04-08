@@ -234,6 +234,8 @@ struct Os *os_new(struct Backend *backend);
 
 struct Os *os_new_linux(struct Backend *backend, struct Symbols *profile);
 
+struct Os *os_new_windows(struct Backend *backend, struct Symbols *profile);
+
 void os_free(struct Os *os);
 
 int read_virtual_memory(const struct Os *os,
