@@ -3,6 +3,17 @@ use crate::{
     TranslationResult, VirtualAddress,
 };
 
+pub fn default_read_virtual_memory<B: Backend + ?Sized>(
+    backend: &B,
+    mmu_addr: PhysicalAddress,
+    addr: VirtualAddress,
+    buf: &mut [u8],
+) -> TranslationResult<()> {
+    let addr = backend.virtual_to_physical(mmu_addr, addr)?;
+    backend.read_physical(addr, buf)?;
+    Ok(())
+}
+
 pub trait Backend: Memory + arch::HasVcpus {
     #[inline]
     fn read_virtual_memory(
@@ -11,9 +22,7 @@ pub trait Backend: Memory + arch::HasVcpus {
         addr: VirtualAddress,
         buf: &mut [u8],
     ) -> TranslationResult<()> {
-        let addr = self.virtual_to_physical(mmu_addr, addr)?;
-        self.read_physical(addr, buf)?;
-        Ok(())
+        default_read_virtual_memory(self, mmu_addr, addr, buf)
     }
 
     #[inline]

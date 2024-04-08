@@ -9,7 +9,7 @@ pub use addr::{PhysicalAddress, VirtualAddress};
 pub mod arch;
 pub use arch::{Architecture, HasVcpus, VcpuId};
 
-mod backend;
+pub mod backend;
 pub use backend::{Backend, RuntimeBackend};
 
 pub mod endian;

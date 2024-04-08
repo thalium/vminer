@@ -46,6 +46,10 @@ typedef struct MemoryMapping {
   uintptr_t len;
 } MemoryMapping;
 
+typedef struct VirtualAddress {
+  uint64_t val;
+} VirtualAddress;
+
 typedef struct X86_64Registers {
   uint64_t rax;
   uint64_t rbx;
@@ -117,8 +121,16 @@ typedef struct X86_64OtherRegisters {
 
 typedef struct X86_64Backend {
   void *data;
-  int32_t (*read_memory)(const void *data, struct PhysicalAddress addr, void *buf, uintptr_t size);
   struct MemoryMapping (*memory_mappings)(const void *data);
+  int32_t (*read_physical_memory)(const void *data,
+                                  struct PhysicalAddress addr,
+                                  void *buf,
+                                  uintptr_t size);
+  int32_t (*read_virtual_memory)(const void *data,
+                                 struct PhysicalAddress mmu_addr,
+                                 struct VirtualAddress addr,
+                                 void *buf,
+                                 uintptr_t size);
   uintptr_t vcpus_count;
   struct X86_64Registers (*registers)(const void *data, uintptr_t vcpu);
   struct X86_64SpecialRegisters (*special_registers)(const void *data, uintptr_t vcpu);
@@ -140,10 +152,6 @@ typedef struct Logger {
   void (*log)(void *data, const struct LogRecord *message);
   void (*flush)(void *data);
 } Logger;
-
-typedef struct VirtualAddress {
-  uint64_t val;
-} VirtualAddress;
 
 typedef struct Process {
   struct VirtualAddress addr;

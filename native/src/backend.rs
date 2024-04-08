@@ -27,8 +27,10 @@ impl Backend {
 
 #[repr(C)]
 pub struct X86_64Backend {
-    data: *mut c_void,
-    read_memory: Option<
+    pub data: *mut c_void,
+
+    pub memory_mappings: Option<unsafe extern "C" fn(data: *const c_void) -> MemoryMapping>,
+    pub read_physical_memory: Option<
         unsafe extern "C" fn(
             data: *const c_void,
             addr: ibc::PhysicalAddress,
@@ -36,17 +38,27 @@ pub struct X86_64Backend {
             size: usize,
         ) -> i32,
     >,
-    memory_mappings: Option<unsafe extern "C" fn(data: *const c_void) -> MemoryMapping>,
-    vcpus_count: usize,
-    registers:
+    pub read_virtual_memory: Option<
+        unsafe extern "C" fn(
+            data: *const c_void,
+            mmu_addr: ibc::PhysicalAddress,
+            addr: ibc::VirtualAddress,
+            buf: *mut c_void,
+            size: usize,
+        ) -> i32,
+    >,
+
+    pub vcpus_count: usize,
+    pub registers:
         Option<unsafe extern "C" fn(data: *const c_void, vcpu: usize) -> arch::X86_64Registers>,
-    special_registers: Option<
+    pub special_registers: Option<
         unsafe extern "C" fn(data: *const c_void, vcpu: usize) -> arch::X86_64SpecialRegisters,
     >,
-    other_registers: Option<
+    pub other_registers: Option<
         unsafe extern "C" fn(data: *const c_void, vcpu: usize) -> arch::X86_64OtherRegisters,
     >,
-    drop: Option<unsafe extern "C" fn(data: *mut c_void)>,
+
+    pub drop: Option<unsafe extern "C" fn(data: *mut c_void)>,
 }
 
 unsafe impl Send for X86_64Backend {}
@@ -78,10 +90,10 @@ impl ibc::Memory for X86_64Backend {
         addr: ibc::PhysicalAddress,
         buf: &mut [u8],
     ) -> ibc::MemoryAccessResult<()> {
-        match self.read_memory {
-            Some(read_memory) => unsafe {
+        match self.read_physical_memory {
+            Some(read_physical) => unsafe {
                 let size = buf.len();
-                match read_memory(self.data, addr, buf.as_mut_ptr().cast(), size) {
+                match read_physical(self.data, addr, buf.as_mut_ptr().cast(), size) {
                     0 => Ok(()),
                     #[cfg(feature = "std")]
                     res if res > 0 => Err(ibc::MemoryAccessError::Io(
@@ -146,7 +158,31 @@ impl ibc::HasVcpus for X86_64Backend {
     }
 }
 
-impl ibc::Backend for X86_64Backend {}
+impl ibc::Backend for X86_64Backend {
+    fn read_virtual_memory(
+        &self,
+        mmu_addr: ibc::PhysicalAddress,
+        addr: ibc::VirtualAddress,
+        buf: &mut [u8],
+    ) -> ibc::TranslationResult<()> {
+        match self.read_virtual_memory {
+            Some(read_virtual) => unsafe {
+                let size = buf.len();
+                match read_virtual(self.data, mmu_addr, addr, buf.as_mut_ptr().cast(), size) {
+                    0 => Ok(()),
+                    #[cfg(feature = "std")]
+                    res if res > 0 => Err(ibc::TranslationError::Memory(
+                        ibc::MemoryAccessError::Io(std::io::Error::from_raw_os_error(res)),
+                    )),
+                    _ => Err(ibc::TranslationError::Memory(
+                        ibc::MemoryAccessError::OutOfBounds,
+                    )),
+                }
+            },
+            None => ibc::backend::default_read_virtual_memory(self, mmu_addr, addr, buf),
+        }
+    }
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
