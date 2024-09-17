@@ -204,6 +204,7 @@ impl Error for TranslationError {
 enum Repr {
     Memory(MemoryAccessError),
     Vcpu(VcpuError),
+    #[allow(dead_code)]
     InvalidPage(u64),
 
     UnsupportedArchitecture,

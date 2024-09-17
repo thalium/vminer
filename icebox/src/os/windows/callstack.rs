@@ -56,6 +56,7 @@ enum UnwindOp {
     SetFpReg,
     Save(Reg, u32),
     Epilog,
+    #[allow(dead_code)]
     SaveXmm128(XmmReg, u32),
     PushMachFrame(bool),
 }
