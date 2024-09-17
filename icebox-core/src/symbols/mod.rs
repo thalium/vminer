@@ -30,8 +30,6 @@ pub fn demangle(sym: &str) -> Cow<str> {
         return Cow::Owned(sym.to_string());
     }
 
-    // TODO: Always enable these once they work with no_std
-    #[cfg(feature = "std")]
     if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
         return Cow::Owned(sym.to_string());
     }

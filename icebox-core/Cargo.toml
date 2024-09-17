@@ -5,7 +5,16 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-std = ["gimli/std", "object/std", "once_cell/std", "once_map/std", "dep:sync_file", "dep:cpp_demangle", "dep:msvc-demangler", "dep:pdb"]
+std = [
+    "gimli/std",
+    "object/std",
+    "once_cell/std",
+    "once_map/std",
+    "dep:sync_file",
+    "cpp_demangle/std",
+    "dep:msvc-demangler",
+    "dep:pdb",
+]
 
 [dependencies]
 bytemuck = { workspace = true, features = ["derive"] }
@@ -24,6 +33,6 @@ pdb = { workspace = true, optional = true }
 sync_file = { version = "0.2", optional = true }
 
 # TODO: Always enable these once they work with no_std
-cpp_demangle = { version = "0.4", optional = true }
+cpp_demangle = { version = "0.4", default-features = false, features = ["alloc"] }
 msvc-demangler = { version = "0.9", optional = true }
 rustc-demangle = { version = "0.1.21" }
