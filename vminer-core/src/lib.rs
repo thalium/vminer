@@ -17,7 +17,7 @@ pub use endian::Endianness;
 
 mod error;
 pub use error::{
-    Error, MemoryAccessError, MemoryAccessResult, ResultExt, TranslationError, TranslationResult,
+    MemoryAccessError, MemoryAccessResult, ResultExt, TranslationError, TranslationResult,
     TranslationResultExt, VcpuError, VcpuResult, VmError, VmResult,
 };
 

@@ -2,76 +2,11 @@ use alloc::{
     boxed::Box,
     string::{String, ToString},
 };
-use core::fmt;
-
-#[cfg(feature = "std")]
-pub use std::error::Error;
+use core::{error::Error, fmt};
 
 use crate::seal;
 
-// Unfortunately `Error` trait does not exist in `core` (yet ?) so we have to
-// define it ourselves
-#[cfg(not(feature = "std"))]
-pub trait Error: fmt::Display + fmt::Debug {
-    #[inline]
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None
-    }
-}
-
 // Add a few common conversions for convenience
-
-#[cfg(not(feature = "std"))]
-impl<E> From<E> for Box<dyn Error + Send + Sync>
-where
-    E: Error + Send + Sync + 'static,
-{
-    fn from(err: E) -> Self {
-        Box::new(err)
-    }
-}
-
-#[cfg(not(feature = "std"))]
-impl From<&'_ str> for Box<dyn Error + Send + Sync> {
-    fn from(err: &str) -> Self {
-        String::from(err).into()
-    }
-}
-
-#[cfg(not(feature = "std"))]
-impl From<String> for Box<dyn Error + Send + Sync> {
-    fn from(err: String) -> Self {
-        struct StringErr(String);
-
-        impl fmt::Debug for StringErr {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-
-        impl fmt::Display for StringErr {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-
-        impl Error for StringErr {}
-
-        Box::new(StringErr(err))
-    }
-}
-
-#[cfg(not(feature = "std"))]
-impl Error for alloc::string::FromUtf8Error {}
-
-#[cfg(not(feature = "std"))]
-impl Error for core::str::Utf8Error {}
-
-#[cfg(not(feature = "std"))]
-impl Error for object::Error {}
-
-#[cfg(not(feature = "std"))]
-impl Error for gimli::Error {}
 
 #[derive(Debug)]
 pub enum VcpuError {

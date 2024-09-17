@@ -1,7 +1,5 @@
 //! This module contains helpers to read DWARF data from ELF files
 
-extern crate alloc;
-
 use alloc::{borrow::Cow, fmt, rc::Rc};
 
 use hashbrown::HashMap;
@@ -214,10 +212,13 @@ impl fmt::Display for Error {
     }
 }
 
-impl crate::Error for Error {
-    fn source(&self) -> Option<&(dyn crate::Error + 'static)> {
+impl core::error::Error for Error {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         Some(match self {
+            #[cfg(feature = "std")]
             Error::Gimli(err) => err,
+            #[cfg(not(feature = "std"))]
+            Error::Gimli(_) => return None,
             Error::Object(err) => err,
             Error::CompressedSection => return None,
         })
