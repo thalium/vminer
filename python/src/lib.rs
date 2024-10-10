@@ -1,8 +1,8 @@
 use ibc::{Backend as _, IceError, IceResult, ResultExt};
 use pyo3::{
     exceptions,
-    once_cell::GILOnceCell,
     prelude::*,
+    sync::GILOnceCell,
     types::{PyBytes, PyString},
 };
 use std::{ops::ControlFlow, sync::Arc};
@@ -134,8 +134,8 @@ impl Backend {
         py: Python<'py>,
         addr: PhysicalAddress,
         len: usize,
-    ) -> PyResult<&'py PyBytes> {
-        PyBytes::new_with(py, len, |buf| {
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        PyBytes::new_bound_with(py, len, |buf| {
             self.0.read_physical(addr.into(), buf).convert_err()
         })
     }
@@ -146,8 +146,8 @@ impl Backend {
         mmu_addr: PhysicalAddress,
         addr: VirtualAddress,
         len: usize,
-    ) -> PyResult<&'py PyBytes> {
-        PyBytes::new_with(py, len, |buf| {
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        PyBytes::new_bound_with(py, len, |buf| {
             self.0
                 .read_virtual_memory(mmu_addr.into(), addr.into(), buf)
                 .convert_err()
@@ -209,7 +209,7 @@ impl Vcpu {
         Ok(addr.into())
     }
 
-    fn __getattr__(&self, py: Python, name: &PyString) -> PyResult<u64> {
+    fn __getattr__(&self, py: Python, name: &Bound<'_, PyString>) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
         let error =
             || pyo3::exceptions::PyAttributeError::new_err::<Py<PyString>>(name.into_py(py));
@@ -341,6 +341,7 @@ impl Os {
     }
 
     #[new]
+    #[pyo3(signature = (backend, path=None, kind=None))]
     fn new(py: Python, backend: Backend, path: Option<&str>, kind: Option<&str>) -> PyResult<Self> {
         let request = match kind {
             Some("linux") => Some(RequestedOs::Linux),
@@ -602,7 +603,7 @@ impl Vma {
         let end = os.0.vma_end(vma)?.0;
         let file =
             os.0.vma_path(vma)?
-                .map(|file| PyString::new(py, &file).into());
+                .map(|file| PyString::new_bound(py, &file).into());
 
         Ok(Self { start, end, file })
     }
@@ -646,8 +647,8 @@ impl Module {
     fn new(py: Python, module: ibc::Module, proc: ibc::Process, os: &RawOs) -> IceResult<Self> {
         let (start, end) = os.0.module_span(module, proc)?;
 
-        let name = PyString::new(py, &os.0.module_name(module, proc)?).into();
-        let path = PyString::new(py, &os.0.module_path(module, proc)?).into();
+        let name = PyString::new_bound(py, &os.0.module_name(module, proc)?).into();
+        let path = PyString::new_bound(py, &os.0.module_path(module, proc)?).into();
 
         Ok(Self {
             start,
@@ -740,7 +741,7 @@ impl StackFrame {
     }
 
     #[pyo3(signature = (*, demangle=true))]
-    fn symbol<'py>(&self, py: Python<'py>, demangle: bool) -> PyResult<&'py PyString> {
+    fn symbol<'py>(&self, py: Python<'py>, demangle: bool) -> PyResult<Bound<'py, PyString>> {
         let os = &self.os.borrow(py)?;
         let mut s =
             os.0.format_stackframe_symbol(self.proc, &self.frame, demangle)
@@ -752,7 +753,7 @@ impl StackFrame {
             }
         }
 
-        Ok(PyString::new(py, &s))
+        Ok(PyString::new_bound(py, &s))
     }
 }
 
@@ -863,7 +864,7 @@ impl CallStackIter {
 /// Python module for Icebox
 #[pymodule]
 #[pyo3(name = "icebox")]
-fn icebox_module(py: Python, m: &PyModule) -> PyResult<()> {
+fn icebox_module(py: Python, m: Bound<'_, PyModule>) -> PyResult<()> {
     let logger = pyo3_log::Logger::new(py, pyo3_log::Caching::Loggers)?;
     if let Err(err) = logger.install() {
         log::error!("{}", err);

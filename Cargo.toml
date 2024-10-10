@@ -12,13 +12,13 @@ icebox = { path = "icebox", default-features = false }
 
 bytemuck = "1.7"
 clap = "4.10"
-env_logger = "0.10"
-gimli = { version = "0.28", default-features = false }
-hashbrown = "0.14"
+env_logger = "0.11"
+gimli = { version = "0.31", default-features = false }
+hashbrown = "0.15"
 libc = "0.2.94"
 log = "0.4"
 memchr = { version = "2.4", default-features = false }
-object = { version = "0.32", default-features = false }
+object = { version = "0.36", default-features = false }
 once_cell = { version = "1.9", default-features = false }
 once_map = { version = "0.4.7", default-features = false }
 pdb = { version = "0.8", default-features = false }
@@ -31,4 +31,4 @@ opt-level = 1
 
 [profile.release]
 debug = 1
-# lto = "thin"
+lto = "thin"

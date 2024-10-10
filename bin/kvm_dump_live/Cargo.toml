@@ -6,7 +6,7 @@ license.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 clap = { version = "4.0.0", features = ["derive"] }
-env_logger = "0.10"
+env_logger = { workspace = true }
 
 
 [target.'cfg(target_os = "linux")'.dependencies.icebox]

@@ -1,4 +1,4 @@
-/* Generated with cbindgen:0.26.0 */
+/* Generated with cbindgen:0.27.0 */
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -360,5 +360,5 @@ int symbols_load_dir(struct Symbols *indexer, const char *path);
 void symbols_free(struct Symbols *indexer);
 
 #ifdef __cplusplus
-} // extern "C"
-#endif // __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
