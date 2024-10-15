@@ -74,7 +74,7 @@ impl<'t> TypeList<'t> {
             }
             pdb::TypeData::Union(u) => {
                 let name = core::str::from_utf8(u.name.as_bytes()).ok()?.to_owned();
-                TypeKind::Struct(name)
+                TypeKind::Union(name)
             }
             ty => {
                 println!("Unsupported type: {ty:?}");
