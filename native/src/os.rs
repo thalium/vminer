@@ -101,17 +101,21 @@ impl From<&ibc::StackFrame> for StackFrame {
 pub struct Os(Box<dyn ibc::Os<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl Os {
-    fn new(backend: Backend) -> IceResult<Box<Self>> {
+    fn new(backend: Backend, symbols: ibc::SymbolsIndexer) -> IceResult<Box<Self>> {
         use icebox::os::Buildable;
 
         if let Some(builder) = icebox::os::Linux::quick_check(&backend.0) {
-            let mut symbols = ibc::SymbolsIndexer::new();
-            #[cfg(feature = "std")]
-            symbols.load_dir("../data/linux-x86-64")?;
             let linux = builder
                 .with_symbols(symbols)
                 .build::<_, icebox::os::Linux<_>>(backend.0)?;
             return Ok(Box::new(Self(Box::new(linux))));
+        }
+
+        if let Some(builder) = icebox::os::Windows::quick_check(&backend.0) {
+            let windows = builder
+                .with_symbols(symbols)
+                .build::<_, icebox::os::Windows<_>>(backend.0)?;
+            return Ok(Box::new(Self(Box::new(windows))));
         }
 
         Err(IceError::from("Failed to guess host OS"))
@@ -119,8 +123,11 @@ impl Os {
 }
 
 #[no_mangle]
-pub extern "C" fn os_new(backend: Box<Backend>) -> Option<Box<Os>> {
-    error::wrap_box(|| Os::new(*backend))
+pub extern "C" fn os_new(backend: Box<Backend>, profile: Option<Box<Symbols>>) -> Option<Box<Os>> {
+    error::wrap_box(|| {
+        let symbols = profile.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
+        Os::new(*backend, symbols)
+    })
 }
 
 #[no_mangle]
