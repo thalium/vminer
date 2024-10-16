@@ -42,7 +42,7 @@ pub struct Error;
 
 #[cfg(feature = "std")]
 #[inline]
-fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> IceResult<T> {
+fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> Option<T> {
     #[cold]
     fn convert_panic_payload(payload: Box<dyn std::any::Any + Send>) -> IceError {
         if let Some(string) = payload.downcast_ref::<String>() {
@@ -54,16 +54,36 @@ fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> IceResult<T> {
         }
     }
 
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+    let res = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(res) => res,
         Err(payload) => Err(convert_panic_payload(payload)),
+    };
+
+    match res {
+        Ok(val) => {
+            clear_error();
+            Some(val)
+        }
+        Err(error) => {
+            set_error(error);
+            None
+        }
     }
 }
 
 #[cfg(not(feature = "std"))]
 #[inline]
 fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> IceResult<T> {
-    f()
+    match f() {
+        Ok(val) => {
+            clear_error();
+            Some(val)
+        }
+        Err(error) => {
+            set_error(error);
+            None
+        }
+    }
 }
 
 #[inline]
@@ -73,58 +93,34 @@ where
     U: Into<T>,
 {
     match catch_unwind(f) {
-        Ok(val) => {
+        Some(val) => {
             if let Some(res) = res {
                 res.write(val.into());
             }
             0
         }
-        Err(err) => {
-            set_error(err);
-            1
-        }
+        None => 1,
     }
 }
 
 #[inline]
 pub fn wrap_unit(f: impl FnOnce() -> IceResult<()>) -> c_int {
     match catch_unwind(f) {
-        Ok(()) => {
-            clear_error();
-            0
-        }
-        Err(err) => {
-            set_error(err);
-            -1
-        }
+        Some(()) => 0,
+        None => -1,
     }
 }
 
 #[inline]
 pub fn wrap_box<T>(f: impl FnOnce() -> IceResult<Box<T>>) -> Option<Box<T>> {
-    match catch_unwind(f) {
-        Ok(res) => {
-            clear_error();
-            Some(res)
-        }
-        Err(err) => {
-            set_error(err);
-            None
-        }
-    }
+    catch_unwind(f)
 }
 
 #[inline]
 pub fn wrap_usize(f: impl FnOnce() -> IceResult<usize>) -> isize {
-    match f() {
-        Ok(n) => {
-            clear_error();
-            n as isize
-        }
-        Err(err) => {
-            set_error(err);
-            -1
-        }
+    match catch_unwind(f) {
+        Some(n) => n as isize,
+        None => -1,
     }
 }
 
