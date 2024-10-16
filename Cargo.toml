@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["bin/force_mmap", "bin/kvm_dump_live", "icebox", "icebox-core", "native", "patch", "python"]
+members = ["bin/force_mmap", "bin/kvm_dump_live", "icebox", "icebox-core", "native", "kvm_patch", "python"]
 
 [workspace.package]
 edition = "2021"

@@ -16,7 +16,7 @@ mod kvm;
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn payload(vcpus: *const i32, n: usize) -> libc::c_int {
+pub unsafe extern "C" fn vminer_payload(vcpus: *const i32, n: usize) -> libc::c_int {
     let vcpus = slice::from_raw_parts(vcpus, n);
     match send_fds(vcpus) {
         Ok(()) => 0,

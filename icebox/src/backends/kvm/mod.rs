@@ -16,8 +16,8 @@ mod ptrace;
 #[cfg_attr(target_arch = "aarch64", path = "aarch64.rs")]
 mod arch;
 
-const LIB_PATH: &[u8] = b"/usr/lib/test.so\0";
-const FUN_NAME: &[u8] = b"payload\0";
+const LIB_PATH: &[u8] = b"/usr/lib/libvminer_kvm_patch.so\0";
+const FUN_NAME: &[u8] = b"vminer_payload\0";
 const TOTAL_LEN: usize = LIB_PATH.len() + FUN_NAME.len();
 
 /// Finds the loading address of a library's text in a process' address space

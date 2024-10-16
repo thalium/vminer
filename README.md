@@ -11,7 +11,7 @@ send the data that Icebox needs.
 
 ## Setting things up
 
-- Build the patch and copy it to `/usr/bin/test.so`
+- Build the patch and copy it to `/usr/lib/libvminer_kvm_patch.so`
 - To target Linux guests, you need the debug info of the kernel and the
   `System.map` file. The debug info and the `System.map` of the exact same
   kernel is required.
