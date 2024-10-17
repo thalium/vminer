@@ -9,5 +9,5 @@ fn main() {
         .with_crate(".")
         .generate()
         .unwrap()
-        .write_to_file("icebox.h");
+        .write_to_file("vminer.h");
 }

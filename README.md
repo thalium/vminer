@@ -1,13 +1,13 @@
-# Icebox v2
+# vminer
 
 Virtual Machine Introspection
 
 ## KVM
 
-Icebox enable VMI with an unpatched KVM.
+Vminer enable VMI with an unpatched KVM.
 
 It works by injecting a thread into the process that control KVM and from there,
-send the data that Icebox needs.
+send the data that vminer needs.
 
 ## Setting things up
 

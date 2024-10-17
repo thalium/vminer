@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["bin/force_mmap", "bin/kvm_dump_live", "icebox", "icebox-core", "native", "kvm_patch", "python"]
+members = ["bin/force_mmap", "bin/kvm_dump_live", "vminer", "vminer-core", "native", "kvm_patch", "python"]
 
 [workspace.package]
 edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-ibc = { package = "icebox-core", path = "icebox-core", default-features = false }
-icebox = { path = "icebox", default-features = false }
+vminer-core = { path = "vminer-core", default-features = false }
+vminer = { path = "vminer", default-features = false }
 
 bytemuck = "1.7"
 clap = "4.10"

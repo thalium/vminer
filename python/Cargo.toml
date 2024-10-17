@@ -1,16 +1,16 @@
 [package]
-name = "icebox-python"
+name = "vminer-python"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "iceboxa"
+name = "vminera"
 crate-type = ["cdylib"]
 
 [dependencies]
-ibc = { workspace = true }
-icebox = { workspace = true, default-features = true, features = ["all_backends"] }
+vminer-core = { workspace = true }
+vminer = { workspace = true, default-features = true, features = ["all_backends"] }
 
 pyo3 = "0.22"
 pyo3-log = "0.11"

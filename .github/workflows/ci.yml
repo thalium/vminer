@@ -31,7 +31,7 @@ jobs:
       - name: Install toolchain
         run: rustup toolchain install stable && rustup default stable && rustup target add aarch64-unknown-none
 
-      - run: cargo check -p icebox --target aarch64-unknown-none --no-default-features
+      - run: cargo check -p vminer --target aarch64-unknown-none --no-default-features
 
   fmt:
     name: Check formatting
@@ -57,7 +57,7 @@ jobs:
       - name: Get test data
         uses: actions/checkout@v4
         with:
-          repository: thalium/icebox2_data
+          repository: thalium/vminer2_data
           lfs: true
           path: data
           ssh-key: ${{ secrets.DUMPS_DEPLOY_KEY }}
@@ -71,4 +71,4 @@ jobs:
       - name: Install toolchain
         run: rustup toolchain install stable && rustup default stable
 
-      - run: cargo test -p icebox --all-features
+      - run: cargo test -p vminer --all-features

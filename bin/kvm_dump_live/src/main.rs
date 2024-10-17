@@ -5,8 +5,7 @@
 mod inner {
     use clap::Parser;
 
-    use icebox::backends::kvm;
-    use icebox::backends::kvm_dump;
+    use vminer::backends::{kvm, kvm_dump};
 
     #[derive(Parser, Debug)]
     struct Args {

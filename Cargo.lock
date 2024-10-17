@@ -367,57 +367,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
-name = "icebox"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "gimli",
- "hashbrown",
- "icebox-core",
- "libc",
- "log",
- "memchr",
- "object",
- "once_cell",
- "pdb",
- "serde",
- "serde_json",
- "spin",
- "ureq",
-]
-
-[[package]]
-name = "icebox-core"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "cpp_demangle",
- "gimli",
- "hashbrown",
- "log",
- "memchr",
- "msvc-demangler",
- "object",
- "once_cell",
- "once_map",
- "pdb",
- "rustc-demangle",
- "serde",
- "sync_file",
-]
-
-[[package]]
-name = "icebox-python"
-version = "0.1.0"
-dependencies = [
- "icebox",
- "icebox-core",
- "log",
- "pyo3",
- "pyo3-log",
-]
-
-[[package]]
 name = "idna"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -461,7 +410,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "env_logger",
- "icebox",
+ "vminer",
 ]
 
 [[package]]
@@ -532,10 +481,10 @@ dependencies = [
  "bytemuck",
  "cbindgen",
  "env_logger",
- "icebox",
- "icebox-core",
  "log",
  "spin",
+ "vminer",
+ "vminer-core",
 ]
 
 [[package]]
@@ -1067,6 +1016,57 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vminer"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "gimli",
+ "hashbrown",
+ "libc",
+ "log",
+ "memchr",
+ "object",
+ "once_cell",
+ "pdb",
+ "serde",
+ "serde_json",
+ "spin",
+ "ureq",
+ "vminer-core",
+]
+
+[[package]]
+name = "vminer-core"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "cpp_demangle",
+ "gimli",
+ "hashbrown",
+ "log",
+ "memchr",
+ "msvc-demangler",
+ "object",
+ "once_cell",
+ "once_map",
+ "pdb",
+ "rustc-demangle",
+ "serde",
+ "sync_file",
+]
+
+[[package]]
+name = "vminer-python"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pyo3",
+ "pyo3-log",
+ "vminer",
+ "vminer-core",
+]
 
 [[package]]
 name = "vminer_kvm_patch"

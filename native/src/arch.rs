@@ -2,14 +2,14 @@ use bytemuck::{Pod, Zeroable};
 use core::mem;
 
 const _: () = {
-    assert!(mem::size_of::<X86_64Registers>() == mem::size_of::<ibc::arch::x86_64::Registers>());
+    assert!(mem::size_of::<X86_64Registers>() == mem::size_of::<vmc::arch::x86_64::Registers>());
     assert!(
         mem::size_of::<X86_64SpecialRegisters>()
-            == mem::size_of::<ibc::arch::x86_64::SpecialRegisters>()
+            == mem::size_of::<vmc::arch::x86_64::SpecialRegisters>()
     );
     assert!(
         mem::size_of::<X86_64OtherRegisters>()
-            == mem::size_of::<ibc::arch::x86_64::OtherRegisters>()
+            == mem::size_of::<vmc::arch::x86_64::OtherRegisters>()
     );
 };
 

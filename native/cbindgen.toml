@@ -8,7 +8,7 @@ cpp_compat = true
 
 [parse]
 parse_deps = true
-include = ["ibc", "icebox-core"]
+include = ["vmc", "vminer-core"]
 
 # [parse.expand]
-# crates = ["ibc", "icebox-core"]
+# crates = ["vmc", "vminer-core"]

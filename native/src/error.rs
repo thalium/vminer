@@ -5,13 +5,13 @@ use core::{
     fmt::{self, Write},
     mem,
 };
-use ibc::{IceError, IceResult};
+use vmc::{VmError, VmResult};
 
 thread_local! {
-    static ERROR: Cell<Option<IceError>> = const { Cell::new(None) };
+    static ERROR: Cell<Option<VmError>> = const { Cell::new(None) };
 }
 
-fn set_error(error: IceError) {
+fn set_error(error: VmError) {
     ERROR.with(|e| e.set(Some(error)))
 }
 
@@ -19,22 +19,22 @@ fn clear_error() {
     ERROR.with(|e| e.set(None))
 }
 
-fn take_error() -> Option<IceError> {
+fn take_error() -> Option<VmError> {
     ERROR.with(|e| e.take())
 }
 
 #[inline]
-unsafe fn error_ref(err: &*const Error) -> &IceError {
+unsafe fn error_ref(err: &*const Error) -> &VmError {
     mem::transmute(err)
 }
 
 #[inline]
-unsafe fn error_from(err: *mut Error) -> IceError {
+unsafe fn error_from(err: *mut Error) -> VmError {
     mem::transmute(err)
 }
 
 #[inline]
-fn error_into(err: IceError) -> *mut Error {
+fn error_into(err: VmError) -> *mut Error {
     unsafe { mem::transmute(err) }
 }
 
@@ -42,15 +42,15 @@ pub struct Error;
 
 #[cfg(feature = "std")]
 #[inline]
-fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> Option<T> {
+fn catch_unwind<T>(f: impl FnOnce() -> VmResult<T>) -> Option<T> {
     #[cold]
-    fn convert_panic_payload(payload: Box<dyn std::any::Any + Send>) -> IceError {
+    fn convert_panic_payload(payload: Box<dyn std::any::Any + Send>) -> VmError {
         if let Some(string) = payload.downcast_ref::<String>() {
-            IceError::new(format!("panic at: {string}"))
+            VmError::new(format!("panic at: {string}"))
         } else if let Some(s) = payload.downcast_ref::<&str>() {
-            IceError::new(format!("panic at: {s}"))
+            VmError::new(format!("panic at: {s}"))
         } else {
-            IceError::new("panic")
+            VmError::new("panic")
         }
     }
 
@@ -73,7 +73,7 @@ fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> Option<T> {
 
 #[cfg(not(feature = "std"))]
 #[inline]
-fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> IceResult<T> {
+fn catch_unwind<T>(f: impl FnOnce() -> VmResult<T>) -> VmResult<T> {
     match f() {
         Ok(val) => {
             clear_error();
@@ -89,7 +89,7 @@ fn catch_unwind<T>(f: impl FnOnce() -> IceResult<T>) -> IceResult<T> {
 #[inline]
 pub fn wrap<F, T, U>(res: Option<&mut mem::MaybeUninit<T>>, f: F) -> c_int
 where
-    F: FnOnce() -> IceResult<U>,
+    F: FnOnce() -> VmResult<U>,
     U: Into<T>,
 {
     match catch_unwind(f) {
@@ -104,7 +104,7 @@ where
 }
 
 #[inline]
-pub fn wrap_unit(f: impl FnOnce() -> IceResult<()>) -> c_int {
+pub fn wrap_unit(f: impl FnOnce() -> VmResult<()>) -> c_int {
     match catch_unwind(f) {
         Some(()) => 0,
         None => -1,
@@ -112,12 +112,12 @@ pub fn wrap_unit(f: impl FnOnce() -> IceResult<()>) -> c_int {
 }
 
 #[inline]
-pub fn wrap_box<T>(f: impl FnOnce() -> IceResult<Box<T>>) -> Option<Box<T>> {
+pub fn wrap_box<T>(f: impl FnOnce() -> VmResult<Box<T>>) -> Option<Box<T>> {
     catch_unwind(f)
 }
 
 #[inline]
-pub fn wrap_usize(f: impl FnOnce() -> IceResult<usize>) -> isize {
+pub fn wrap_usize(f: impl FnOnce() -> VmResult<usize>) -> isize {
     match catch_unwind(f) {
         Some(n) => n as isize,
         None => -1,
@@ -150,13 +150,13 @@ pub unsafe extern "C" fn print_last_error(str: *mut c_char, max_len: usize) -> u
 #[no_mangle]
 pub unsafe extern "C" fn error_with_message(err: *mut Error, context: *mut c_char) -> *mut Error {
     let context = cstring::from_ut8_lossy(context);
-    let err = IceError::with_context(context, error_from(err));
+    let err = VmError::with_context(context, error_from(err));
     error_into(err)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn error_missing_symbol(sym: *mut c_char) -> *mut Error {
-    let err = IceError::missing_symbol(&cstring::from_ut8_lossy(sym));
+    let err = VmError::missing_symbol(&cstring::from_ut8_lossy(sym));
     error_into(err)
 }
 

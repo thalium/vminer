@@ -4,8 +4,8 @@ use core::ffi::{c_char, c_void};
 
 #[repr(C)]
 pub struct MemoryMap {
-    start: ibc::PhysicalAddress,
-    end: ibc::PhysicalAddress,
+    start: vmc::PhysicalAddress,
+    end: vmc::PhysicalAddress,
 }
 
 #[repr(C)]
@@ -14,14 +14,14 @@ pub struct MemoryMapping {
     len: usize,
 }
 
-pub struct Backend(pub Arc<dyn ibc::Backend<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
+pub struct Backend(pub Arc<dyn vmc::Backend<Arch = vmc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl Backend {
     fn new<B>(backend: B) -> Box<Self>
     where
-        B: ibc::Backend + Send + Sync + 'static,
+        B: vmc::Backend + Send + Sync + 'static,
     {
-        Box::new(Self(Arc::new(ibc::RuntimeBackend(backend))))
+        Box::new(Self(Arc::new(vmc::RuntimeBackend(backend))))
     }
 }
 
@@ -33,7 +33,7 @@ pub struct X86_64Backend {
     pub read_physical_memory: Option<
         unsafe extern "C" fn(
             data: *const c_void,
-            addr: ibc::PhysicalAddress,
+            addr: vmc::PhysicalAddress,
             buf: *mut c_void,
             size: usize,
         ) -> i32,
@@ -41,8 +41,8 @@ pub struct X86_64Backend {
     pub read_virtual_memory: Option<
         unsafe extern "C" fn(
             data: *const c_void,
-            mmu_addr: ibc::PhysicalAddress,
-            addr: ibc::VirtualAddress,
+            mmu_addr: vmc::PhysicalAddress,
+            addr: vmc::VirtualAddress,
             buf: *mut c_void,
             size: usize,
         ) -> i32,
@@ -74,8 +74,8 @@ impl Drop for X86_64Backend {
     }
 }
 
-impl ibc::Memory for X86_64Backend {
-    fn memory_mappings(&self) -> &[ibc::mem::MemoryMap] {
+impl vmc::Memory for X86_64Backend {
+    fn memory_mappings(&self) -> &[vmc::mem::MemoryMap] {
         match self.memory_mappings {
             Some(mappings) => unsafe {
                 let MemoryMapping { maps, len } = mappings(self.data);
@@ -87,99 +87,99 @@ impl ibc::Memory for X86_64Backend {
 
     fn read_physical(
         &self,
-        addr: ibc::PhysicalAddress,
+        addr: vmc::PhysicalAddress,
         buf: &mut [u8],
-    ) -> ibc::MemoryAccessResult<()> {
+    ) -> vmc::MemoryAccessResult<()> {
         match self.read_physical_memory {
             Some(read_physical) => unsafe {
                 let size = buf.len();
                 match read_physical(self.data, addr, buf.as_mut_ptr().cast(), size) {
                     0 => Ok(()),
                     #[cfg(feature = "std")]
-                    res if res > 0 => Err(ibc::MemoryAccessError::Io(
+                    res if res > 0 => Err(vmc::MemoryAccessError::Io(
                         std::io::Error::from_raw_os_error(res),
                     )),
-                    _ => Err(ibc::MemoryAccessError::OutOfBounds),
+                    _ => Err(vmc::MemoryAccessError::OutOfBounds),
                 }
             },
-            None => Err(ibc::MemoryAccessError::Unsupported),
+            None => Err(vmc::MemoryAccessError::Unsupported),
         }
     }
 }
 
-impl ibc::HasVcpus for X86_64Backend {
-    type Arch = ibc::arch::X86_64;
+impl vmc::HasVcpus for X86_64Backend {
+    type Arch = vmc::arch::X86_64;
 
     fn arch(&self) -> Self::Arch {
-        ibc::arch::X86_64
+        vmc::arch::X86_64
     }
 
     fn vcpus_count(&self) -> usize {
         self.vcpus_count
     }
 
-    fn registers(&self, vcpu: ibc::VcpuId) -> ibc::VcpuResult<ibc::arch::x86_64::Registers> {
+    fn registers(&self, vcpu: vmc::VcpuId) -> vmc::VcpuResult<vmc::arch::x86_64::Registers> {
         if vcpu.0 >= self.vcpus_count {
-            return Err(ibc::VcpuError::InvalidId);
+            return Err(vmc::VcpuError::InvalidId);
         }
 
         match self.registers {
             Some(registers) => Ok(bytemuck::cast(unsafe { registers(self.data, vcpu.0) })),
-            None => Err(ibc::VcpuError::Unsupported),
+            None => Err(vmc::VcpuError::Unsupported),
         }
     }
 
     fn special_registers(
         &self,
-        vcpu: ibc::VcpuId,
-    ) -> ibc::VcpuResult<ibc::arch::x86_64::SpecialRegisters> {
+        vcpu: vmc::VcpuId,
+    ) -> vmc::VcpuResult<vmc::arch::x86_64::SpecialRegisters> {
         if vcpu.0 >= self.vcpus_count {
-            return Err(ibc::VcpuError::InvalidId);
+            return Err(vmc::VcpuError::InvalidId);
         }
 
         match self.special_registers {
             Some(registers) => Ok(bytemuck::cast(unsafe { registers(self.data, vcpu.0) })),
-            None => Err(ibc::VcpuError::Unsupported),
+            None => Err(vmc::VcpuError::Unsupported),
         }
     }
 
     fn other_registers(
         &self,
-        vcpu: ibc::VcpuId,
-    ) -> ibc::VcpuResult<ibc::arch::x86_64::OtherRegisters> {
+        vcpu: vmc::VcpuId,
+    ) -> vmc::VcpuResult<vmc::arch::x86_64::OtherRegisters> {
         if vcpu.0 >= self.vcpus_count {
-            return Err(ibc::VcpuError::InvalidId);
+            return Err(vmc::VcpuError::InvalidId);
         }
 
         match self.other_registers {
             Some(registers) => Ok(bytemuck::cast(unsafe { registers(self.data, vcpu.0) })),
-            None => Err(ibc::VcpuError::Unsupported),
+            None => Err(vmc::VcpuError::Unsupported),
         }
     }
 }
 
-impl ibc::Backend for X86_64Backend {
+impl vmc::Backend for X86_64Backend {
     fn read_virtual_memory(
         &self,
-        mmu_addr: ibc::PhysicalAddress,
-        addr: ibc::VirtualAddress,
+        mmu_addr: vmc::PhysicalAddress,
+        addr: vmc::VirtualAddress,
         buf: &mut [u8],
-    ) -> ibc::TranslationResult<()> {
+    ) -> vmc::TranslationResult<()> {
         match self.read_virtual_memory {
             Some(read_virtual) => unsafe {
                 let size = buf.len();
                 match read_virtual(self.data, mmu_addr, addr, buf.as_mut_ptr().cast(), size) {
                     0 => Ok(()),
                     #[cfg(feature = "std")]
-                    res if res > 0 => Err(ibc::TranslationError::Memory(
-                        ibc::MemoryAccessError::Io(std::io::Error::from_raw_os_error(res)),
+                    res if res > 0 => Err(vmc::TranslationError::Memory(
+                        vmc::MemoryAccessError::Io(std::io::Error::from_raw_os_error(res)),
                     )),
-                    _ => Err(ibc::TranslationError::Memory(
-                        ibc::MemoryAccessError::OutOfBounds,
+                    _ => Err(vmc::TranslationError::Memory(
+                        vmc::MemoryAccessError::OutOfBounds,
                     )),
                 }
             },
-            None => ibc::backend::default_read_virtual_memory(self, mmu_addr, addr, buf),
+            None => vmc::backend::default_read_virtual_memory(self, mmu_addr, addr, buf),
         }
     }
 }
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn backend_make(backend: X86_64Backend) -> Box<Backend> {
 #[no_mangle]
 pub extern "C" fn kvm_connect(pid: i32) -> Option<Box<Backend>> {
     error::wrap_box(|| {
-        let kvm = icebox::backends::kvm::Kvm::connect(pid)?;
+        let kvm = vminer::backends::kvm::Kvm::connect(pid)?;
         Ok(Backend::new(kvm))
     })
 }
@@ -203,7 +203,7 @@ pub extern "C" fn kvm_connect(pid: i32) -> Option<Box<Backend>> {
 pub unsafe extern "C" fn read_dump(path: *const c_char) -> Option<Box<Backend>> {
     error::wrap_box(|| {
         let path = cstring::from_ut8(path)?;
-        let dump = icebox::backends::kvm_dump::DumbDump::read(path)?;
+        let dump = vminer::backends::kvm_dump::DumbDump::read(path)?;
         Ok(Backend::new(dump))
     })
 }

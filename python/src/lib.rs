@@ -1,4 +1,5 @@
-use ibc::{Backend as _, IceError, IceResult, ResultExt};
+extern crate vminer_core as vmc;
+
 use pyo3::{
     exceptions,
     prelude::*,
@@ -6,48 +7,49 @@ use pyo3::{
     types::{PyBytes, PyString},
 };
 use std::{ops::ControlFlow, sync::Arc};
+use vmc::{Backend as _, ResultExt, VmError, VmResult};
 
-pyo3::create_exception!(icebox, IceboxError, pyo3::exceptions::PyException);
+pyo3::create_exception!(vminer, VminerError, pyo3::exceptions::PyException);
 
 trait ToPyResult<T> {
     fn convert_err(self) -> PyResult<T>;
 }
 
-impl<T> ToPyResult<T> for IceResult<T> {
+impl<T> ToPyResult<T> for VmResult<T> {
     fn convert_err(self) -> PyResult<T> {
-        self.map_err(|err| IceboxError::new_err(err.print_backtrace()))
+        self.map_err(|err| VminerError::new_err(err.print_backtrace()))
     }
 }
 
-impl<T> ToPyResult<T> for ibc::MemoryAccessResult<T> {
+impl<T> ToPyResult<T> for vmc::MemoryAccessResult<T> {
     fn convert_err(self) -> PyResult<T> {
-        self.map_err(|err| IceboxError::new_err(err.to_string()))
+        self.map_err(|err| VminerError::new_err(err.to_string()))
     }
 }
 
-impl<T> ToPyResult<T> for ibc::TranslationResult<T> {
+impl<T> ToPyResult<T> for vmc::TranslationResult<T> {
     fn convert_err(self) -> PyResult<T> {
-        self.map_err(|err| IceboxError::new_err(err.to_string()))
+        self.map_err(|err| VminerError::new_err(err.to_string()))
     }
 }
 
-impl<T> ToPyResult<T> for ibc::VcpuResult<T> {
+impl<T> ToPyResult<T> for vmc::VcpuResult<T> {
     fn convert_err(self) -> PyResult<T> {
-        self.map_err(|err| IceboxError::new_err(err.to_string()))
+        self.map_err(|err| VminerError::new_err(err.to_string()))
     }
 }
 
 #[derive(pyo3::FromPyObject)]
 struct VirtualAddress(u64);
 
-impl From<VirtualAddress> for ibc::VirtualAddress {
+impl From<VirtualAddress> for vmc::VirtualAddress {
     fn from(addr: VirtualAddress) -> Self {
         Self(addr.0)
     }
 }
 
-impl From<ibc::VirtualAddress> for VirtualAddress {
-    fn from(addr: ibc::VirtualAddress) -> Self {
+impl From<vmc::VirtualAddress> for VirtualAddress {
+    fn from(addr: vmc::VirtualAddress) -> Self {
         Self(addr.0)
     }
 }
@@ -61,14 +63,14 @@ impl pyo3::IntoPy<Py<PyAny>> for VirtualAddress {
 #[derive(pyo3::FromPyObject)]
 struct PhysicalAddress(u64);
 
-impl From<PhysicalAddress> for ibc::PhysicalAddress {
+impl From<PhysicalAddress> for vmc::PhysicalAddress {
     fn from(addr: PhysicalAddress) -> Self {
         Self(addr.0)
     }
 }
 
-impl From<ibc::PhysicalAddress> for PhysicalAddress {
-    fn from(addr: ibc::PhysicalAddress) -> Self {
+impl From<vmc::PhysicalAddress> for PhysicalAddress {
+    fn from(addr: vmc::PhysicalAddress) -> Self {
         Self(addr.0)
     }
 }
@@ -113,7 +115,7 @@ impl<T: pyo3::PyClass> PyOwned<T> {
 
 #[pyclass(subclass)]
 #[derive(Clone)]
-struct Backend(Arc<dyn ibc::Backend<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
+struct Backend(Arc<dyn vmc::Backend<Arch = vmc::arch::RuntimeArchitecture> + Send + Sync>);
 
 #[pymethods]
 impl Backend {
@@ -164,13 +166,13 @@ impl Kvm {
     fn new(_pid: i32) -> PyResult<(Self, Backend)> {
         #[cfg(target_os = "linux")]
         {
-            let kvm = icebox::backends::kvm::Kvm::connect(_pid).convert_err()?;
-            Ok((Kvm, Backend(Arc::new(ibc::RuntimeBackend(kvm)))))
+            let kvm = vminer::backends::kvm::Kvm::connect(_pid).convert_err()?;
+            Ok((Kvm, Backend(Arc::new(vmc::RuntimeBackend(kvm)))))
         }
 
         #[cfg(not(target_os = "linux"))]
         {
-            Err(IceError::from(
+            Err(VmError::from(
                 "This backend is not available on your platform",
             ))
             .convert_err()
@@ -181,14 +183,14 @@ impl Kvm {
 #[pyclass]
 struct Vcpu {
     os: PyOwned<RawOs>,
-    id: ibc::VcpuId,
+    id: vmc::VcpuId,
 }
 
 impl Vcpu {
     fn new(py: Python, id: usize, os: &PyOwned<RawOs>) -> Self {
         Self {
             os: os.clone_ref(py),
-            id: ibc::VcpuId(id),
+            id: vmc::VcpuId(id),
         }
     }
 }
@@ -216,7 +218,7 @@ impl Vcpu {
         let name = name.to_str()?;
 
         Ok(match os.0.registers(self.id).convert_err()? {
-            ibc::arch::runtime::Registers::X86_64(regs) => match name {
+            vmc::arch::runtime::Registers::X86_64(regs) => match name {
                 "rax" => regs.rax,
                 "rbx" => regs.rbx,
                 "rcx" => regs.rcx,
@@ -237,7 +239,7 @@ impl Vcpu {
                 "rflags" => regs.rflags,
                 _ => return Err(error()),
             },
-            ibc::arch::runtime::Registers::Aarch64(regs) => {
+            vmc::arch::runtime::Registers::Aarch64(regs) => {
                 if let Some(n) = name.strip_prefix('x') {
                     let n: usize = n.parse().map_err(|_| error())?;
                     if n == 0 {
@@ -265,7 +267,7 @@ struct Dump;
 impl Dump {
     #[new]
     fn new(path: &str) -> PyResult<(Self, Backend)> {
-        let dump = icebox::backends::kvm_dump::DumbDump::read(path).convert_err()?;
+        let dump = vminer::backends::kvm_dump::DumbDump::read(path).convert_err()?;
         Ok((Dump, Backend(Arc::new(dump))))
     }
 }
@@ -277,42 +279,42 @@ enum RequestedOs {
 }
 
 #[pyclass]
-struct RawOs(Box<dyn ibc::Os<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
+struct RawOs(Box<dyn vmc::Os<Arch = vmc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl RawOs {
-    fn new(backend: Backend, path: Option<&str>, os: Option<RequestedOs>) -> IceResult<Self> {
+    fn new(backend: Backend, path: Option<&str>, os: Option<RequestedOs>) -> VmResult<Self> {
         let (mut builder, os) = Self::detect(&backend.0, os).context("failed to guess guest OS")?;
 
         if let Some(path) = path {
-            let mut symbols = ibc::SymbolsIndexer::new();
+            let mut symbols = vmc::SymbolsIndexer::new();
             symbols.load_dir(path)?;
             builder = builder.with_symbols(symbols);
         }
 
         match os {
             RequestedOs::Linux => Ok(RawOs(Box::new(
-                builder.build::<_, icebox::os::Linux<_>>(backend.0)?,
+                builder.build::<_, vminer::os::Linux<_>>(backend.0)?,
             ))),
             RequestedOs::Windows => Ok(RawOs(Box::new(
-                builder.build::<_, icebox::os::Windows<_>>(backend.0)?,
+                builder.build::<_, vminer::os::Windows<_>>(backend.0)?,
             ))),
         }
     }
 
     fn detect(
-        backend: &impl ibc::Backend,
+        backend: &impl vmc::Backend,
         os: Option<RequestedOs>,
-    ) -> Option<(icebox::os::OsBuilder, RequestedOs)> {
-        use icebox::os::Buildable;
+    ) -> Option<(vminer::os::OsBuilder, RequestedOs)> {
+        use vminer::os::Buildable;
 
         if let Some(RequestedOs::Linux) | None = os {
-            if let Some(builder) = icebox::os::Linux::quick_check(backend) {
+            if let Some(builder) = vminer::os::Linux::quick_check(backend) {
                 return Some((builder, RequestedOs::Linux));
             }
         }
 
         if let Some(RequestedOs::Windows) | None = os {
-            if let Some(builder) = icebox::os::Windows::quick_check(backend) {
+            if let Some(builder) = vminer::os::Windows::quick_check(backend) {
                 return Some((builder, RequestedOs::Windows));
             }
         }
@@ -325,7 +327,7 @@ impl RawOs {
 struct Os(PyOwned<RawOs>);
 
 impl Os {
-    fn make_proc(&self, py: Python, proc: ibc::Process) -> Process {
+    fn make_proc(&self, py: Python, proc: vmc::Process) -> Process {
         Process::new(py, proc, &self.0)
     }
 }
@@ -346,7 +348,7 @@ impl Os {
         let request = match kind {
             Some("linux") => Some(RequestedOs::Linux),
             Some("windows") => Some(RequestedOs::Windows),
-            Some(_) => Err(IceError::new("Unknown OS")).convert_err()?,
+            Some(_) => Err(VmError::new("Unknown OS")).convert_err()?,
             None => None,
         };
         let raw = RawOs::new(backend, path, request).convert_err()?;
@@ -403,12 +405,12 @@ impl Os {
 
 #[pyclass]
 struct Process {
-    proc: ibc::Process,
+    proc: vmc::Process,
     os: PyOwned<RawOs>,
 }
 
 impl Process {
-    fn new(py: Python, proc: ibc::Process, os: &PyOwned<RawOs>) -> Self {
+    fn new(py: Python, proc: vmc::Process, os: &PyOwned<RawOs>) -> Self {
         Self {
             proc,
             os: os.clone_ref(py),
@@ -546,12 +548,12 @@ impl Process {
 
 #[pyclass]
 struct Thread {
-    thread: ibc::Thread,
+    thread: vmc::Thread,
     os: PyOwned<RawOs>,
 }
 
 impl Thread {
-    fn new(py: Python, thread: ibc::Thread, os: &PyOwned<RawOs>) -> Self {
+    fn new(py: Python, thread: vmc::Thread, os: &PyOwned<RawOs>) -> Self {
         Self {
             thread,
             os: os.clone_ref(py),
@@ -598,7 +600,7 @@ struct Vma {
 }
 
 impl Vma {
-    fn new(py: Python, vma: ibc::Vma, os: &RawOs) -> IceResult<Self> {
+    fn new(py: Python, vma: vmc::Vma, os: &RawOs) -> VmResult<Self> {
         let start = os.0.vma_start(vma)?.0;
         let end = os.0.vma_end(vma)?.0;
         let file =
@@ -633,8 +635,8 @@ impl Vma {
 
 #[pyclass]
 struct Module {
-    start: ibc::VirtualAddress,
-    end: ibc::VirtualAddress,
+    start: vmc::VirtualAddress,
+    end: vmc::VirtualAddress,
 
     #[pyo3(get)]
     name: Py<PyString>,
@@ -644,7 +646,7 @@ struct Module {
 }
 
 impl Module {
-    fn new(py: Python, module: ibc::Module, proc: ibc::Process, os: &RawOs) -> IceResult<Self> {
+    fn new(py: Python, module: vmc::Module, proc: vmc::Process, os: &RawOs) -> VmResult<Self> {
         let (start, end) = os.0.module_span(module, proc)?;
 
         let name = PyString::new_bound(py, &os.0.module_name(module, proc)?).into();
@@ -697,10 +699,10 @@ impl VcpuIter {
 
 #[pyclass]
 struct StackFrame {
-    frame: ibc::StackFrame,
+    frame: vmc::StackFrame,
 
     os: PyOwned<RawOs>,
-    proc: ibc::Process,
+    proc: vmc::Process,
     module: GILOnceCell<Option<Py<Module>>>,
 }
 
@@ -748,7 +750,7 @@ impl StackFrame {
                 .convert_err()?;
 
         if demangle {
-            if let std::borrow::Cow::Owned(sym) = ibc::symbols::demangle(&s) {
+            if let std::borrow::Cow::Owned(sym) = vmc::symbols::demangle(&s) {
                 s = sym;
             }
         }
@@ -759,7 +761,7 @@ impl StackFrame {
 
 #[pyclass]
 struct ProcessIter {
-    procs: std::vec::IntoIter<ibc::Process>,
+    procs: std::vec::IntoIter<vmc::Process>,
     os: PyOwned<RawOs>,
 }
 
@@ -777,7 +779,7 @@ impl ProcessIter {
 
 #[pyclass]
 struct ThreadIter {
-    threads: std::vec::IntoIter<ibc::Thread>,
+    threads: std::vec::IntoIter<vmc::Thread>,
     os: PyOwned<RawOs>,
 }
 
@@ -795,8 +797,8 @@ impl ThreadIter {
 
 #[pyclass]
 struct ModuleIter {
-    modules: std::vec::IntoIter<ibc::Module>,
-    proc: ibc::Process,
+    modules: std::vec::IntoIter<vmc::Module>,
+    proc: vmc::Process,
     os: PyOwned<RawOs>,
 }
 
@@ -818,7 +820,7 @@ impl ModuleIter {
 
 #[pyclass]
 struct VmaIter {
-    vmas: std::vec::IntoIter<ibc::Vma>,
+    vmas: std::vec::IntoIter<vmc::Vma>,
     os: PyOwned<RawOs>,
 }
 
@@ -841,7 +843,7 @@ impl VmaIter {
 #[pyclass]
 struct CallStackIter {
     frames: std::vec::IntoIter<StackFrame>,
-    error: IceResult<()>,
+    error: VmResult<()>,
 }
 
 #[pymethods]
@@ -861,10 +863,10 @@ impl CallStackIter {
     }
 }
 
-/// Python module for Icebox
+/// Python module for vminer
 #[pymodule]
-#[pyo3(name = "icebox")]
-fn icebox_module(py: Python, m: Bound<'_, PyModule>) -> PyResult<()> {
+#[pyo3(name = "vminer")]
+fn vminer_module(py: Python, m: Bound<'_, PyModule>) -> PyResult<()> {
     let logger = pyo3_log::Logger::new(py, pyo3_log::Caching::Loggers)?;
     if let Err(err) = logger.install() {
         log::error!("{}", err);

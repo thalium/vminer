@@ -9,6 +9,6 @@ clap = { version = "4.0.0", features = ["derive"] }
 env_logger = { workspace = true }
 
 
-[target.'cfg(target_os = "linux")'.dependencies.icebox]
+[target.'cfg(target_os = "linux")'.dependencies.vminer]
 workspace = true
 features = ["kvm", "dump"]

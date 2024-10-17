@@ -109,7 +109,7 @@ impl fmt::Write for Formatter {
 pub unsafe fn with_formatter(
     ptr: *mut c_char,
     len: usize,
-    f: impl FnOnce(&mut Formatter) -> ibc::IceResult<()>,
+    f: impl FnOnce(&mut Formatter) -> vmc::VmResult<()>,
 ) -> isize {
     crate::error::wrap_usize(|| {
         let mut fmt = Formatter::new(ptr, len);

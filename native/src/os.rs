@@ -7,22 +7,22 @@ use core::{
     fmt::Write as _,
     mem,
 };
-use ibc::{IceError, IceResult};
+use vmc::{VmError, VmResult};
 
 #[repr(C)]
 pub struct Process {
     addr: VirtualAddress,
 }
 
-impl From<ibc::Process> for Process {
-    fn from(proc: ibc::Process) -> Self {
+impl From<vmc::Process> for Process {
+    fn from(proc: vmc::Process) -> Self {
         Self {
             addr: proc.0.into(),
         }
     }
 }
 
-impl From<Process> for ibc::Process {
+impl From<Process> for vmc::Process {
     fn from(proc: Process) -> Self {
         Self(proc.addr.into())
     }
@@ -33,15 +33,15 @@ pub struct Module {
     addr: VirtualAddress,
 }
 
-impl From<ibc::Module> for Module {
-    fn from(module: ibc::Module) -> Self {
+impl From<vmc::Module> for Module {
+    fn from(module: vmc::Module) -> Self {
         Self {
             addr: module.0.into(),
         }
     }
 }
 
-impl From<Module> for ibc::Module {
+impl From<Module> for vmc::Module {
     fn from(module: Module) -> Self {
         Self(module.addr.into())
     }
@@ -52,15 +52,15 @@ pub struct Thread {
     addr: VirtualAddress,
 }
 
-impl From<ibc::Thread> for Thread {
-    fn from(thread: ibc::Thread) -> Self {
+impl From<vmc::Thread> for Thread {
+    fn from(thread: vmc::Thread) -> Self {
         Self {
             addr: thread.0.into(),
         }
     }
 }
 
-impl From<Thread> for ibc::Thread {
+impl From<Thread> for vmc::Thread {
     fn from(thread: Thread) -> Self {
         Self(thread.addr.into())
     }
@@ -71,13 +71,13 @@ pub struct Vma {
     addr: VirtualAddress,
 }
 
-impl From<ibc::Vma> for Vma {
-    fn from(vma: ibc::Vma) -> Self {
+impl From<vmc::Vma> for Vma {
+    fn from(vma: vmc::Vma) -> Self {
         Self { addr: vma.0.into() }
     }
 }
 
-impl From<Vma> for ibc::Vma {
+impl From<Vma> for vmc::Vma {
     fn from(vma: Vma) -> Self {
         Self(vma.addr.into())
     }
@@ -89,8 +89,8 @@ pub struct StackFrame {
     sp: VirtualAddress,
 }
 
-impl From<&ibc::StackFrame> for StackFrame {
-    fn from(frame: &ibc::StackFrame) -> Self {
+impl From<&vmc::StackFrame> for StackFrame {
+    fn from(frame: &vmc::StackFrame) -> Self {
         Self {
             ip: frame.instruction_pointer.into(),
             sp: frame.stack_pointer.into(),
@@ -98,34 +98,34 @@ impl From<&ibc::StackFrame> for StackFrame {
     }
 }
 
-pub struct Os(Box<dyn ibc::Os<Arch = ibc::arch::RuntimeArchitecture> + Send + Sync>);
+pub struct Os(Box<dyn vmc::Os<Arch = vmc::arch::RuntimeArchitecture> + Send + Sync>);
 
 impl Os {
-    fn new(backend: Backend, symbols: ibc::SymbolsIndexer) -> IceResult<Box<Self>> {
-        use icebox::os::Buildable;
+    fn new(backend: Backend, symbols: vmc::SymbolsIndexer) -> VmResult<Box<Self>> {
+        use vminer::os::Buildable;
 
-        if let Some(builder) = icebox::os::Linux::quick_check(&backend.0) {
+        if let Some(builder) = vminer::os::Linux::quick_check(&backend.0) {
             let linux = builder
                 .with_symbols(symbols)
-                .build::<_, icebox::os::Linux<_>>(backend.0)?;
+                .build::<_, vminer::os::Linux<_>>(backend.0)?;
             return Ok(Box::new(Self(Box::new(linux))));
         }
 
-        if let Some(builder) = icebox::os::Windows::quick_check(&backend.0) {
+        if let Some(builder) = vminer::os::Windows::quick_check(&backend.0) {
             let windows = builder
                 .with_symbols(symbols)
-                .build::<_, icebox::os::Windows<_>>(backend.0)?;
+                .build::<_, vminer::os::Windows<_>>(backend.0)?;
             return Ok(Box::new(Self(Box::new(windows))));
         }
 
-        Err(IceError::from("Failed to guess host OS"))
+        Err(VmError::from("Failed to guess host OS"))
     }
 }
 
 #[no_mangle]
 pub extern "C" fn os_new(backend: Box<Backend>, symbols: Option<Box<Symbols>>) -> Option<Box<Os>> {
     error::wrap_box(|| {
-        let symbols = symbols.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
+        let symbols = symbols.map_or_else(vmc::SymbolsIndexer::new, |s| s.0);
         Os::new(*backend, symbols)
     })
 }
@@ -136,8 +136,8 @@ pub extern "C" fn os_new_linux(
     symbols: Option<Box<Symbols>>,
 ) -> Option<Box<Os>> {
     error::wrap_box(|| {
-        let symbols = symbols.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
-        let linux = icebox::os::Linux::create(backend.0, symbols)?;
+        let symbols = symbols.map_or_else(vmc::SymbolsIndexer::new, |s| s.0);
+        let linux = vminer::os::Linux::create(backend.0, symbols)?;
         Ok(Box::new(Os(Box::new(linux))))
     })
 }
@@ -148,8 +148,8 @@ pub extern "C" fn os_new_windows(
     symbols: Option<Box<Symbols>>,
 ) -> Option<Box<Os>> {
     error::wrap_box(|| {
-        let symbols = symbols.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
-        let linux = icebox::os::Windows::create(backend.0, symbols)?;
+        let symbols = symbols.map_or_else(vmc::SymbolsIndexer::new, |s| s.0);
+        let linux = vminer::os::Windows::create(backend.0, symbols)?;
         Ok(Box::new(Os(Box::new(linux))))
     })
 }
@@ -221,7 +221,7 @@ pub extern "C" fn os_current_process(
     vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Process>>,
 ) -> c_int {
-    error::wrap(proc, || os.0.current_process(ibc::VcpuId(vcpu)))
+    error::wrap(proc, || os.0.current_process(vmc::VcpuId(vcpu)))
 }
 
 #[no_mangle]
@@ -230,7 +230,7 @@ pub extern "C" fn os_current_thread(
     vcpu: usize,
     proc: Option<&mut mem::MaybeUninit<Thread>>,
 ) -> c_int {
-    error::wrap(proc, || os.0.current_thread(ibc::VcpuId(vcpu)))
+    error::wrap(proc, || os.0.current_thread(vmc::VcpuId(vcpu)))
 }
 
 #[no_mangle]

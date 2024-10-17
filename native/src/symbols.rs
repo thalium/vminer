@@ -1,7 +1,7 @@
 use crate::{cstring, error};
 use alloc::boxed::Box;
 use core::ffi::{c_char, c_int};
-use ibc::SymbolsIndexer;
+use vmc::SymbolsIndexer;
 
 #[derive(Default)]
 pub struct Symbols(pub SymbolsIndexer);

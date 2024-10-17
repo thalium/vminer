@@ -50,7 +50,7 @@ impl<T> Drop for Array<T> {
 pub unsafe fn fill<T>(
     ptr: *mut T,
     max_size: usize,
-    f: impl FnOnce(&mut Array<T>) -> ibc::IceResult<()>,
+    f: impl FnOnce(&mut Array<T>) -> vmc::VmResult<()>,
 ) -> isize {
     crate::error::wrap_usize(|| {
         let mut array = Array::new(ptr, max_size);
