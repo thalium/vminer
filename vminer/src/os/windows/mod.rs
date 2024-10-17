@@ -363,6 +363,29 @@ impl<B: vmc::Backend> Windows<B> {
             },
         )
     }
+
+    pub fn thread_pc(&self, thread: ibc::Thread) -> IceResult<VirtualAddress> {
+        self.pointer_of(thread)
+            .field(|t| t.Tcb)?
+            .read_pointer_field(|tcb| tcb.TrapFrame)?
+            .read_field(|frame| frame.Rip)
+    }
+
+    pub fn thread_regs(
+        &self,
+        thread: ibc::Thread,
+    ) -> IceResult<(VirtualAddress, VirtualAddress, VirtualAddress)> {
+        let trap_frame = self
+            .pointer_of(thread)
+            .field(|t| t.Tcb)?
+            .read_pointer_field(|tcb| tcb.TrapFrame)?;
+
+        let rip = trap_frame.read_field(|frame| frame.Rip)?;
+        let rsp = trap_frame.read_field(|frame| frame.Rsp)?;
+        let rbp = trap_frame.read_field(|frame| frame.Rbp)?;
+
+        Ok((rip, rsp, rbp))
+    }
 }
 
 impl<B: vmc::Backend> super::Buildable<B> for Windows<B> {

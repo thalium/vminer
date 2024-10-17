@@ -226,6 +226,15 @@ define_structs! {
     #[define_for(kernel)]
     struct Kthread {
         Process: Pointer<Eprocess>,
+        TrapFrame: Pointer<KTrapFrame>,
+    }
+
+    #[actual_name(_KTRAP_FRAME)]
+    #[define_for(kernel)]
+    struct KTrapFrame {
+        Rip: VirtualAddress,
+        Rbp: VirtualAddress,
+        Rsp: VirtualAddress,
     }
 
     #[actual_name(_KUSER_SHARED_DATA)]
