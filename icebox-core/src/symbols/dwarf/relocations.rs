@@ -215,8 +215,7 @@ impl fmt::Display for Error {
 }
 
 impl crate::Error for Error {
-    #[cfg(feature = "std")]
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn crate::Error + 'static)> {
         Some(match self {
             Error::Gimli(err) => err,
             Error::Object(err) => err,

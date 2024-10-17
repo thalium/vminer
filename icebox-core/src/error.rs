@@ -70,6 +70,9 @@ impl Error for core::str::Utf8Error {}
 #[cfg(not(feature = "std"))]
 impl Error for object::Error {}
 
+#[cfg(not(feature = "std"))]
+impl Error for gimli::Error {}
+
 #[derive(Debug)]
 pub enum VcpuError {
     Unsupported,
