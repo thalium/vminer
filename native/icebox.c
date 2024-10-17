@@ -40,7 +40,7 @@ typedef struct {
 	uint64_t offset;
 } MyBackend;
 
-int32_t read_memory(const void *data, struct PhysicalAddress addr, void *buf, uintptr_t size) {
+int32_t read_physical_memory(const void *data, struct PhysicalAddress addr, void *buf, uintptr_t size) {
 	const MyBackend *backend_data = data;
 	uint64_t offset = addr.val + backend_data->offset;
 
@@ -138,7 +138,7 @@ Backend *make_dump(const char *path) {
 	X86_64Backend x86_64_dump = {
 		.data = backend_data,
 		.vcpus_count = header.n_vcpus,
-		.read_memory = read_memory,
+		.read_physical_memory = read_physical_memory,
 		.memory_mappings = memory_mappings,
 		.registers = get_registers,
 		.special_registers = get_special_registers,

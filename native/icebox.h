@@ -230,11 +230,11 @@ bool set_logger(struct Logger *logger);
 bool set_default_logger(void);
 #endif
 
-struct Os *os_new(struct Backend *backend, struct Symbols *profile);
+struct Os *os_new(struct Backend *backend, struct Symbols *symbols);
 
-struct Os *os_new_linux(struct Backend *backend, struct Symbols *profile);
+struct Os *os_new_linux(struct Backend *backend, struct Symbols *symbols);
 
-struct Os *os_new_windows(struct Backend *backend, struct Symbols *profile);
+struct Os *os_new_windows(struct Backend *backend, struct Symbols *symbols);
 
 void os_free(struct Os *os);
 

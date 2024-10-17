@@ -123,25 +123,33 @@ impl Os {
 }
 
 #[no_mangle]
-pub extern "C" fn os_new(backend: Box<Backend>, profile: Option<Box<Symbols>>) -> Option<Box<Os>> {
+pub extern "C" fn os_new(backend: Box<Backend>, symbols: Option<Box<Symbols>>) -> Option<Box<Os>> {
     error::wrap_box(|| {
-        let symbols = profile.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
+        let symbols = symbols.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
         Os::new(*backend, symbols)
     })
 }
 
 #[no_mangle]
-pub extern "C" fn os_new_linux(backend: Box<Backend>, profile: Box<Symbols>) -> Option<Box<Os>> {
+pub extern "C" fn os_new_linux(
+    backend: Box<Backend>,
+    symbols: Option<Box<Symbols>>,
+) -> Option<Box<Os>> {
     error::wrap_box(|| {
-        let linux = icebox::os::Linux::create(backend.0, profile.0)?;
+        let symbols = symbols.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
+        let linux = icebox::os::Linux::create(backend.0, symbols)?;
         Ok(Box::new(Os(Box::new(linux))))
     })
 }
 
 #[no_mangle]
-pub extern "C" fn os_new_windows(backend: Box<Backend>, profile: Box<Symbols>) -> Option<Box<Os>> {
+pub extern "C" fn os_new_windows(
+    backend: Box<Backend>,
+    symbols: Option<Box<Symbols>>,
+) -> Option<Box<Os>> {
     error::wrap_box(|| {
-        let linux = icebox::os::Windows::create(backend.0, profile.0)?;
+        let symbols = symbols.map_or_else(ibc::SymbolsIndexer::new, |s| s.0);
+        let linux = icebox::os::Windows::create(backend.0, symbols)?;
         Ok(Box::new(Os(Box::new(linux))))
     })
 }
