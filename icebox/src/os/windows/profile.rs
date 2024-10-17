@@ -228,6 +228,13 @@ define_structs! {
         Process: Pointer<Eprocess>,
     }
 
+    #[actual_name(_KUSER_SHARED_DATA)]
+    #[define_for(kernel)]
+    struct KUserSharedData {
+        NtMajorVersion: u32,
+        NtMinorVersion: u32,
+    }
+
     #[actual_name(_LDR_DATA_TABLE_ENTRY)]
     #[define_for(all)]
     struct LdrDataTableEntry {

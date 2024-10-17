@@ -322,6 +322,18 @@ impl<B: ibc::Backend> Windows<B> {
         Ok(Pointer::new(per_cpu, self, KernelSpace))
     }
 
+    fn user_shared_data(&self) -> Pointer<profile::KUserSharedData, Self> {
+        let addr = VirtualAddress(0xfffff78000000000);
+        Pointer::new(addr, self, pointer::KernelSpace)
+    }
+
+    pub fn nt_os_version(&self) -> IceResult<(u32, u32)> {
+        let ptr = self.user_shared_data();
+        let major = ptr.read_field(|data| data.NtMajorVersion)?;
+        let minor = ptr.read_field(|data| data.NtMinorVersion)?;
+        Ok((major, minor))
+    }
+
     fn module_codeview(
         &self,
         proc: ibc::Process,
