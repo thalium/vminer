@@ -24,4 +24,4 @@ log = { workspace = true }
 env_logger = { workspace = true, optional = true }
 
 [build-dependencies]
-cbindgen = { version = "0.27", default-features = false }
+cbindgen = { version = "0.28", default-features = false }

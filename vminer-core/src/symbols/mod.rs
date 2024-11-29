@@ -161,7 +161,7 @@ pub struct StructRef<'a> {
     pub fields: &'a [StructField],
 }
 
-impl<'a> StructRef<'a> {
+impl StructRef<'_> {
     pub fn find_offset(&self, field_name: &str) -> Option<u64> {
         self.find_field(field_name).map(|f| f.offset)
     }

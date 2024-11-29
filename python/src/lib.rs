@@ -4,9 +4,9 @@ use pyo3::{
     exceptions,
     prelude::*,
     sync::GILOnceCell,
-    types::{PyBytes, PyString},
+    types::{PyBytes, PyInt, PyString},
 };
-use std::{ops::ControlFlow, sync::Arc};
+use std::{convert::Infallible, ops::ControlFlow, sync::Arc};
 use vmc::{Backend as _, ResultExt, VmError, VmResult};
 
 pyo3::create_exception!(vminer, VminerError, pyo3::exceptions::PyException);
@@ -54,9 +54,13 @@ impl From<vmc::VirtualAddress> for VirtualAddress {
     }
 }
 
-impl pyo3::IntoPy<Py<PyAny>> for VirtualAddress {
-    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
-        self.0.into_py(py)
+impl<'py> pyo3::IntoPyObject<'py> for VirtualAddress {
+    type Target = PyInt;
+    type Output = Bound<'py, PyInt>;
+    type Error = Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.0.into_pyobject(py)
     }
 }
 
@@ -75,9 +79,13 @@ impl From<vmc::PhysicalAddress> for PhysicalAddress {
     }
 }
 
-impl pyo3::IntoPy<Py<PyAny>> for PhysicalAddress {
-    fn into_py(self, py: Python<'_>) -> Py<PyAny> {
-        self.0.into_py(py)
+impl<'py> pyo3::IntoPyObject<'py> for PhysicalAddress {
+    type Target = PyInt;
+    type Output = Bound<'py, PyInt>;
+    type Error = Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.0.into_pyobject(py)
     }
 }
 
@@ -137,7 +145,7 @@ impl Backend {
         addr: PhysicalAddress,
         len: usize,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        PyBytes::new_bound_with(py, len, |buf| {
+        PyBytes::new_with(py, len, |buf| {
             self.0.read_physical(addr.into(), buf).convert_err()
         })
     }
@@ -149,7 +157,7 @@ impl Backend {
         addr: VirtualAddress,
         len: usize,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        PyBytes::new_bound_with(py, len, |buf| {
+        PyBytes::new_with(py, len, |buf| {
             self.0
                 .read_virtual_memory(mmu_addr.into(), addr.into(), buf)
                 .convert_err()
@@ -213,8 +221,11 @@ impl Vcpu {
 
     fn __getattr__(&self, py: Python, name: &Bound<'_, PyString>) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
-        let error =
-            || pyo3::exceptions::PyAttributeError::new_err::<Py<PyString>>(name.into_py(py));
+        let error = || {
+            pyo3::exceptions::PyAttributeError::new_err(
+                name.clone().into_pyobject(py).unwrap().unbind(),
+            )
+        };
         let name = name.to_str()?;
 
         Ok(match os.0.registers(self.id).convert_err()? {
@@ -605,7 +616,7 @@ impl Vma {
         let end = os.0.vma_end(vma)?.0;
         let file =
             os.0.vma_path(vma)?
-                .map(|file| PyString::new_bound(py, &file).into());
+                .map(|file| PyString::new(py, &file).into());
 
         Ok(Self { start, end, file })
     }
@@ -649,8 +660,8 @@ impl Module {
     fn new(py: Python, module: vmc::Module, proc: vmc::Process, os: &RawOs) -> VmResult<Self> {
         let (start, end) = os.0.module_span(module, proc)?;
 
-        let name = PyString::new_bound(py, &os.0.module_name(module, proc)?).into();
-        let path = PyString::new_bound(py, &os.0.module_path(module, proc)?).into();
+        let name = PyString::new(py, &os.0.module_name(module, proc)?).into();
+        let path = PyString::new(py, &os.0.module_path(module, proc)?).into();
 
         Ok(Self {
             start,
@@ -755,7 +766,7 @@ impl StackFrame {
             }
         }
 
-        Ok(PyString::new_bound(py, &s))
+        Ok(PyString::new(py, &s))
     }
 }
 

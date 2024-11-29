@@ -152,7 +152,7 @@ impl DwarfAttribute for DwAtCount {
 /// A DWARF node has an entry and children
 struct DwarfNode<'a, 'u, 't, R: GimliReader>(gimli::EntriesTreeNode<'a, 'u, 't, R>);
 
-impl<'a, 'u, 't, R: GimliReader> DwarfNode<'a, 'u, 't, R> {
+impl<'a, 'u, R: GimliReader> DwarfNode<'a, 'u, '_, R> {
     fn entry<'me>(&'me self) -> DwarfEntry<'me, 'a, 'u, R> {
         DwarfEntry(self.0.entry())
     }
@@ -264,15 +264,15 @@ struct DwarfEntry<'node, 'a, 'u, R: GimliReader>(
     &'node gimli::DebuggingInformationEntry<'a, 'u, R>,
 );
 
-impl<'node, 'a, 'u, R: GimliReader> Clone for DwarfEntry<'node, 'a, 'u, R> {
+impl<R: GimliReader> Clone for DwarfEntry<'_, '_, '_, R> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'node, 'a, 'u, R: GimliReader> Copy for DwarfEntry<'node, 'a, 'u, R> {}
+impl<R: GimliReader> Copy for DwarfEntry<'_, '_, '_, R> {}
 
-impl<'node, 'a, 'u, R: GimliReader> DwarfEntry<'node, 'a, 'u, R> {
+impl<R: GimliReader> DwarfEntry<'_, '_, '_, R> {
     fn read_attr(self, name: gimli::DwAt) -> ResolveTypeResult<gimli::AttributeValue<R>> {
         self.0
             .attr_value(name)?

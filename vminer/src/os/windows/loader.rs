@@ -61,6 +61,7 @@ impl SymbolLoader {
         ureq::get(&url)
             .call()
             .map_err(vmc::VmError::new)?
+            .into_body()
             .into_reader()
             .read_to_end(&mut pdb)?;
 
