@@ -34,7 +34,6 @@ pub fn demangle(sym: &str) -> Cow<str> {
         return Cow::Owned(sym.to_string());
     }
 
-    #[cfg(feature = "std")]
     if let Ok(sym) = msvc_demangler::demangle(sym, msvc_demangler::DemangleFlags::NAME_ONLY) {
         return Cow::Owned(sym);
     }
@@ -52,14 +51,11 @@ pub fn demangle_to<W: fmt::Write>(sym: &str, mut writer: W) -> fmt::Result {
         return Ok(());
     }
 
-    // TODO: Always enable these once they work with no_std
-    #[cfg(feature = "std")]
     if let Ok(sym) = cpp_demangle::Symbol::new(sym) {
         writer.write_fmt(format_args!("{sym}"))?;
         return Ok(());
     }
 
-    #[cfg(feature = "std")]
     if let Ok(sym) = msvc_demangler::demangle(sym, msvc_demangler::DemangleFlags::NAME_ONLY) {
         writer.write_str(&sym)?;
         return Ok(());
