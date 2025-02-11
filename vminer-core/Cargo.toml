@@ -14,7 +14,7 @@ readme = "../README.md"
 std = ["gimli/std", "object/std", "once_cell/std", "once_map/std", "dep:sync_file", "cpp_demangle/std", "dep:pdb"]
 
 [dependencies]
-bytemuck = { workspace = true, features = ["derive"] }
+bytemuck = { workspace = true }
 hashbrown = { workspace = true }
 memchr = { workspace = true, default-features = false }
 log = { workspace = true }

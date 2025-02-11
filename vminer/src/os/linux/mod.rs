@@ -595,6 +595,7 @@ impl<B: vmc::Backend> vmc::Os for Linux<B> {
             let id = match self.backend.arch().into_runtime() {
                 vmc::arch::RuntimeArchitecture::X86_64(_) => "x86_64",
                 vmc::arch::RuntimeArchitecture::Aarch64(_) => "aarch64",
+                vmc::arch::RuntimeArchitecture::Riscv64(_) => "riscv64",
             };
 
             let module = self.symbols_loader.load(name, id)?;

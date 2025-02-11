@@ -24,6 +24,7 @@ const MAGIC: u32 = u32::from_le_bytes(*b"\xaabox");
 enum Vcpus {
     X86_64(Vec<arch::x86_64::Vcpu>),
     Aarch64(Vec<arch::aarch64::Vcpu>),
+    Riscv64(Vec<arch::riscv64::Vcpu>),
 }
 
 impl Vcpus {
@@ -138,6 +139,10 @@ impl<Mem: vmc::Memory> DumbDump<Mem> {
                 header.arch = 1;
                 header.n_vcpus = vcpus.len() as u32;
             }
+            Vcpus::Riscv64(vcpus) => {
+                header.arch = 2;
+                header.n_vcpus = vcpus.len() as u32;
+            }
         }
 
         out.write_all(bytemuck::bytes_of(&header))?;
@@ -152,6 +157,13 @@ impl<Mem: vmc::Memory> DumbDump<Mem> {
                 }
             }
             Vcpus::Aarch64(vcpus) => {
+                for vcpu in vcpus {
+                    out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
+                    out.write_all(bytemuck::bytes_of(&vcpu.other_registers))?;
+                }
+            }
+            Vcpus::Riscv64(vcpus) => {
                 for vcpu in vcpus {
                     out.write_all(bytemuck::bytes_of(&vcpu.registers))?;
                     out.write_all(bytemuck::bytes_of(&vcpu.special_registers))?;
@@ -213,6 +225,18 @@ impl DumbDump<vmc::mem::RawMemory<Vec<u8>>> {
                 }
                 Vcpus::Aarch64(vcpus)
             }
+            arch::RuntimeArchitecture::Riscv64(_) => {
+                let backend = vmc::arch::AssumeRiscv64(backend);
+                let mut vcpus = Vec::with_capacity(backend.vcpus_count());
+                for vcpu in backend.iter_vcpus() {
+                    vcpus.push(vmc::arch::riscv64::Vcpu {
+                        registers: backend.registers(vcpu)?,
+                        special_registers: backend.special_registers(vcpu)?,
+                        other_registers: backend.other_registers(vcpu)?,
+                    })
+                }
+                Vcpus::Riscv64(vcpus)
+            }
         };
 
         let mem = vmc::mem::RawMemory::new(mem);
@@ -258,6 +282,7 @@ impl<Mem> vmc::HasVcpus for DumbDump<Mem> {
         match &self.vcpus {
             Vcpus::X86_64(_) => vmc::arch::RuntimeArchitecture::X86_64(vmc::arch::X86_64),
             Vcpus::Aarch64(_) => vmc::arch::RuntimeArchitecture::Aarch64(vmc::arch::Aarch64),
+            Vcpus::Riscv64(_) => vmc::arch::RuntimeArchitecture::Riscv64(vmc::arch::Riscv64),
         }
     }
 
@@ -265,6 +290,7 @@ impl<Mem> vmc::HasVcpus for DumbDump<Mem> {
         match &self.vcpus {
             Vcpus::X86_64(vcpus) => vcpus.len(),
             Vcpus::Aarch64(vcpus) => vcpus.len(),
+            Vcpus::Riscv64(vcpus) => vcpus.len(),
         }
     }
 
@@ -280,6 +306,12 @@ impl<Mem> vmc::HasVcpus for DumbDump<Mem> {
                     .registers,
             ),
             Vcpus::Aarch64(vcpus) => vmc::arch::runtime::Registers::Aarch64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(vmc::VcpuError::InvalidId)?
+                    .registers,
+            ),
+            Vcpus::Riscv64(vcpus) => vmc::arch::runtime::Registers::Riscv64(
                 vcpus
                     .get(vcpu.0)
                     .ok_or(vmc::VcpuError::InvalidId)?
@@ -305,6 +337,12 @@ impl<Mem> vmc::HasVcpus for DumbDump<Mem> {
                     .ok_or(vmc::VcpuError::InvalidId)?
                     .special_registers,
             ),
+            Vcpus::Riscv64(vcpus) => vmc::arch::runtime::SpecialRegisters::Riscv64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(vmc::VcpuError::InvalidId)?
+                    .special_registers,
+            ),
         })
     }
 
@@ -320,6 +358,12 @@ impl<Mem> vmc::HasVcpus for DumbDump<Mem> {
                     .other_registers,
             ),
             Vcpus::Aarch64(vcpus) => vmc::arch::runtime::OtherRegisters::Aarch64(
+                vcpus
+                    .get(vcpu.0)
+                    .ok_or(vmc::VcpuError::InvalidId)?
+                    .other_registers,
+            ),
+            Vcpus::Riscv64(vcpus) => vmc::arch::runtime::OtherRegisters::Riscv64(
                 vcpus
                     .get(vcpu.0)
                     .ok_or(vmc::VcpuError::InvalidId)?

@@ -402,5 +402,10 @@ fn dwarf_registers<A: vmc::Architecture>(arch: A) -> DwarfRegisters {
             sp: gimli::AArch64::SP,
             bp: None,
         },
+        vmc::arch::RuntimeArchitecture::Riscv64(_) => DwarfRegisters {
+            ip: gimli::RiscV::RA,
+            sp: gimli::RiscV::SP,
+            bp: None,
+        },
     }
 }

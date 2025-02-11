@@ -1,6 +1,9 @@
 pub mod aarch64;
 pub use aarch64::Aarch64;
 
+pub mod riscv64;
+pub use riscv64::Riscv64;
+
 pub mod runtime;
 pub use runtime::Architecture as RuntimeArchitecture;
 
@@ -227,6 +230,55 @@ impl<Vcpus: HasVcpus + ?Sized> HasVcpus for AssumeAarch64<'_, Vcpus> {
     ) -> VcpuResult<<Self::Arch as Architecture>::OtherRegisters> {
         match self.0.other_registers(vcpu)?.into() {
             runtime::OtherRegisters::Aarch64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    // We don't forward other methods here to check the architecture
+}
+
+#[derive(Debug)]
+pub struct AssumeRiscv64<'a, Vcpus: ?Sized>(pub &'a Vcpus);
+
+impl<Vcpus: HasVcpus + ?Sized> HasVcpus for AssumeRiscv64<'_, Vcpus> {
+    type Arch = Riscv64;
+
+    #[inline]
+    fn arch(&self) -> Self::Arch {
+        Riscv64
+    }
+
+    #[inline]
+    fn vcpus_count(&self) -> usize {
+        self.0.vcpus_count()
+    }
+
+    #[inline]
+    fn registers(&self, vcpu: VcpuId) -> VcpuResult<<Self::Arch as Architecture>::Registers> {
+        match self.0.registers(vcpu)?.into() {
+            runtime::Registers::Riscv64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    #[inline]
+    fn special_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::SpecialRegisters> {
+        match self.0.special_registers(vcpu)?.into() {
+            runtime::SpecialRegisters::Riscv64(regs) => Ok(regs),
+            _ => Err(VcpuError::BadArchitecture),
+        }
+    }
+
+    #[inline]
+    fn other_registers(
+        &self,
+        vcpu: VcpuId,
+    ) -> VcpuResult<<Self::Arch as Architecture>::OtherRegisters> {
+        match self.0.other_registers(vcpu)?.into() {
+            runtime::OtherRegisters::Riscv64(regs) => Ok(regs),
             _ => Err(VcpuError::BadArchitecture),
         }
     }

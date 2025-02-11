@@ -11,7 +11,7 @@ license = "MIT"
 vminer-core = { path = "vminer-core", version = "0.1.0", default-features = false }
 vminer = { path = "vminer", version = "0.1.0", default-features = false }
 
-bytemuck = "1.7"
+bytemuck = { version = "1.14", features = ["derive", "must_cast"] }
 clap = "4.10"
 env_logger = "0.11"
 gimli = { version = "0.31", default-features = false }

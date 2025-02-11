@@ -4,12 +4,14 @@ use crate::{arch, endian::RuntimeEndian, Endianness, HasVcpus, PhysicalAddress, 
 pub enum Architecture {
     X86_64(arch::X86_64),
     Aarch64(arch::Aarch64),
+    Riscv64(arch::Riscv64),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Registers {
     X86_64(arch::x86_64::Registers),
     Aarch64(arch::aarch64::Registers),
+    Riscv64(arch::riscv64::Registers),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -17,12 +19,14 @@ pub enum Registers {
 pub enum SpecialRegisters {
     X86_64(arch::x86_64::SpecialRegisters),
     Aarch64(arch::aarch64::SpecialRegisters),
+    Riscv64(arch::riscv64::SpecialRegisters),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum OtherRegisters {
     X86_64(arch::x86_64::OtherRegisters),
     Aarch64(arch::aarch64::OtherRegisters),
+    Riscv64(arch::riscv64::OtherRegisters),
 }
 
 macro_rules! dispatch {
@@ -30,6 +34,7 @@ macro_rules! dispatch {
         match $val {
             Architecture::X86_64($arch) => $expr,
             Architecture::Aarch64($arch) => $expr,
+            Architecture::Riscv64($arch) => $expr,
         }
     };
     ($val:expr, $vcpus:ident => |$arch:ident| $expr:expr) => {
@@ -40,6 +45,10 @@ macro_rules! dispatch {
             }
             Architecture::Aarch64($arch) => {
                 let $vcpus = &super::AssumeAarch64($vcpus);
+                $expr
+            }
+            Architecture::Riscv64($arch) => {
+                let $vcpus = &super::AssumeRiscv64($vcpus);
                 $expr
             }
         }
