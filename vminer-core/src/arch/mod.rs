@@ -106,6 +106,10 @@ pub trait HasVcpus {
         vcpu: VcpuId,
     ) -> VcpuResult<<Self::Arch as Architecture>::OtherRegisters>;
 
+    fn register_by_name(&self, vcpu: VcpuId, name: &str) -> VcpuResult<u64> {
+        self.arch().register_by_name(self, vcpu, name)
+    }
+
     #[inline]
     fn instruction_pointer(&self, vcpu: VcpuId) -> VcpuResult<VirtualAddress> {
         self.arch().instruction_pointer(self, vcpu)
@@ -265,6 +269,11 @@ impl<V: HasVcpus + ?Sized> HasVcpus for alloc::sync::Arc<V> {
     }
 
     #[inline]
+    fn register_by_name(&self, vcpu: VcpuId, name: &str) -> VcpuResult<u64> {
+        (**self).register_by_name(vcpu, name)
+    }
+
+    #[inline]
     fn instruction_pointer(&self, vcpu: VcpuId) -> VcpuResult<VirtualAddress> {
         (**self).instruction_pointer(vcpu)
     }
@@ -336,6 +345,13 @@ pub trait Architecture {
     ) -> MemoryAccessResult<Option<VirtualAddress>>;
 
     fn kernel_base(&self) -> VirtualAddress;
+
+    fn register_by_name<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: VcpuId,
+        name: &str,
+    ) -> VcpuResult<u64>;
 
     fn instruction_pointer<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
         &self,

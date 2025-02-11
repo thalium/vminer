@@ -221,53 +221,9 @@ impl Vcpu {
 
     fn __getattr__(&self, py: Python, name: &Bound<'_, PyString>) -> PyResult<u64> {
         let os = self.os.borrow(py)?;
-        let error = || {
-            pyo3::exceptions::PyAttributeError::new_err(
-                name.clone().into_pyobject(py).unwrap().unbind(),
-            )
-        };
         let name = name.to_str()?;
 
-        Ok(match os.0.registers(self.id).convert_err()? {
-            vmc::arch::runtime::Registers::X86_64(regs) => match name {
-                "rax" => regs.rax,
-                "rbx" => regs.rbx,
-                "rcx" => regs.rcx,
-                "rdx" => regs.rdx,
-                "rsi" => regs.rsi,
-                "rdi" => regs.rdi,
-                "rsp" => regs.rsp,
-                "rbp" => regs.rbp,
-                "r8" => regs.r8,
-                "r9" => regs.r9,
-                "r10" => regs.r10,
-                "r11" => regs.r11,
-                "r12" => regs.r12,
-                "r13" => regs.r13,
-                "r14" => regs.r14,
-                "r15" => regs.r15,
-                "rip" => regs.rip,
-                "rflags" => regs.rflags,
-                _ => return Err(error()),
-            },
-            vmc::arch::runtime::Registers::Aarch64(regs) => {
-                if let Some(n) = name.strip_prefix('x') {
-                    let n: usize = n.parse().map_err(|_| error())?;
-                    if n == 0 {
-                        0
-                    } else {
-                        *regs.regs.get(n - 1).ok_or_else(error)?
-                    }
-                } else {
-                    match name {
-                        "pc" => regs.pc,
-                        "sp" => regs.sp,
-                        "pstate" => regs.pstate,
-                        _ => return Err(error()),
-                    }
-                }
-            }
-        })
+        os.0.register_by_name(self.id, name).convert_err()
     }
 }
 

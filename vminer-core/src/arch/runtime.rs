@@ -112,6 +112,16 @@ impl arch::Architecture for Architecture {
     }
 
     #[inline]
+    fn register_by_name<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: arch::VcpuId,
+        name: &str,
+    ) -> crate::VcpuResult<u64> {
+        dispatch!(self, vcpus => |arch| arch.register_by_name(vcpus, vcpu, name))
+    }
+
+    #[inline]
     fn instruction_pointer<Vcpus: HasVcpus<Arch = Self> + ?Sized>(
         &self,
         vcpus: &Vcpus,

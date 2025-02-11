@@ -108,6 +108,37 @@ impl super::Architecture for X86_64 {
         VirtualAddress(0xffff_f800_0000_0000)
     }
 
+    fn register_by_name<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: super::VcpuId,
+        name: &str,
+    ) -> crate::VcpuResult<u64> {
+        let regs = vcpus.registers(vcpu)?;
+
+        Ok(match name {
+            "rax" => regs.rax,
+            "rbx" => regs.rbx,
+            "rcx" => regs.rcx,
+            "rdx" => regs.rdx,
+            "rsi" => regs.rsi,
+            "rdi" => regs.rdi,
+            "rsp" => regs.rsp,
+            "rbp" => regs.rbp,
+            "r8" => regs.r8,
+            "r9" => regs.r9,
+            "r10" => regs.r10,
+            "r11" => regs.r11,
+            "r12" => regs.r12,
+            "r13" => regs.r13,
+            "r14" => regs.r14,
+            "r15" => regs.r15,
+            "rip" => regs.rip,
+            "rflags" => regs.rflags,
+            _ => return Err(crate::VcpuError::UnknownRegister),
+        })
+    }
+
     fn instruction_pointer<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
         &self,
         vcpus: &Vcpus,

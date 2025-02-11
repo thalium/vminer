@@ -13,6 +13,7 @@ pub enum VcpuError {
     Unsupported,
     InvalidId,
     BadArchitecture,
+    UnknownRegister,
     #[cfg(feature = "std")]
     Io(std::io::Error),
 }
@@ -25,6 +26,7 @@ impl fmt::Display for VcpuError {
             Self::Unsupported => f.write_str("unsupported operation"),
             Self::InvalidId => f.write_str("invalid vCPU ID"),
             Self::BadArchitecture => f.write_str("wrong architecture"),
+            Self::UnknownRegister => f.write_str("unknown register"),
             #[cfg(feature = "std")]
             Self::Io(err) => err.fmt(f),
         }

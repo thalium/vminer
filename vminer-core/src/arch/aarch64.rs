@@ -113,6 +113,35 @@ impl super::Architecture for Aarch64 {
         super::find_in_kernel_memory::<MmuDesc, M>(memory, mmu_addr, needle, self.kernel_base())
     }
 
+    fn register_by_name<Vcpus: super::HasVcpus<Arch = Self> + ?Sized>(
+        &self,
+        vcpus: &Vcpus,
+        vcpu: super::VcpuId,
+        name: &str,
+    ) -> VcpuResult<u64> {
+        let regs = vcpus.registers(vcpu)?;
+
+        let reg = (|| {
+            Some(if let Some(n) = name.strip_prefix('x') {
+                let n: usize = n.parse().ok()?;
+                if n == 0 {
+                    0
+                } else {
+                    *regs.regs.get(n - 1)?
+                }
+            } else {
+                match name {
+                    "pc" => regs.pc,
+                    "sp" => regs.sp,
+                    "pstate" => regs.pstate,
+                    _ => return None,
+                }
+            })
+        })();
+
+        reg.ok_or(crate::VcpuError::UnknownRegister)
+    }
+
     #[inline]
     fn kernel_base(&self) -> VirtualAddress {
         VirtualAddress(0xffff_a000_0000_0000)
