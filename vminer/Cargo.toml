@@ -9,6 +9,9 @@ documentation = "https://docs.rs/vminer"
 repository = "https://github.com/thalium/vminer"
 readme = "../README.md"
 
+[package.metadata.docs.rs]
+all-features = true
+
 
 [features]
 # default = ["std", "all_os"]
