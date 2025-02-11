@@ -1,8 +1,13 @@
 [package]
 name = "vminer"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+description = "Virtual Machine Introspection library"
+documentation = "https://docs.rs/vminer"
+repository = "https://github.com/thalium/vminer"
+
 
 [features]
 # default = ["std", "all_os"]

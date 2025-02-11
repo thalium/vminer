@@ -1,8 +1,12 @@
 [package]
 name = "vminer-core"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+description = "Core library for vminer"
+documentation = "https://docs.rs/vminer-core"
+repository = "https://github.com/thalium/vminer"
 
 [features]
 std = ["gimli/std", "object/std", "once_cell/std", "once_map/std", "dep:sync_file", "cpp_demangle/std", "dep:pdb"]

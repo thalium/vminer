@@ -3,12 +3,13 @@ resolver = "2"
 members = ["bin/force_mmap", "bin/kvm_dump_live", "vminer", "vminer-core", "native", "kvm_patch", "python"]
 
 [workspace.package]
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-vminer-core = { path = "vminer-core", default-features = false }
-vminer = { path = "vminer", default-features = false }
+vminer-core = { path = "vminer-core", version = "0.1.0", default-features = false }
+vminer = { path = "vminer", version = "0.1.0", default-features = false }
 
 bytemuck = "1.7"
 clap = "4.10"
