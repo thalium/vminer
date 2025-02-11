@@ -135,6 +135,7 @@ typedef struct X86_64Backend {
   struct X86_64Registers (*registers)(const void *data, uintptr_t vcpu);
   struct X86_64SpecialRegisters (*special_registers)(const void *data, uintptr_t vcpu);
   struct X86_64OtherRegisters (*other_registers)(const void *data, uintptr_t vcpu);
+  int32_t (*registers_by_name)(const void *data, uintptr_t vcpu, const char *name, uint64_t *reg);
   void (*drop)(void *data);
 } X86_64Backend;
 

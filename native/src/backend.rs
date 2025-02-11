@@ -58,6 +58,15 @@ pub struct X86_64Backend {
         unsafe extern "C" fn(data: *const c_void, vcpu: usize) -> arch::X86_64OtherRegisters,
     >,
 
+    pub registers_by_name: Option<
+        unsafe extern "C" fn(
+            data: *const c_void,
+            vcpu: usize,
+            name: *const c_char,
+            reg: *mut u64,
+        ) -> i32,
+    >,
+
     pub drop: Option<unsafe extern "C" fn(data: *mut c_void)>,
 }
 
@@ -154,6 +163,26 @@ impl vmc::HasVcpus for X86_64Backend {
         match self.other_registers {
             Some(registers) => Ok(bytemuck::cast(unsafe { registers(self.data, vcpu.0) })),
             None => Err(vmc::VcpuError::Unsupported),
+        }
+    }
+
+    fn register_by_name(&self, vcpu: vmc::VcpuId, name: &str) -> vmc::VcpuResult<u64> {
+        use vmc::Architecture;
+
+        match self.registers_by_name {
+            Some(registers_by_name) => {
+                let mut reg = 0;
+                let name =
+                    alloc::ffi::CString::new(name).map_err(|_| vmc::VcpuError::UnknownRegister)?;
+
+                let res = unsafe { registers_by_name(self.data, vcpu.0, name.as_ptr(), &mut reg) };
+
+                match res {
+                    0 => Ok(reg),
+                    _ => Err(vmc::VcpuError::UnknownRegister),
+                }
+            }
+            None => self.arch().register_by_name(self, vcpu, name),
         }
     }
 }
